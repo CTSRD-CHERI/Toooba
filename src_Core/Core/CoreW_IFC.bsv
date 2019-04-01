@@ -1,11 +1,14 @@
 // Copyright (c) 2018-2019 Bluespec, Inc. All Rights Reserved.
 
-package Core_IFC;
+package CoreW_IFC;
 
 // ================================================================
-// This package defines the interface of a Core module which
+// This package defines the interface of a CoreW module which
 // contains:
-//     - mkCPU (the RISC-V CPU)
+//     - mkProc (the RISC-V CPU; this a variant of MIT's RISCY-OOO mkProc)
+//            Note: MIT's RISCY-OOO internally contains a 'mkCore'
+//                  and hence this interface and its module is called
+//                  'CoreW', to disambiguate.
 //     - mkFabric_2x3
 //     - mkNear_Mem_IO_AXI4
 //     - mkPLIC_16_2_7
@@ -38,9 +41,9 @@ import Debug_Module  :: *;
 `endif
 
 // ================================================================
-// The Core interface
+// The CoreW interface
 
-interface Core_IFC #(numeric type t_n_interrupt_sources);
+interface CoreW_IFC #(numeric type t_n_interrupt_sources);
 
    // ----------------------------------------------------------------
    // Debugging: set core's verbosity
@@ -65,6 +68,12 @@ interface Core_IFC #(numeric type t_n_interrupt_sources);
    // External interrupt sources
 
    interface Vector #(t_n_interrupt_sources, PLIC_Source_IFC)  core_external_interrupt_sources;
+
+   // ----------------
+   // External interrupt [14] to go into Debug Mode
+
+   (* always_ready, always_enabled *)
+   method Action  debug_external_interrupt_req (Bool set_not_clear);
 
    // ----------------------------------------------------------------
    // Optional Tandem Verifier interface output tuples (n,vb),
