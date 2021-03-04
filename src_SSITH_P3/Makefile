@@ -33,6 +33,7 @@ BSC_COMPILATION_FLAGS += \
 	-D PERFORMANCE_MONITORING \
 	-D SHIFT_BARREL    \
 	-D MULT_SERIAL    \
+        -D NUM_CORES=2 \
 	-D Near_Mem_Caches    \
 	-D FABRIC64    \
 	-D CAP128 \
