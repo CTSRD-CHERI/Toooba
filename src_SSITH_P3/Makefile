@@ -28,6 +28,7 @@ BSC_COMPILATION_FLAGS += \
 	-D ISA_I  -D ISA_M  -D ISA_A  -D ISA_F  -D ISA_D  -D ISA_FD_DIV  -D ISA_C  \
 	-D SHIFT_BARREL    \
 	-D MULT_SERIAL    \
+        -D NUM_CORES=2 \
 	-D Near_Mem_Caches    \
 	-D PERFORMANCE_MONITORING \
 	-D FABRIC64    \
