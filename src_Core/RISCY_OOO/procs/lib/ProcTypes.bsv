@@ -329,6 +329,8 @@ typedef union tagged {
     AddrSource SetAddr;
     void Seal;
     void SealEntry;
+    void SetStackFrameSize;
+    void GetStackFrameBase;
     SrcSelector Unseal;
     void AndPerm;
     void SetFlags;
@@ -351,6 +353,7 @@ typedef union tagged {
     void GetFlags;
     void GetPerm;
     void GetType;
+    void GetStackFrameSize;
     void ToPtr;
 } CapInspectFunc deriving(Bits, Eq, FShow);
 

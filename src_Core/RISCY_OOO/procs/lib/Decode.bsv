@@ -43,6 +43,7 @@ import ProcTypes::*;
 import MemoryTypes::*;
 import Vector::*;
 import DefaultValue::*;
+import ISA_Decls::*;
 import ISA_Decls_CHERI::*;
 
 Bit#(3) memWU   = 3'b110;
@@ -558,18 +559,29 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
         end
 
         opcStore: begin
-            dInst.iType = St;
-            if (isValid(mem_inst)) begin
-                dInst.execFunc = tagged Mem fromMaybe(?, mem_inst);
+            if (funct3 == f3_CSC) begin
+                dInst.capChecks.stack_lifetime = True;
+                regs.dst = Valid(tagged Gpr 0);
+                regs.src1 = Valid(tagged Gpr rs1);
+                regs.src2 = Valid(tagged Gpr rd);
+                dInst.imm = Valid(immS);
+                dInst.csr = tagged Invalid;
+                dInst.iType = Cap;
+                dInst.capFunc = CapModify (Move);
             end else begin
-                illegalInst = True;
+                dInst.iType = St;
+                if (isValid(mem_inst)) begin
+                    dInst.execFunc = tagged Mem fromMaybe(?, mem_inst);
+                end else begin
+                    illegalInst = True;
+                end
+                regs.dst  = Invalid;
+                regs.src1 = Valid(tagged Gpr rs1);
+                regs.src2 = Valid(tagged Gpr rs2);
+                dInst.imm = Valid(immS);
+                dInst.csr = tagged Invalid;
+                dInst.capChecks = memCapChecks(cap_mode);
             end
-            regs.dst  = Invalid;
-            regs.src1 = Valid(tagged Gpr rs1);
-            regs.src2 = Valid(tagged Gpr rs2);
-            dInst.imm = Valid(immS);
-            dInst.csr = tagged Invalid;
-            dInst.capChecks = memCapChecks(cap_mode);
         end
 
         opcAmo: begin
@@ -949,8 +961,15 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                     dInst.iType = Cap;
                     regs.dst = Valid(tagged Gpr rd);
                     regs.src1 = Valid(tagged Gpr rs1);
-                    dInst.imm = Valid (immIunsigned);
+                    dInst.imm = Valid(immIunsigned);
                     dInst.capFunc = CapModify (SetBounds (SetBounds));
+                end
+                f3_cap_CSetStackFrameSizeImmediate: begin
+                    dInst.iType = Cap;
+                    regs.dst = Valid(tagged Gpr rd);
+                    regs.src1 = Valid(tagged Gpr rs1);
+                    dInst.imm = Valid(immIunsigned);
+                    dInst.capFunc = CapModify (SetStackFrameSize);
                 end
                 f3_cap_ThreeOp: begin
                     case (funct7)
@@ -1327,6 +1346,13 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capFunc = CapModify (SealEntry);
                                 end
+                                f5rs2_cap_CGetStackFrameBase: begin
+                                    dInst.capChecks.src1_tag = True;
+                                    dInst.iType = Cap;
+                                    regs.dst = Valid(tagged Gpr rd);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    dInst.capFunc = CapModify (GetStackFrameBase);
+                                end
                                 f5rs2_cap_CGetOffset: begin
                                     dInst.iType = Cap;
                                     regs.dst = Valid(tagged Gpr rd);
@@ -1381,6 +1407,12 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.dst  = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capChecks = memCapChecks(True);
+                                end
+                                f5rs2_cap_CGetStackFrameSize: begin
+                                    dInst.iType = Cap;
+                                    regs.dst = Valid(tagged Gpr rd);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    dInst.capFunc = CapInspect (GetStackFrameSize);
                                 end
                                 default: begin
                                     illegalInst = True;

@@ -22,3 +22,4 @@
 `CAP_CHECK_FIELD(cfromptr_bypass,"cfromptr_bypass")
 `CAP_CHECK_FIELD(ccseal_bypass,"ccseal_bypass")
 `CAP_CHECK_FIELD(cap_exact,"cap_exact")
+`CAP_CHECK_FIELD(stack_lifetime,"stack_lifetime")
