@@ -10,3 +10,6 @@
 [submodule "libs/cheri-cap-lib"]
 	path = libs/cheri-cap-lib
 	url = https://github.com/CTSRD-CHERI/cheri-cap-lib.git
+[submodule "libs/WindCoreInterface"]
+	path = libs/WindCoreInterface
+	url = https://github.com/CTSRD-CHERI/WindCoreInterface.git
