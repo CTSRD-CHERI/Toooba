@@ -72,6 +72,7 @@ import CacheUtils::*;
 `ifdef PERFORMANCE_MONITORING
 import PerformanceMonitor::*;
 import BlueUtils::*;
+import DReg::*;
 `endif
 
 import Cur_Cycle :: *;
@@ -236,6 +237,7 @@ interface MemExePipeline;
     method Data getPerf(ExeStagePerfType t);
 `ifdef PERFORMANCE_MONITORING
     method EventsCoreMem events;
+    method EventsTransExe events_trans_exe;
 `endif
 endinterface
 
@@ -278,6 +280,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
 `ifdef PERFORMANCE_MONITORING
     Array #(Reg #(EventsCoreMem)) events_reg <- mkDRegOR (5, unpack (0));
+    Reg#(EventsTransExe) events_trans_exe_reg <- mkDReg(unpack(0));
 `endif
 
     // reservation station
@@ -672,6 +675,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
                                          );
 
+
+`ifdef PERFORMANCE_MONITORING
+        EventsTransExe events_trans_exe = unpack(0);
+        events_trans_exe.evt_EXECUTED_INSTS = 1;
+        events_trans_exe.evt_EXECUTED_MEM_INSTS = 1;
+        events_trans_exe_reg <= events_trans_exe;
+`endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE
@@ -1581,5 +1591,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endmethod
 `ifdef PERFORMANCE_MONITORING
     method events = events_reg[0];
+    method events_trans_exe = events_trans_exe_reg;
 `endif
 endmodule

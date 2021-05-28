@@ -40,6 +40,7 @@ import Cntrs::*;
 import Vector::*;
 import BuildVector::*;
 import Types::*;
+import DReg::*;
 import ProcTypes::*;
 import SynthParam::*;
 import Exec::*;
@@ -136,6 +137,9 @@ interface FpuMulDivExePipeline;
     interface SpeculationUpdate specUpdate;
     // performance
     method Data getPerf(ExeStagePerfType t);
+`ifdef PERFORMANCE_MONITORING
+    method EventsTransExe events;
+`endif
 endinterface
 
 module mkFpuMulDivExePipeline#(FpuMulDivExeInput inIfc)(FpuMulDivExePipeline);
@@ -162,6 +166,10 @@ module mkFpuMulDivExePipeline#(FpuMulDivExeInput inIfc)(FpuMulDivExePipeline);
     Count#(Data) exeFpFmaCnt <- mkCount(0);
     Count#(Data) exeFpDivCnt <- mkCount(0);
     Count#(Data) exeFpSqrtCnt <- mkCount(0);
+`endif
+
+`ifdef PERFORMANCE_MONITORING
+    Reg#(EventsTransExe) events_reg <- mkDReg(unpack(0));
 `endif
 
     rule doDispatchFpuMulDiv;
@@ -264,6 +272,12 @@ module mkFpuMulDivExePipeline#(FpuMulDivExeInput inIfc)(FpuMulDivExePipeline);
                               , ExtraTraceBundle{regWriteData: data, memByteEn: ?}
 `endif
         );
+`ifdef PERFORMANCE_MONITORING
+        EventsTransExe events = unpack(0);
+        events.evt_EXECUTED_INSTS = 1;
+        events.evt_EXECUTED_FPU_INSTS = 1;
+        events_reg <= events;
+`endif
         // since FPU op has no spec tag, this doFinish rule is ordered before
         // other rules that calls incorrectSpec, and BSV compiler creates
         // cycles in scheduling. We manually creates a conflict between this
@@ -357,4 +371,7 @@ module mkFpuMulDivExePipeline#(FpuMulDivExeInput inIfc)(FpuMulDivExePipeline);
             default: 0;
         endcase);
     endmethod
+`ifdef PERFORMANCE_MONITORING
+   method events = events_reg;
+`endif
 endmodule

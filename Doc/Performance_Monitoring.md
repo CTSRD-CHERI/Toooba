@@ -86,6 +86,13 @@ TagController events:
 - Set tag read (unimplemented)
 - Evict (0x7d)
 
+Transient-execution events
+- Renamed instructions &ndash; count renamed instructions excluding instructions that are already trapping (0x80)
+- Executed ALU instructions (0x81)
+- Executed FPU instructions (0x82)
+- Executed memory pipeline instructions (0x83)
+- Executed instructions in total (0x84)
+
 Missing events are:
 - L1 WT CHERI events
 - L1 WB events

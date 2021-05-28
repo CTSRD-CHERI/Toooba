@@ -44,6 +44,7 @@ import BuildVector::*;
 import Cntrs::*;
 import Types::*;
 import ProcTypes::*;
+import DReg::*;
 import SynthParam::*;
 import Exec::*;
 import Performance::*;
@@ -202,6 +203,9 @@ interface AluExePipeline;
     interface ReservationStationAlu rsAluIfc;
     interface SpeculationUpdate specUpdate;
     method Data getPerf(ExeStagePerfType t);
+`ifdef PERFORMANCE_MONITORING
+    method EventsTransExe events;
+`endif
 endinterface
 
 module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
@@ -225,6 +229,10 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
     Count#(Data) exeRedirectBrCnt <- mkCount(0);
     Count#(Data) exeRedirectJrCnt <- mkCount(0);
     Count#(Data) exeRedirectOtherCnt <- mkCount(0);
+`endif
+
+`ifdef PERFORMANCE_MONITORING
+    Reg#(EventsTransExe) events_reg <- mkDReg(unpack(0));
 `endif
 
     rule doDispatchAlu;
@@ -395,6 +403,13 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
 `endif
         );
 
+`ifdef PERFORMANCE_MONITORING
+        EventsTransExe events = unpack(0);
+        events.evt_EXECUTED_INSTS = 1;
+        events.evt_EXECUTED_ALU_INSTS = 1;
+        events_reg <= events;
+`endif
+
         // handle spec tags for branch predictions
         // TODO what happens here if we trap?
         (* split *)
@@ -467,4 +482,8 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
             default: 0;
         endcase);
     endmethod
+
+`ifdef PERFORMANCE_MONITORING
+   method events = events_reg;
+`endif
 endmodule
