@@ -1,5 +1,7 @@
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -73,8 +75,8 @@ function MemTaggedData amoExec( AmoInst amo_inst, Bit#(2) wordIdx
   endcase
   Bit#(128) newData = (pack(current.data) & ~(mask << shftAmnt)) | (tmpData << shftAmnt);
 
-  Bool newTag = (amo_inst.func == Swap && amo_inst.width == QWord) ? inpt.tag : False;
-  return MemTaggedData { tag: newTag, data: unpack(newData) };
+  Bool newTag = (amo_inst.func == Swap && amo_inst.width == QWord) ? inpt.tag.captag : False;
+  return MemTaggedData { tag: MemTag {captag: newTag, version: current.tag.version} , data: unpack(newData) };
 endfunction
 
 function Bit#(t) sMax( Bit#(t) a, Bit#(t) b );

@@ -1,6 +1,8 @@
 // Copyright (c) 2018 Massachusetts Institute of Technology
 // Portions (c) 2019-2020 Bluespec, Inc.
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jessica Clarke
@@ -834,7 +836,7 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
    rule rl_mmio_to_fabric_req (curReq matches tagged MMIO_Fabric_Adapter .addr
                                &&& (state == ProcessReq)
                                &&& (isLd || isSt));
-      let req = MMIOCRq {addr:addr, func:reqFunc, byteEn:reqBE, data:reqData, loadTags:False};
+      let req = MMIOCRq {addr:addr, func:reqFunc, byteEn:reqBE, data:reqData, loadTags:False, version:False};
       mmio_fabric_adapter_core_side.request.put (req);
       state <= WaitResp;
 
@@ -871,7 +873,7 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
       // Byte enables are used in the AXI adapter to determine the size of the req. Set 8 bits (it
       // doesn't matter which) to preserve the behaviour of requesting 8 bytes).
       // TODO: instead specify access size in interface
-      let req = MMIOCRq {addr:addr, func:tagged Ld, byteEn:unpack(16'b0000_0000_1111_1111), data:?, loadTags:False};
+      let req = MMIOCRq {addr:addr, func:tagged Ld, byteEn:unpack(16'b0000_0000_1111_1111), data:?, loadTags:False, version:False};
       mmio_fabric_adapter_core_side.request.put (req);
       state <= WaitResp;
       amoWaitWriteResp <= False;
@@ -913,7 +915,7 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
                                   ld_val, reqData);
 
          // Write back new st_val to fabric
-         let req = MMIOCRq {addr:addr, func:tagged St, byteEn:reqBE, data: new_st_val, loadTags: False};
+         let req = MMIOCRq {addr:addr, func:tagged St, byteEn:reqBE, data: new_st_val, loadTags: False, version:False};
          mmio_fabric_adapter_core_side.request.put (req);
 
          let prs = tagged DataAccess (MMIODataPRs { valid: True, data: ld_val });
@@ -949,7 +951,7 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
       // Byte enables are used in the AXI adapter to determine the size of the req. Set 8 bits (it
       // doesn't matter which) to preserve the behaviour of requesting 8 bytes).
       // TODO: instead specify access size in interface
-      let req = MMIOCRq {addr:addr1, func: tagged Ld, byteEn: unpack(16'b0000_0000_1111_1111), data: ?, loadTags: False};
+      let req = MMIOCRq {addr:addr1, func: tagged Ld, byteEn: unpack(16'b0000_0000_1111_1111), data: ?, loadTags: False, version: False};
       mmio_fabric_adapter_core_side.request.put (req);
       state <= WaitResp;
 

@@ -1,6 +1,8 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -68,6 +70,7 @@ typedef struct {
     SBBlockAddr addr;
     SBByteEn byteEn;
     CLine line;
+    Bool stVersion;
 } SBEntry deriving(Bits, Eq, FShow);
 
 // result of searching (e.g. load byass)
@@ -79,7 +82,7 @@ typedef struct {
 interface StoreBuffer;
     method Bool isEmpty;
     method Maybe#(SBIndex) getEnqIndex(Addr paddr);
-    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data);
+    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bool stVersion);
     method ActionValue#(SBEntry) deq(SBIndex idx);
     method ActionValue#(Tuple2#(SBIndex, SBEntry)) issue;
     method SBSearchRes search(Addr paddr, ByteOrTagEn be); // load bypass/stall or atomic inst stall
@@ -143,7 +146,7 @@ module mkStoreBufferEhr(StoreBuffer);
 
     function Bool noMatch(Addr paddr, ByteOrTagEn be);
         // input BE has been shifted, just pack it
-        Bit#(MemDataBytes) ldBE = pack(be.DataMemAccess);
+        Bit#(MemDataBytes) ldBE = be == VerMemAccess ? -1 : pack(be.DataMemAccess);
 
         // data offset within block
         SBBlockMemDataSel sel = getSBBlockMemDataSel(paddr);
@@ -191,19 +194,21 @@ module mkStoreBufferEhr(StoreBuffer);
         end
     endmethod
 
-    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData d) if(inited);
+    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData d, Bool stVersion) if(inited);
         // get data offset
         SBBlockMemDataSel sel = getSBBlockMemDataSel(paddr);
         // check whether the entry already exists
         if(valid[idx][enqPort]) begin
             // existing entry: merge
             doAssert(getSBBlockAddr(paddr) == entry[idx][enqPort].addr, "SB enq to existing entry addr should match");
+            doAssert(!stVersion && !entry[idx][enqPort].stVersion, "Cannot merge with store version in SB");
             // update data
             CLine block = entry[idx][enqPort].line;
             block.data[sel] = mergeDataBE(block.data[sel], d.data, be);
             // update tag
-            if (pack(be) == ~0) block.tag[sel] = d.tag;
-            else if (pack(be) != 0) block.tag[sel] = False;
+            if (pack(be) == ~0) block.captags[sel] = d.tag.captag;
+            else if (pack(be) != 0) block.captags[sel] = False;
+            // xxx storeversion
             // update byte enable
             Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = unpack(pack(entry[idx][enqPort].byteEn));
             byteEn[sel] = unpack(pack(byteEn[sel]) | pack(be));
@@ -211,7 +216,8 @@ module mkStoreBufferEhr(StoreBuffer);
             entry[idx][enqPort] <= SBEntry {
                 addr: getSBBlockAddr(paddr),
                 byteEn: unpack(pack(byteEn)),
-                line: block
+                line: block,
+                stVersion: stVersion
             };
             // this entry must have been sent to issueQ
         end
@@ -221,14 +227,16 @@ module mkStoreBufferEhr(StoreBuffer);
             // setup entry
             CLine block = ?;
             block.data[sel] = d.data;
-            if (pack(be) == ~0) block.tag[sel] = d.tag;
-            else if (pack(be) != 0) block.tag[sel] = False;
+            // xxx storeversion
+            if (pack(be) == ~0) block.captags[sel] = d.tag.captag; 
+            else if (pack(be) != 0) block.captags[sel] = False;
             Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = replicate(replicate(False));
             byteEn[sel] = be;
             entry[idx][enqPort] <= SBEntry {
                 addr: getSBBlockAddr(paddr),
                 byteEn: unpack(pack(byteEn)),
-                line: block
+                line: block,
+                stVersion: stVersion
             };
             // send this entry to issueQ
             doAssert(issueQ.notFull, "SB issueQ should not be full");
@@ -254,7 +262,7 @@ module mkStoreBufferEhr(StoreBuffer);
 
     method SBSearchRes search(Addr paddr, ByteOrTagEn be);
         // input BE has been shifted, just pack it
-        Bit#(MemDataBytes) ldBE = pack(be.DataMemAccess);
+        Bit#(MemDataBytes) ldBE = be == VerMemAccess ? -1 : pack(be.DataMemAccess);
 
         // data offset within block
         SBBlockMemDataSel sel = getSBBlockMemDataSel(paddr);
@@ -277,13 +285,17 @@ module mkStoreBufferEhr(StoreBuffer);
         Vector#(SBSize, Integer) idxVec = genVector;
         if(searchIndex(matchEntry, idxVec) matches tagged Valid .idx) begin
             // check whether bytes reading are all covered by the entry
-            if(be != TagMemAccess && (getEntryBE(idx) & ldBE) == ldBE) begin
+            if(be != TagMemAccess && be != VerMemAccess && (getEntryBE(idx) & ldBE) == ldBE) begin
                 // fully covered, forward data
                 CLine block = entry[idx][searchPort].line;
                 return SBSearchRes {
                     matchIdx: Valid (idx),
-                    forwardData: Valid (MemTaggedData { tag:  block.tag[sel]
-                                                      , data: block.data[sel]})
+                    forwardData: Valid (MemTaggedData { 
+                        tag: MemTag {
+                            captag: block.captags[sel],
+                            version: defaultValue // xxx forward version?
+                        },
+                        data: block.data[sel]})
                 };
             end
             else begin
@@ -311,7 +323,7 @@ endmodule
 module mkDummyStoreBuffer(StoreBuffer);
     method Bool isEmpty = True;
     method Maybe#(SBIndex) getEnqIndex(Addr paddr) = Invalid;
-    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data);
+    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bool stVersion);
         doAssert(False, "enq should never be called)");
     endmethod
     method ActionValue#(SBEntry) deq(SBIndex idx);

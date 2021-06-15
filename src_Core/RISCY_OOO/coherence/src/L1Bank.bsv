@@ -1,5 +1,7 @@
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -552,9 +554,17 @@ endfunction
             end
             St: begin
                 // resp processor, get write data & BE
-                let {be, wrLine} <- procResp.respSt(req.id);
+                let {be, wrLine} <- procResp.respSt(req.id, curLine.versions[dataSel]);
                 // calculate new data to write
-                newLine = getUpdatedLine(curLine, be, wrLine);
+                if (req.version) begin
+                    // storeversion
+                    // XXX For now we smuggle the version to write in index 0
+                    // to avoid unnecessary indexing. Alternatively could use 
+                    // another byte enable for versions 
+                    newLine.versions[dataSel] = wrLine.versions[0];
+                end else begin
+                    newLine = getUpdatedLine(curLine, be, wrLine);
+                end
             end
             default: begin
                 doAssert(False, "unknown mem op");
@@ -616,11 +626,11 @@ endfunction
         MemTaggedData resp = case (req.amoInst.width)
           QWord: current;
           DWord: MemTaggedData {
-            tag: False,
+            tag: defaultValue,
             data: unpack(signExtend(dwordData[dwordIdx]))
           };
           Word: MemTaggedData {
-            tag: False,
+            tag: defaultValue,
             data: unpack(signExtend(wordData[wordIdx]))
           };
         endcase;

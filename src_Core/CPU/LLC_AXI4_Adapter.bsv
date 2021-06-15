@@ -1,3 +1,5 @@
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -67,7 +69,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
             Bits#(childT, b__),
             FShow#(ToMemMsg#(idT, childT)),
             FShow#(MemRsMsg#(idT, childT)),
-            Add#(SizeOf#(Line), 0, TAdd#(512, 4))); // assert Line sz = 512 + 4 tags
+            Add#(SizeOf#(Line), 0, TAdd#(512, 20))); // assert Line sz = 512 + 4 tags XXX
 
    // Verbosity: 0: quiet; 1: LLC transactions; 2: loop detail
    Integer verbosity = 0;
@@ -149,9 +151,10 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       end
 
       // Shift next 64 bits from fabric into the cache line being assembled
-      let new_cline_tag = { mem_rsp.ruser, pack(rg_cline.tag) [3:1] };
+      let new_cline_tag = { mem_rsp.ruser, pack(getCapTags(rg_cline)) [3:1] };
       let new_cline_data = { mem_rsp.rdata, pack(rg_cline.data) [511:64] };
-      let new_cline = CLine { tag: rg_rd_rsp_beat[0] == 0 ? unpack(new_cline_tag) : rg_cline.tag
+      let new_cline = CLine { captags: rg_rd_rsp_beat[0] == 0 ? unpack(new_cline_tag) : rg_cline.captags
+                            , versions: unpack(0) // XXX
                             , data: unpack(new_cline_data) };
 
       if (mem_rsp.rlast) begin
@@ -222,7 +225,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
         wdata:  line_data[rg_wr_req_beat[2:1]].data[rg_wr_req_beat[0]],
         wstrb:  line_strb[rg_wr_req_beat],
         wlast:  rg_wr_req_beat == 7,
-        wuser:  pack(line_data[rg_wr_req_beat[2:1]].tag)});
+        wuser:  pack(line_data[rg_wr_req_beat[2:1]].tag.captag)});
    endrule
 
    // ----------------

@@ -1,6 +1,8 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -51,6 +53,9 @@ import Performance::*;
 import FShow::*;
 import MsgFifo::*;
 
+// For CapVersion
+import CHERICC_Fat::*;
+
 // 64B cache line
 typedef 4 CLineNumMemTaggedData;
 typedef TMul#(CLineNumMemTaggedData, 2) CLineNumData;
@@ -63,39 +68,59 @@ function CLineMemTaggedDataSel getCLineMemTaggedDataSel(Addr a) =
 function CLineDataSel getCLineDataSel(Addr a) =
   truncate(a >> valueOf(TLog#(DataBytes)));
 typedef struct {
-  Vector#(CLineNumMemTaggedData, MemTag) tag;
+  Vector#(CLineNumMemTaggedData, Bool) captags;
+  Vector#(CLineNumMemTaggedData, CapVersion) versions;
   Vector#(CLineNumMemTaggedData, MemData) data;
 } CLine deriving (Bits, Eq, FShow);
 function Vector#(CLineNumMemTaggedData, MemTaggedData) clineToMemTaggedDataVector(CLine line);
-  function f(x,y) = MemTaggedData{tag: x, data: y};
-  return zipWith(f, line.tag, line.data);
+  function f(x,y,z) = MemTaggedData{
+    tag: MemTag {
+      captag: x, 
+      version: y
+    },
+    data: z};
+  return zipWith3(f, line.captags, line.versions, line.data);
 endfunction
 function CLine memTaggedDataVectorToCline(Vector#(CLineNumMemTaggedData, MemTaggedData) line) =
-  CLine{tag: map(getTag, line), data: map(getData, line)};
+  CLine {
+    captags: map(getMemTaggedCapTag, line), 
+    versions: map(getMemTaggedVersion, line),
+    data: map(getData, line)
+  };
 function Data getDataAt(CLine line, CLineDataSel sel);
   Vector#(CLineNumData, Data) data = unpack(pack(line.data));
   return data[sel];
 endfunction
+// clears cap tag and leaves version unchanged
 function CLine setDataAt(CLine line, CLineDataSel sel, Data data);
   Vector#(CLineNumData, Data) newData = unpack(pack(line.data));
   newData[sel] = data;
   CLineMemTaggedDataSel bigSel = truncateLSB(sel);
   let newLine = line;
-  newLine.tag[bigSel] = False;
+  newLine.captags[bigSel] = False;
   newLine.data = unpack(pack(newData));
   return newLine;
 endfunction
+// clears cap tag and leaves version unchanged
 function CLine setDataAtBE(CLine line, CLineDataSel sel, Data data, ByteEn be);
   let oldData = getDataAt(line, sel);
   return setDataAt(line, sel, mergeDataBE(oldData, data, be));
 endfunction
 function MemTaggedData getTaggedDataAt(CLine line, CLineMemTaggedDataSel sel) =
-  MemTaggedData { tag: line.tag[sel], data: line.data[sel] };
+  MemTaggedData { 
+    tag: MemTag{ 
+        captag: line.captags[sel], 
+        version: line.versions[sel]
+    }, data: line.data[sel] };
+function Vector#(CLineNumMemTaggedData, Bool) getCapTags(CLine line) = line.captags;
 function MemTaggedData getTagsAt(CLine line) =
-  MemTaggedData { tag: False, data: cons(zeroExtend(pack(line.tag)), unpack(0)) };
+  MemTaggedData { tag: defaultValue, data: cons(zeroExtend(pack(getCapTags(line))), unpack(0)) };
+// Leaves version unchanged
 function CLine setTaggedDataAt(CLine line, CLineMemTaggedDataSel sel, MemTaggedData data);
   let newLine = line;
-  newLine.tag[sel] = data.tag;
+  newLine.captags[sel] = data.tag.captag;
+  // XXX set version? all uses at preset set version to previous anyway
+  // newLine.version[sel] = data.tag.version;
   newLine.data[sel] = data.data;
   return newLine;
 endfunction

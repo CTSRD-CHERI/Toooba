@@ -2,6 +2,8 @@
 // Copyright (c) 2017 Massachusetts Institute of Technology
 // Portions Copyright (c) 2019-2020 Bluespec, Inc.
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jessica Clarke
@@ -1136,8 +1138,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
                     excLoadAddrMisaligned, excLoadAccessFault,
                     excStoreAddrMisaligned, excStoreAccessFault,
                     excLoadPageFault, excStorePageFault,
-                    excLoadCapPageFault, excStoreCapPageFault: return addr;
-
+                    excLoadCapPageFault, excStoreCapPageFault, 
+                    excVersionFault: return addr;
                     default: return 0;
                 endcase);
             end

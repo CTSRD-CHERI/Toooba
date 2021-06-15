@@ -1,5 +1,7 @@
 // Copyright (c) 2018 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -168,7 +170,8 @@ module mkMMIOCore#(MMIOCoreInput inIfc)(MMIOCore);
             func: Inst (maxWay),
             byteEn: ?,
             data: ?,
-            loadTags: False
+            loadTags: False,
+            version: False
         });
     endrule
 

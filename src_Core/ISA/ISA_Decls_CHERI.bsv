@@ -1,6 +1,7 @@
 /*
  * Copyright (c) 2020 Peter Rugg
  * Copyright (c) 2020 Jonathan Woodruff
+ * Copyright (c) 2021 Microsoft
  * All rights reserved.
 
  * This software was developed by SRI International and the University of
@@ -124,6 +125,8 @@ Bit #(3) f3_cap_CSetBoundsImmediate = 3'h2;
 
 // 7'h00 unused
 Bit #(7) f7_cap_CSpecialRW      = 7'h01;
+Bit #(7) f7_cap_CSetVersion     = 7'h02;
+Bit #(7) f7_cap_CAmoCDecVersion = 7'h03;
 // 7'h02-7'h07 unused
 Bit #(7) f7_cap_CSetBounds      = 7'h08;
 Bit #(7) f7_cap_CSetBoundsExact = 7'h09;
@@ -157,7 +160,8 @@ Bit #(7) f7_cap_TwoOp           = 7'h7f;
 
 // 5'h00 unused
 Bit #(5) rd_cap_CCall          = 5'h01;
-// 5'h02-5'h1f unused
+Bit #(5) rd_cap_CStoreVersion  = 5'h02;
+// 5'h03-5'h1f unused
 
 // ================================================================
 // f7_cap_TwoOp opcode subdivision
@@ -184,9 +188,12 @@ Bit #(5) f5rs2_cap_CGetAddr    = 5'h0f;
 Bit #(5) f5rs2_cap_CClearFPReg = 5'h10;
 Bit #(5) f5rs2_cap_CSealEntry  = 5'h11;
 Bit #(5) f5rs2_cap_CLoadTags   = 5'h12;
-// 5'h13 unused
+Bit #(5) f5rs2_cap_CGetVersion = 5'h13;
 Bit #(5) f5rs2_cap_JALR_PCC    = 5'h14;
-// 5'h15-5'h1f unused (5'h1f reserved for 1-reg instructions)
+Bit #(5) f5rs2_cap_CLoadVersions = 5'h15;
+Bit #(5) f5rs2_cap_CLoadVersion = 5'h16;
+// 5'h17-5'h1f unused (5'h1f reserved for 1-reg instructions)
+
 
 // ================================================================
 // f7_cap_{Load, Store} opcode subdivision

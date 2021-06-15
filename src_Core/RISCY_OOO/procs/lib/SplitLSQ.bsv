@@ -1,6 +1,8 @@
 
 // Copyright (c) 2018 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -51,6 +53,9 @@ import StoreBuffer::*;
 import Exec::*;
 import FP_Utils::*;
 import CacheUtils::*; // For CLoadTags alignment
+
+// for CapVersion
+import CHERICC_Fat::*;
 
 // I don't want to export auxiliary functions, so manually export all types
 export LdQMemFunc(..);
@@ -336,7 +341,7 @@ typedef struct {
     Maybe#(PhyDst)    dst;
     Addr              paddr;
     Bool              isMMIO;
-    MemDataByteEn     shiftedBE;
+    ByteOrTagEn       shiftedBE;
     MemTaggedData     stData;
     Bool              allowCapAmoLd;
     Maybe#(Trap)      fault;
@@ -371,7 +376,8 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE,
+        CapVersion version
     );
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
@@ -486,12 +492,19 @@ endfunction
 function Bool overlapAddr(Addr addr_1, ByteOrTagEn shift_be_1,
                           Addr addr_2, ByteOrTagEn shift_be_2);
     Bool be_overlap = (pack(shift_be_1.DataMemAccess) & pack(shift_be_2.DataMemAccess)) != 0;
-    Bool dataOverlap = be_overlap && sameDataAlignedAddr(addr_1, addr_2);
+    Bool sameDataAddr = sameDataAlignedAddr(addr_1, addr_2);
+    Bool dataOverlap = be_overlap && sameDataAddr;
     Bool tagOverlap = sameCachelineAlignedAddr(addr_1, addr_2);
-    return (shift_be_1 == TagMemAccess || shift_be_2 == TagMemAccess) ? tagOverlap : dataOverlap;
+    if (shift_be_1 == TagMemAccess || shift_be_2 == TagMemAccess)
+        return tagOverlap;
+    else if (shift_be_1 == VerMemAccess || shift_be_2 == VerMemAccess)
+        return sameDataAddr; // Version accesses are 16 btyes (== sizeof MemDataBytes) TODO except LoadVersions
+    else
+        return dataOverlap;
 endfunction
 
 // check shiftBE1 covers shiftBE2
+// Note that this prevents St -> Ld forwarding for loadtags or load/store version
 function Bool be1CoverBe2(ByteOrTagEn shift_be_1, ByteOrTagEn shift_be_2);
     return shift_be_1 matches tagged DataMemAccess .shift_be_1_data &&&
            shift_be_2 matches tagged DataMemAccess .shift_be_2_data &&&
@@ -504,7 +517,7 @@ function Bool checkAddrAlign(Addr addr, ByteOrTagEn byteOrTagEn);
     if (byteOrTagEn == TagMemAccess) begin
         return isCLineAlignAddr(addr);
     end
-    else if(byteEn[15]) begin
+    else if(byteEn[15] || byteOrTagEn == VerMemAccess) begin
         return addr[3:0] == 0;
     end
     else if(byteEn[7]) begin
@@ -656,6 +669,8 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_unsigned        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(ByteOrTagEn))             ld_byteOrTagEn     <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_allowCap        <- replicateM(mkConfigRegU);
+    // authorising version for load
+    Vector#(LdQSize, Reg#(CapVersion))              ld_version         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_acq             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_rel             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Maybe#(PhyDst)))          ld_dst             <- replicateM(mkConfigRegU);
@@ -728,6 +743,7 @@ module mkSplitLSQ(SplitLSQ);
     let ld_fault_updAddr = getVEhrPort(ld_fault, 0); // write
     let ld_fault_issue   = getVEhrPort(ld_fault, 1); // assert
     let ld_fault_enqIss  = getVEhrPort(ld_fault, 1); // assert
+    let ld_fault_resp    = getVEhrPort(ld_fault, 1); // XXXX write is C with enq OK?
     let ld_fault_enq     = getVEhrPort(ld_fault, 1); // write
 
     let ld_computed_findIss = getVEhrPort(ld_computed, 0);
@@ -848,13 +864,13 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(InstTag))                 st_instTag   <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(StQMemFunc))              st_memFunc   <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(AmoFunc))                 st_amoFunc   <- replicateM(mkRegU);
-    Vector#(StQSize, Reg#(MemDataByteEn))           st_byteEn    <- replicateM(mkRegU);
+    Vector#(StQSize, Reg#(ByteOrTagEn))             st_byteEn    <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Bool))                    st_acq       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Bool))                    st_rel       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Maybe#(PhyDst)))          st_dst       <- replicateM(mkRegU);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
-    Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, ByteOrTagEn))          st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Trap)))         st_fault     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_allowCapAmoLd <- replicateM(mkEhr(?));
@@ -1432,7 +1448,7 @@ module mkSplitLSQ(SplitLSQ);
     method ByteOrTagEn getOrigBE(LdStQTag t);
         return (case(t) matches
             tagged Ld .tag: (ld_byteOrTagEn[tag]);
-            tagged St .tag: (DataMemAccess(st_byteEn[tag]));
+            tagged St .tag: (st_byteEn[tag]);
             default: ?;
         endcase);
     endmethod
@@ -1544,7 +1560,7 @@ module mkSplitLSQ(SplitLSQ);
         st_instTag[st_enqP] <= inst_tag;
         st_memFunc[st_enqP] <= getStQMemFunc(mem_inst.mem_func);
         st_amoFunc[st_enqP] <= mem_inst.amo_func;
-        st_byteEn[st_enqP] <= mem_inst.byteOrTagEn.DataMemAccess;
+        st_byteEn[st_enqP] <= mem_inst.byteOrTagEn;
         st_acq[st_enqP] <= mem_inst.aq;
         st_rel[st_enqP] <= mem_inst.rl;
         st_dst[st_enqP] <= dst;
@@ -1569,7 +1585,8 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be,
+        CapVersion version
     );
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1615,6 +1632,7 @@ module mkSplitLSQ(SplitLSQ);
             ld_allowCap[tag] <= allowCap;
             ld_isMMIO_updAddr[tag] <= mmio;
             ld_shiftedBE_updAddr[tag] <= shift_be;
+            ld_version[tag] <= version;
 
             delayIssue = isValid(ld_olderSt_updAddr[tag]) && ld_waitForOlderSt[tag];
 
@@ -1645,7 +1663,7 @@ module mkSplitLSQ(SplitLSQ);
             st_computed_updAddr[tag] <= !isValid(fault);
             st_paddr_updAddr[tag] <= pa;
             st_isMMIO_updAddr[tag] <= mmio;
-            st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
+            st_shiftedBE_updAddr[tag] <= shift_be;
 
             // A store always try to kill younger loads
             doKill = True;
@@ -1818,7 +1836,7 @@ module mkSplitLSQ(SplitLSQ);
             Bool computed = st_computed_issue[i];
             Bool overlap = overlapAddr(pa, shift_be,
                                        st_paddr_issue[i],
-                                       DataMemAccess(st_shiftedBE_issue[i]));
+                                       st_shiftedBE_issue[i]);
             return valid_older && computed && overlap;
         endfunction
         Vector#(StQSize, Bool) overlapSts = map(isOverlapSt,
@@ -1834,7 +1852,8 @@ module mkSplitLSQ(SplitLSQ);
                 end
                 St: begin
                     // check if forwarding is possible
-                    if(be1CoverBe2(DataMemAccess(st_shiftedBE_issue[stTag]), shift_be)) begin
+                    // XXX need to be careful about forwarding version
+                    if(be1CoverBe2(st_shiftedBE_issue[stTag], shift_be)) begin
                         // store covers the issuing load, forward
                         issRes = Forward (LSQForwardResult {
                             dst: ld_dst[tag],
@@ -1906,7 +1925,7 @@ module mkSplitLSQ(SplitLSQ);
             Bool computed = st_computed_issue[i];
             Bool overlap = overlapAddr(pa, shift_be,
                                        st_paddr_issue[i],
-                                       DataMemAccess(st_shiftedBE_issue[i]));
+                                       st_shiftedBE_issue[i]);
             return valid_older && (acquire || computed && overlap);
         endfunction
         Vector#(StQSize, Bool) checkSts = map(isStNeedCheck,
@@ -1954,7 +1973,7 @@ module mkSplitLSQ(SplitLSQ);
                     end
                     St: begin
                         // check if forwarding is possible
-                        if(be1CoverBe2(DataMemAccess(st_shiftedBE_issue[stTag]),
+                        if(be1CoverBe2(st_shiftedBE_issue[stTag],
                                        shift_be)) begin
                             // store covers the issuing load, forward
                             issRes = Forward (LSQForwardResult {
@@ -2063,6 +2082,10 @@ module mkSplitLSQ(SplitLSQ);
                      ld_executing_resp[t] &&
                      !ld_done_resp[t],
                      "must be computed, executing, not done");
+            let auth_version = ld_version[t];
+            if (auth_version != 0 && (auth_version != alignedData.tag.version)) begin
+                ld_fault_resp[t] <= Valid(Exception(excVersionFault));
+            end
             // we may load into x0 reg, then dst is Invalid, so don't assert
             // that dst is valid
             // mark load as done, and shift resp
@@ -2193,7 +2216,7 @@ module mkSplitLSQ(SplitLSQ);
 
         // sanity check
         if(!isValid(st_fault_deqSt[deqP])) begin
-            doAssert(checkAddrAlign(st_paddr_deqSt[deqP], DataMemAccess(st_byteEn[deqP])),
+            doAssert(checkAddrAlign(st_paddr_deqSt[deqP], st_byteEn[deqP]),
                      "addr BE should be naturally aligned");
             doAssert(st_specBits_deqSt[deqP] == 0,
                      "must have zero spec bits");

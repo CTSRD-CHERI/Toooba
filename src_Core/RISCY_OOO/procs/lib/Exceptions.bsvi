@@ -15,3 +15,4 @@
 `Exception(LoadCapPageFault,    5'd26)
 `Exception(StoreCapPageFault,   5'd27)
 `Exception(CHERIFault,          5'd28)
+`Exception(VersionFault,        5'd29)

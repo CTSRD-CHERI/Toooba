@@ -1,6 +1,8 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -997,6 +999,16 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.scr = Valid (scr);
                             dInst.capFunc = CapModify (SpecialRW (scrType));
                         end
+                        f7_cap_CSetVersion: begin
+                            dInst.iType = Cap;
+                            regs.dst = Valid(tagged Gpr rd);
+                            regs.src1 = Valid(tagged Gpr rs1);
+                            regs.src2 = Valid(tagged Gpr rs2);
+                            dInst.capChecks.src1_tag = True;
+                            dInst.capChecks.src1_unsealed = True;
+                            dInst.capChecks.src1_unversioned = True;
+                            dInst.capFunc = CapModify (SetVersion);
+                        end
                         f7_cap_CSetBounds: begin
                             dInst.capChecks.src1_tag = True;
                             dInst.capChecks.src1_unsealed = True;
@@ -1124,6 +1136,23 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.dst = Valid(tagged Gpr 31);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     regs.src2 = Valid(tagged Gpr rs2);
+                                end
+                                rd_cap_CStoreVersion: begin
+                                    dInst.iType = St;
+                                    dInst.imm = Valid (0);
+                                    dInst.execFunc = tagged Mem MemInst{
+                                        mem_func: St,
+                                        amo_func: None,
+                                        unsignedLd: False,
+                                        byteOrTagEn: VerMemAccess,
+                                        aq: False,
+                                        rl: False,
+                                        reg_bounds: True };
+                                    regs.dst  = Invalid;
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    regs.src2 = Valid(tagged Gpr rs2);
+                                    // NB memCapChecks takes care of version check
+                                    dInst.capChecks = memCapChecks(True);
                                 end
                                 default: begin
                                     illegalInst = True;
@@ -1408,6 +1437,28 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.dst = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capFunc = CapInspect (GetType);
+                                end
+                                f5rs2_cap_CGetVersion: begin
+                                    dInst.iType = Cap;
+                                    regs.dst = Valid(tagged Gpr rd);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    dInst.capFunc = CapInspect (GetVersion);
+                                end
+                                f5rs2_cap_CLoadVersion: begin
+                                    dInst.iType = Ld;
+                                    dInst.imm = Valid (0);
+                                    dInst.execFunc = tagged Mem MemInst{
+                                        mem_func: Ld,
+                                        amo_func: None,
+                                        unsignedLd: False,
+                                        byteOrTagEn: VerMemAccess,
+                                        aq: False,
+                                        rl: False,
+                                        reg_bounds: True };
+                                    regs.dst  = Valid(tagged Gpr rd);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    dInst.capChecks = memCapChecks(True);
+                                    // NB memCapChecks takes care of version check
                                 end
                                 f5rs2_cap_CLoadTags: begin
                                     dInst.iType = Ld;

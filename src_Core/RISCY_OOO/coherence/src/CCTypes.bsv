@@ -1,6 +1,8 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -44,6 +46,9 @@ import Assert::*;
 import Connectable::*;
 import GetPut::*;
 import ClientServer::*;
+
+// For CapVersion
+import CHERICC_Fat::*;
 
 `ifdef PERFORMANCE_MONITORING
 typedef struct {
@@ -224,6 +229,7 @@ typedef struct {
     MemTaggedData data; // valid when op == Sc/Amo
     AmoInst amoInst; // valid when op == Amo
     Bool loadTags; // valid when op == Ld
+    Bool version; // valid when op == Ld / St 
 } ProcRq#(type idT) deriving(Bits, Eq, FShow);
 
 interface L1ProcReq#(type idT);
@@ -233,7 +239,7 @@ endinterface
 interface L1ProcResp#(type idT);
     method Action respLd(idT id, MemTaggedData resp);
     method Action respLrScAmo(idT id, MemTaggedData resp);
-    method ActionValue#(Tuple2#(LineByteEn, Line)) respSt(idT id);
+    method ActionValue#(Tuple2#(LineByteEn, Line)) respSt(idT id, CapVersion v);
     method Action evict(LineAddr a); // called when cache line is evicted
 endinterface
 

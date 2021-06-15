@@ -2,6 +2,8 @@
 // Copyright (c) 2017 Massachusetts Institute of Technology
 // Portions (c) 2020 Bluespec, Inc.
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -336,6 +338,7 @@ typedef union tagged {
     void Move;
     void ClearTag;
     void FromPtr;
+    void SetVersion;
 } CapModifyFunc deriving(Bits, Eq, FShow);
 
 typedef union tagged {
@@ -351,6 +354,7 @@ typedef union tagged {
     void GetFlags;
     void GetPerm;
     void GetType;
+    void GetVersion;
     void ToPtr;
 } CapInspectFunc deriving(Bits, Eq, FShow);
 
@@ -702,6 +706,8 @@ typedef struct {
     Bool loadTags;
     // Whether the request is for tags rather than data
     // For non-LOAD: always False
+    // Whether this is a load / store of version XXX unnecessary?
+    Bool version;
 } MMIOCRq deriving(Bits, Eq, FShow);
 
 // resp from platform to core
@@ -1046,7 +1052,7 @@ function Fmt showInst(Instruction inst);
   return ret;
 endfunction
 
-function x addPc(x cap, Bit#(12) inc) provisos (Add#(f, 12, c), CHERICap::CHERICap#(x, a, b, c, d, e)) = setAddrUnsafe(cap, getAddr(cap) + signExtend(inc));
+function x addPc(x cap, Bit#(12) inc) provisos (Add#(f, 12, c), CHERICap::CHERICap#(x, a, b, c, d, e, v)) = setAddrUnsafe(cap, getAddr(cap) + signExtend(inc));
 
 `ifdef PERFORMANCE_MONITORING
 `ifdef CONTRACTS_VERIFY

@@ -1,6 +1,8 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -41,6 +43,8 @@ import Vector::*;
 import Assert::*;
 import ClientServer::*;
 import GetPut::*;
+import DefaultValue::*;
+
 import CHERICC_Fat::*;
 `ifdef RVFI_DII
 import RVFI_DII_Types::*;
@@ -60,7 +64,18 @@ typedef struct {
 function tag_t getTag(TaggedData#(tag_t, data_t) td) = td.tag;
 function data_t getData(TaggedData#(tag_t, data_t) td) = td.data;
 typedef Vector#(2, Data) MemData;
-typedef Bool MemTag;
+typedef struct {
+  Bool captag;
+  CapVersion version;
+} MemTag deriving (Bits, FShow, Eq);
+instance DefaultValue#(MemTag);
+  function defaultValue = unpack(0);
+endinstance
+function MemTag clearCapTag(MemTag t);
+  t.captag = False;
+  return t;
+endfunction
+//typedef Bool MemTag;
 typedef SizeOf#(MemData) MemDataSz;
 typedef TDiv#(MemDataSz, 8) MemDataBytes;
 typedef SizeOf#(MemTag) MemTagSz;
@@ -69,10 +84,13 @@ typedef TaggedData#(MemTag, MemData) MemTaggedData;
 instance Literal#(MemTaggedData);
   function fromInteger(i);
     Bit#(MemDataSz) val = fromInteger(i);
-    return MemTaggedData { tag: False, data: unpack(val) };
+    return MemTaggedData { tag: defaultValue, data: unpack(val) };
   endfunction
   function inLiteralRange(x, i) = i < 2**valueOf(MemDataSz);
 endinstance
+function Bool getMemTagCapTag(MemTag t) = t.captag;
+function Bool getMemTaggedCapTag(MemTaggedData d) = d.tag.captag;
+function CapVersion getMemTaggedVersion(MemTaggedData t) = t.tag.version;
 function data_res mergeDataBE(data_t0 oldData, data_t1 newData, be_t be)
   provisos( Bits#(data_t0, data_sz), Bits#(data_t1, data_sz), Bits#(be_t, be_sz)
           , Bits#(data_res, data_sz)
@@ -84,23 +102,34 @@ function data_res mergeDataBE(data_t0 oldData, data_t1 newData, be_t be)
   Vector#(be_sz, Bit#(8)) finalVec = map(getNewByte, genVector);
   return unpack(pack(finalVec));
 endfunction
+// Merges data using byte enable. Writes of entire cap store new tag,
+// partial writes clear tag, and writes of nothing preserve old tag.
+// Version is always preserved.
 function MemTaggedData mergeMemTaggedDataBE( MemTaggedData oldItem
                                            , MemTaggedData newItem
                                            , be_t be)
-  provisos (Bits#(be_t, MemDataBytes)) =
-  MemTaggedData { tag : case (pack(be))
-                            0: oldItem.tag;
-                            -1: newItem.tag;
-                            default: False;
-                        endcase
-                , data: mergeDataBE(oldItem.data, newItem.data, be)};
+  provisos (Bits#(be_t, MemDataBytes));
+  let newCapTag = 
+    case (pack(be))
+      0:  oldItem.tag.captag;
+      -1: newItem.tag.captag;
+      default: False;
+    endcase;
+  return MemTaggedData { 
+    tag : MemTag {
+      captag: newCapTag,
+      version: oldItem.tag.version
+    }, 
+    data: mergeDataBE(oldItem.data, newItem.data, be)
+  };
+endfunction
 function MemData dataToMemData(Data x) = unpack(zeroExtend(x));
 function MemDataByteEn dataBEToMemDataBE(ByteEn x) = unpack(zeroExtend(pack(x)));
 function Data memDataToData(MemData x) = x[0];
 function ByteEn memDataBEToDataBE(MemDataByteEn x) = unpack(truncate(pack(x)));
 function MemTaggedData toMemTaggedData(t x)
   provisos (Bits#(t, sz), Add#(sz, smthg, MemDataSz)) = MemTaggedData {
-  tag: False,
+  tag: defaultValue, // XXX check version correct for all uses
   data: unpack(zeroExtend(pack(x)))
 };
 function MemTaggedData dataToMemTaggedData(Data x) = toMemTaggedData(x);
@@ -116,7 +145,7 @@ function MemTaggedData toMemTaggedDataSelect(t x, Addr addr)
   Vector#(ts_in_memdata, t) vec = replicate(0);
   vec[t_index] = x;
   return MemTaggedData {
-    tag: False,
+    tag: defaultValue, // XXX check version is correct for all usages
     data: unpack(pack(vec))
   };
 endfunction
@@ -146,6 +175,7 @@ typedef TLog#(MemDataBytes) IndxShamt;
 typedef Vector#(MemDataBytes, Bool) MemDataByteEn;
 
 typedef union tagged {
+  void VerMemAccess;
   void TagMemAccess;
   MemDataByteEn DataMemAccess;
 } ByteOrTagEn deriving (FShow, Eq, Bits);

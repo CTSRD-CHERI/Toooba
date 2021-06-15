@@ -1,5 +1,7 @@
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -498,7 +500,7 @@ module mkSelfInvL1Bank#(
             end
             St: begin
                 // resp processor, get write data & BE
-                let {be, wrLine} <- procResp.respSt(req.id);
+                let {be, wrLine} <- procResp.respSt(req.id, curLine.versions[dataSel]);
                 // calculate new data to write
                 newLine = getUpdatedLine(curLine, be, wrLine);
             end
@@ -586,11 +588,11 @@ module mkSelfInvL1Bank#(
         MemTaggedData resp = case (req.amoInst.width)
           QWord: current;
           DWord: MemTaggedData {
-            tag: False,
+            tag: defaultValue, // xxx preserve version?
             data: unpack(signExtend(dwordData[dwordIdx]))
           };
           Word: MemTaggedData {
-            tag: False,
+            tag: defaultValue, // xxx preserve version?
             data: unpack(signExtend(wordData[wordIdx]))
           };
         endcase;

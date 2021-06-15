@@ -1,5 +1,7 @@
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
+// CHERI Versioning modifications:
+//     Copyright (c) 2021 Microsoft
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
@@ -75,6 +77,8 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
         result = e1(cheriExcTypeViolation);
     else if (toCheck.src1_src2_types_match     && getKind(a).SEALED_WITH_TYPE != getKind(b).SEALED_WITH_TYPE)
         result = e1(cheriExcTypeViolation);
+    else if (toCheck.src1_unversioned          && isVersioned(a))
+        result = e1(cheriExcVersionViolation);
     else if (toCheck.src1_permit_ccall         && !getHardPerms(a).permitCCall)
         result = e1(cheriExcPermitCCallViolation);
     else if (toCheck.src2_permit_ccall         && !getHardPerms(b).permitCCall)
@@ -117,6 +121,8 @@ function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapCheck
         result = eAuth(cheriExcTagViolation);
     else if (getKind(auth) != UNSEALED)
         result = eAuth(cheriExcSealViolation);
+    else if (byteOrTagEn == VerMemAccess && isVersioned(auth))
+        result = eAuth(cheriExcVersionViolation);
     else if (isLoad && !getHardPerms(auth).permitLoad)
         result = eAuth(cheriExcPermitRViolation);
     else if (isLoad && !getHardPerms(auth).permitLoadCap && byteOrTagEn == TagMemAccess)
@@ -278,6 +284,8 @@ function Tuple2#(CapPipe,Bool) capModify(CapPipe a, CapPipe b, CapModifyFunc fun
                 t(a);
             tagged ClearTag               :
                 t(setValidCap(a, False));
+            tagged SetVersion             :
+                t(setVersion(a, truncate(getAddr(b))));
             default: ?;
         endcase);
     return res;
@@ -318,6 +326,8 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                        tagged RES1: otype_res1_ext;
                        tagged SEALED_WITH_TYPE .t: zeroExtend(t);
                    endcase
+               tagged GetVersion             :
+                   zeroExtend(getVersion(a));
                tagged ToPtr                  :
                    (isValidCap(a) ? (getAddr(a) - getBase(b)) : 0);
                default: ?;
@@ -590,7 +600,7 @@ function Bool memAddrMisaligned(Addr addr, ByteOrTagEn byteOrTagEn);
     if (byteOrTagEn == TagMemAccess) begin
         return(!isCLineAlignAddr(addr));
     end
-    else if(byteEn[15]) begin
+    else if(byteOrTagEn == VerMemAccess || byteEn[15]) begin
         return addr[3:0] != 0;
     end
     else if(byteEn[7]) begin
@@ -613,7 +623,13 @@ function MemTaggedData gatherLoad( Addr addr, ByteOrTagEn byteOrTagEn
     Bit#(IndxShamt) offset = truncate(addr);
 
     MemDataByteEn byteEn = byteOrTagEn.DataMemAccess;
-    if((byteOrTagEn == TagMemAccess) || pack(byteEn) == ~0) return data;
+    if (byteOrTagEn == VerMemAccess)
+        return MemTaggedData {
+            tag: defaultValue,
+            data: unpack(zeroExtend(pack(data.tag.version)))
+        };
+    else if((byteOrTagEn == TagMemAccess) || pack(byteEn) == ~0) 
+        return data;
     else if(byteEn[7]) begin
         Vector#(2, Bit#(64)) dataVec = unpack(pack(data.data));
         return dataToMemTaggedData(extend(dataVec[offset[3]]));
