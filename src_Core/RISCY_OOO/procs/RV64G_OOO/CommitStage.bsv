@@ -609,63 +609,48 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         if(trap.trap matches tagged Interrupt .inter) begin
             inIfc.commitCsrInstOrInterrupt;
         end
-
 `ifdef INCLUDE_GDB_CONTROL
-        else if (trap.trap == tagged Exception excBreakpoint) begin
+        else if (trap.trap == tagged Exception Breakpoint) begin
             inIfc.commitCsrInstOrInterrupt;    // TODO: Why?
         end
+
+        if ((trap.trap == tagged Interrupt DebugHalt)
+         || (trap.trap == tagged Interrupt DebugStep)
+         || ((trap.trap == tagged Exception Breakpoint) && (csrf.dcsr_break_bit == 1'b1))) begin
+
+            // Flush everything (tlbs, caches, reservation, branch predictor);
+            // reconcilei and I; update VM info.
+            makeSystemConsistent_for_debug_mode;
+
+            // Save values in debugger CSRs
+            Bit #(3) dcsr_cause = (  (trap.trap == tagged Interrupt DebugHalt)
+                ? 3
+                : (  (trap.trap == tagged Interrupt DebugStep)
+                   ? 4
+                   : 1));
+            csrf.dcsr_cause_write (dcsr_cause);
+            csrf.dpc_write (trap.pc);
+
+            // Tell fetch stage to wait for redirect
+            // Note: rule doCommitTrap_flush may have done this already; redundant call is ok.
+            inIfc.setFetchWaitRedirect;
+            inIfc.setFetchWaitFlush;
+
+	    // Go to quiescent state until debugger resumes execution
+	    rg_run_state <= RUN_STATE_DEBUGGER_HALTED;
+	    if (verbosity >= 2)
+	    	$display ("%0d: %m.commitStage.doCommitTrap_handle; debugger halt:", cur_cycle);
+	  end
+       else begin
 `endif
-
-`ifdef INCLUDE_GDB_CONTROL
-       if ((trap.trap == tagged Interrupt intrDebugHalt)
-           || (trap.trap == tagged Interrupt intrDebugStep)
-           || ((trap.trap == tagged Exception excBreakpoint) && (csrf.dcsr_break_bit == 1'b1)))
-          begin
-             // Flush everything (tlbs, caches, reservation, branch predictor);
-             // reconcilei and I; update VM info.
-             makeSystemConsistent_for_debug_mode;
-
-             // Save values in debugger CSRs
-             Bit #(3) dcsr_cause = (  (trap.trap == tagged Interrupt intrDebugHalt)
-                                    ? 3
-                                    : (  (trap.trap == tagged Interrupt intrDebugStep)
-                                       ? 4
-                                       : 1));
-             csrf.dcsr_cause_write (dcsr_cause);
-             csrf.dpc_write (cast(trap.pc));
-
-             // Tell fetch stage to wait for redirect
-             // Note: rule doCommitTrap_flush may have done this already; redundant call is ok.
-             // Or not?  These apparently conflict with redirectPC now?
-             inIfc.setFetchWaitRedirect;
-             inIfc.setFetchWaitFlush;
-
-             // Go to quiescent state until debugger resumes execution
-             rg_run_state <= RUN_STATE_DEBUGGER_HALTED;
-
-             if (verbosity >= 2)
-                $display ("%0d: %m.commitStage.doCommitTrap_handle; debugger halt:", cur_cycle);
-          end else begin
-`endif
-       // trap handling & redirect
-       let trap_updates <- csrf.trap(trap.trap, cast(trap.pc), trap.addr, trap.orig_inst);
-       CapPipe new_pc = cast(trap_updates.new_pcc);
-       inIfc.redirectPc(cast(new_pc)
-`ifdef RVFI_DII
-                        , trap.x.dii_pid + (is_16b_inst(trap.orig_inst) ? 1 : 2)
-`endif
-       );
-`ifdef RVFI
-       Rvfi_Traces rvfis = replicate(tagged Invalid);
-       rvfis[0] = genRVFI(trap.x, traceCnt, getTSB(), getAddr(new_pc));
-       rvfiQ.enq(rvfis);
-       traceCnt <= traceCnt + 1;
-`endif
+	  // trap handling & redirect
+       let trap_updates <- csrf.trap(trap.trap, trap.pc, trap.addr, trap.orig_inst);
+       inIfc.redirectPc(trap_updates.new_pc);
 
 `ifdef INCLUDE_TANDEM_VERIF
        fa_to_TV (way0, rg_serial_num,
-                 tagged Invalid,
-                 x, no_fflags, no_mstatus, tagged Valid trap_updates, no_ret_updates);
+		 tagged Invalid,
+		 x, no_fflags, no_mstatus, tagged Valid trap_updates, no_ret_updates);
 `endif
        rg_serial_num <= rg_serial_num + 1;
 
