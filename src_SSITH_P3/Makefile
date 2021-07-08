@@ -42,6 +42,9 @@ SYNTH_BSC_OPTIONS = -D XILINX_XCVU9P
 # Sim only BSC_COMPILATION_FLAGS
 SIM_BSC_OPTIONS = -D BSIM
 
+# Set number of cores for RISCY config
+CORE_NUM = 2
+
 # Only used if we don't have INCLUDE_GDB_CONTROL
 #	-D EXTERNAL_DEBUG_MODULE
 
