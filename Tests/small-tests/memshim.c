@@ -45,7 +45,7 @@ int main(void) {
 
     //Loop that counts AXI4 requests coming out of CPU 
     asm volatile (
-        "li t0, 0x84;"//Event ID for AXI4 ar
+        "li t0, 0x74;"//Event ID for AXI4 ar
         //"li t0, 0x6;"//Event ID for AUIPC
         "csrw mhpmevent3, t0;"
         "csrr t1, mhpmcounter3;"

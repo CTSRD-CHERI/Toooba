@@ -178,7 +178,7 @@ module mkProc #(Bool secure_world) (Proc_IFC);
    endrule
 
 `ifdef PERFORMANCE_MONITORING
-   Reg#(EventsCache) events_tgc_reg <- mkRegU;
+   Reg#(Vector#(7, Bit#(1))) events_tgc_reg <- mkRegU;
    Reg#(AXI4_Events) events_axi_reg <- mkRegU;
    rule broadcastPerfEvents;
        for(Integer j = 0; j < valueof(CoreNum); j = j+1) begin

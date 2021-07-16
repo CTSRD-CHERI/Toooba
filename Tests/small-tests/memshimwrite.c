@@ -2,7 +2,7 @@ int main(void) {
     int ret;
     //Loop that counts AXI4 requests coming out of CPU 
     asm volatile (
-        "li t0, 0x80;"//Event ID for AXI4 aw
+        "li t0, 0x70;"//Event ID for AXI4 aw
         "csrw mhpmevent3, t0;"
         "csrr t1, mhpmcounter3;"
         "li t0, 100;"
