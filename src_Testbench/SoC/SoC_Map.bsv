@@ -101,6 +101,7 @@ interface SoC_Map_IFC;
    (* always_ready *)   method  Range#(Wd_Addr)  m_plic_addr_range;
    (* always_ready *)   method  Range#(Wd_Addr)  m_uart0_addr_range;
    (* always_ready *)   method  Range#(Wd_Addr)  m_boot_rom_addr_range;
+   (* always_ready *)   method  Range#(Wd_Addr)  m_ddr4_0_uncached_addr_range;
    (* always_ready *)   method  Range#(Wd_Addr)  m_mem0_controller_addr_range;
    (* always_ready *)   method  Range#(Wd_Addr)  m_tcm_addr_range;
 
@@ -163,6 +164,14 @@ module mkSoC_Map (SoC_Map_IFC);
    };
 
    // ----------------------------------------------------------------
+   // Uncached DDR4 access
+
+   let ddr4_0_uncached_addr_range = Range {
+      base: 'h_D000_0000,
+      size: 'h_4000_0000    // 1 GB
+   };
+
+   // ----------------------------------------------------------------
    // Main Mem Controller 0
 
    let mem0_controller_addr_range = Range {
@@ -212,6 +221,7 @@ module mkSoC_Map (SoC_Map_IFC);
 		      || inRange(plic_addr_range, addr)
 		      || inRange(uart0_addr_range, addr)
           || inRange(praesidio_conf_addr_range, addr)
+          || inRange(ddr4_0_uncached_addr_range, addr)
 		      )
 		  )
 	      );
@@ -233,6 +243,7 @@ module mkSoC_Map (SoC_Map_IFC);
    method  Range#(Wd_Addr)  m_uart0_addr_range = uart0_addr_range;
    method  Range#(Wd_Addr)  m_boot_rom_addr_range = boot_rom_addr_range;
 
+   method  Range#(Wd_Addr)  m_ddr4_0_uncached_addr_range = ddr4_0_uncached_addr_range;
    method  Range#(Wd_Addr)  m_mem0_controller_addr_range = mem0_controller_addr_range;
 
    method  Range#(Wd_Addr)  m_tcm_addr_range = tcm_addr_range;

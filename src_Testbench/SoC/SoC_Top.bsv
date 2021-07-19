@@ -218,9 +218,19 @@ module mkSoC_Top #(Reset dm_power_on_reset)
    route_vector[htif_subordinate_num] = soc_map.m_htif_addr_range;
 `endif
 
+   function my_route (addr);
+      let route = routeFromMappingTable(route_vector)(addr);
+      let alt_route = replicate(False);
+      alt_route[mem0_controller_subordinate_num] = True;
+      if (inRange (soc_map.m_ddr4_0_uncached_addr_range, addr)) begin
+        return alt_route;
+      end else begin
+        return route;
+      end
+   endfunction
+
    // SoC Fabric
-   let bus <- mkAXI4Bus (routeFromMappingTable(route_vector),
-                         manager_vector, subordinate_vector);
+   let bus <- mkAXI4Bus (my_route, manager_vector, subordinate_vector);
 
    // ----------------
    // Connect interrupt sources for CPU external interrupt request inputs.
@@ -266,7 +276,9 @@ module mkSoC_Top #(Reset dm_power_on_reset)
                                 rangeTop(soc_map.m_boot_rom_addr_range));
 
          mem0_controller.set_addr_map (rangeBase(soc_map.m_mem0_controller_addr_range),
-                                       rangeTop(soc_map.m_mem0_controller_addr_range));
+                                       rangeTop(soc_map.m_mem0_controller_addr_range),
+                                       rangeBase(soc_map.m_ddr4_0_uncached_addr_range),
+                                       rangeTop(soc_map.m_ddr4_0_uncached_addr_range));
 
          uart0.set_addr_map (rangeBase(soc_map.m_uart0_addr_range),
                              rangeTop(soc_map.m_uart0_addr_range));
