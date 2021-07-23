@@ -133,6 +133,41 @@ typedef enum {SOC_START,
 deriving (Bits, Eq, FShow);
 
 // ================================================================
+// DRAM Delay
+// Based on CAS Latency in: https://www.samsung.com/semiconductor/global.semi/file/resource/2017/11/4G_E_DDR4_Samsung_Spec_Rev1_6_Jan_17-0.pdf
+
+typedef 20 MyLatency;
+module mkAXI4ManagerSubordinateShimDramDelay (AXI4_ManagerSubordiante_Shim#(a, b, c, d, e, f, g, h));
+  let awff <- mkUGFFDelay(MyLatency);
+  let  wff <- mkUGFFDelay(MyLatency);
+  let  bff <- mkBypassFIFOF;
+  let arff <- mkUGFFDelay(MyLatency);
+  let  rff <- mkBypassFIFOF;
+  method clear = action
+    awff.clear;
+    wff.clear;
+    bff.clear;
+    arff.clear;
+    rff.clear;
+  endaction;
+  interface manager = interface AXI4_Manager;
+    interface aw = toSource(awff);
+    interface  w = toSource(wff);
+    interface  b = toSink(bff);
+    interface ar = toSource(arff);
+    interface  r = toSink(rff);
+  endinterface;
+  interface subordinate = interface AXI4_Subordinate;
+    interface aw = toSink(awff);
+    interface  w = toSink(wff);
+    interface  b = toSource(bff);
+    interface ar = toSink(arff);
+    interface  r = toSource(rff);
+  endinterface;
+endmodule
+
+
+// ================================================================
 // The module
 
 (* synthesize *)
@@ -158,6 +193,9 @@ module mkSoC_Top #(Reset dm_power_on_reset)
 
    // SoC Memory
    Mem_Controller_IFC  mem0_controller <- mkMem_Controller;
+   // Static delay FIFO to get closer to real DRAM performance
+   AXI4_ManagerSubordinate_Shim#(Wd_SId, Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
+      mem0_controller_delayer <- mkAXI4ManagerSubordinateShimDramDelay;
    // AXI4 Deburster in front of SoC Memory
    AXI4_ManagerSubordinate_Shim#(Wd_SId, Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
       mem0_controller_axi4_deburster <- mkBurstToNoBurst_ManagerSubordinate;
@@ -197,8 +235,10 @@ module mkSoC_Top #(Reset dm_power_on_reset)
    route_vector[boot_rom_subordinate_num] = soc_map.m_boot_rom_addr_range;
 
    // Fabric to Mem Controller
-   mkConnection(mem0_controller_axi4_deburster.manager, mem0_controller.slave);
-   subordinate_vector[mem0_controller_subordinate_num] = mem0_controller_axi4_deburster.subordinate;
+   let mem0_controller_subordinate = mem0_controller.slave;
+   mkConnection(mem0_controller_axi4_deburster.manager, mem0_controller_subordinate);
+   mkConnection(mem0_controller_delayer.manager, mem0_controller_axi4_deburster.subordinate);
+   subordinate_vector[mem0_controller_subordinate_num] = mem0_controller_delayer.subordinate;
    route_vector[mem0_controller_subordinate_num] = soc_map.m_mem0_controller_addr_range;
 
    // Fabric to UART0
