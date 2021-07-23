@@ -11,3 +11,4 @@ loop
 memshimwrite
 communication
 memshimread
+baselinecommunication

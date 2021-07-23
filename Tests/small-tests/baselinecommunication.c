@@ -1,20 +1,20 @@
-#define COMMUNICATION_ADDRESS (0xD0010000)
+#define COMMUNICATION_ADDRESS (0x80010000)
 #define FIRST_VAL             (0x55555555)
 #define SECOND_VAL            (0xCAFEBABE)
 #define REPITITIONS           (100)
 
 int main(void) {
-  int secure_world, start_time, end_time, tmp;
+  int hart_id, start_time, end_time, tmp;
   int total = 0;
   asm volatile(
-    "csrr %0, 0xFC0" //CSR indicating whether a core is in the secure world or not
-    : "=r" (secure_world) //output
+    "csrr %0, 0xF14" //CSR mhartid
+    : "=r" (hart_id) //output
     : //input
     : //clobbered
   );
   volatile unsigned int* ptr = (unsigned int*) COMMUNICATION_ADDRESS;
   tmp = *ptr;
-  if(secure_world == 0) {
+  if(hart_id == 0) {
     for(int i = 0; i < REPITITIONS; i++) {
       asm volatile(
         "rdcycle %0"
