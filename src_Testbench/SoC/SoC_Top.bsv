@@ -33,6 +33,7 @@ export SoC_Top_IFC (..), mkSoC_Top;
 // BSV library imports
 
 import FIFOF         :: *;
+import SpecialFIFOs  :: *;
 import GetPut        :: *;
 import ClientServer  :: *;
 import Connectable   :: *;
@@ -47,6 +48,8 @@ import Cur_Cycle   :: *;
 import GetPut_Aux  :: *;
 import Routable    :: *;
 import AXI4        :: *;
+import FF          :: *;
+import SourceSink  :: *;
 
 // ================================================================
 // Project imports
@@ -137,11 +140,13 @@ deriving (Bits, Eq, FShow);
 // Based on CAS Latency in: https://www.samsung.com/semiconductor/global.semi/file/resource/2017/11/4G_E_DDR4_Samsung_Spec_Rev1_6_Jan_17-0.pdf
 
 typedef 20 MyLatency;
-module mkAXI4ManagerSubordinateShimDramDelay (AXI4_ManagerSubordiante_Shim#(a, b, c, d, e, f, g, h));
-  let awff <- mkUGFFDelay(MyLatency);
-  let  wff <- mkUGFFDelay(MyLatency);
+typedef 64 DelayFFDepth;
+module mkAXI4ManagerSubordinateShimDramDelay (AXI4_ManagerSubordinate_Shim#(id_, addr_, data_, awuser_, wuser_, buser_, aruser_, ruser_));
+  Bit#(16) latency = fromInteger(valueOf(MyLatency));
+  FF#(AXI4_AWFlit#(id_, addr_, awuser_), DelayFFDepth) awff <- mkUGFFDelay(latency);
+  let  wff <- mkBypassFIFOF;
   let  bff <- mkBypassFIFOF;
-  let arff <- mkUGFFDelay(MyLatency);
+  FF#(AXI4_ARFlit#(id_, addr_, aruser_), DelayFFDepth) arff <- mkUGFFDelay(latency);
   let  rff <- mkBypassFIFOF;
   method clear = action
     awff.clear;
