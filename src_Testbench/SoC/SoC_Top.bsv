@@ -138,8 +138,12 @@ deriving (Bits, Eq, FShow);
 // ================================================================
 // DRAM Delay
 // Based on CAS Latency in: https://www.samsung.com/semiconductor/global.semi/file/resource/2017/11/4G_E_DDR4_Samsung_Spec_Rev1_6_Jan_17-0.pdf
+// CAS latency is the minimum latency for accessing and open DRAM row
+// CAS latency is 19 clock cycles for a 1.333 GHz DRAM module
+// Core i9 x-series processor has a base clock frequency of 3.7 GHz
+// CAS latency in processor cycles is thus: 19/1.333*3.7 = 52.7
 
-typedef 20 MyLatency;
+typedef 52 MyLatency;
 typedef 64 DelayFFDepth;
 module mkAXI4ManagerSubordinateShimDramDelay (AXI4_ManagerSubordinate_Shim#(id_, addr_, data_, awuser_, wuser_, buser_, aruser_, ruser_));
   Bit#(16) latency = fromInteger(valueOf(MyLatency));
@@ -170,7 +174,6 @@ module mkAXI4ManagerSubordinateShimDramDelay (AXI4_ManagerSubordinate_Shim#(id_,
     interface  r = toSource(rff);
   endinterface;
 endmodule
-
 
 // ================================================================
 // The module
