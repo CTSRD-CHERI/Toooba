@@ -19,7 +19,7 @@ SIM_DRAM_TYPE := AWSF1
 USE_XILINX_FPU ?= false
 
 # default 1 core
-CORE_NUM ?= 1
+CORE_NUM ?= 2
 # TSO or WEAK
 TSO_MM ?= false
 # Lr upgrades line to E (no forward progress guarantee)
