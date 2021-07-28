@@ -33,6 +33,7 @@ export SoC_Top_IFC (..), mkSoC_Top;
 // BSV library imports
 
 import FIFOF         :: *;
+import SpecialFIFOs  :: *;
 import GetPut        :: *;
 import ClientServer  :: *;
 import Connectable   :: *;
@@ -47,6 +48,8 @@ import Cur_Cycle   :: *;
 import GetPut_Aux  :: *;
 import Routable    :: *;
 import AXI4        :: *;
+import FF          :: *;
+import SourceSink  :: *;
 
 // ================================================================
 // Project imports
@@ -133,6 +136,42 @@ typedef enum {SOC_START,
 deriving (Bits, Eq, FShow);
 
 // ================================================================
+// DRAM Delay
+// Based on CAS Latency in: https://www.samsung.com/semiconductor/global.semi/file/resource/2017/11/4G_E_DDR4_Samsung_Spec_Rev1_6_Jan_17-0.pdf
+
+typedef 52 MyLatency;
+typedef 64 DelayFFDepth;
+module mkAXI4ManagerSubordinateShimDramDelay (AXI4_ManagerSubordinate_Shim#(id_, addr_, data_, awuser_, wuser_, buser_, aruser_, ruser_));
+  Bit#(16) latency = fromInteger(valueOf(MyLatency));
+  FF#(AXI4_AWFlit#(id_, addr_, awuser_), DelayFFDepth) awff <- mkUGFFDelay(latency);
+  let  wff <- mkBypassFIFOF;
+  let  bff <- mkBypassFIFOF;
+  FF#(AXI4_ARFlit#(id_, addr_, aruser_), DelayFFDepth) arff <- mkUGFFDelay(latency);
+  let  rff <- mkBypassFIFOF;
+  method clear = action
+    awff.clear;
+    wff.clear;
+    bff.clear;
+    arff.clear;
+    rff.clear;
+  endaction;
+  interface manager = interface AXI4_Manager;
+    interface aw = toSource(awff);
+    interface  w = toSource(wff);
+    interface  b = toSink(bff);
+    interface ar = toSource(arff);
+    interface  r = toSink(rff);
+  endinterface;
+  interface subordinate = interface AXI4_Subordinate;
+    interface aw = toSink(awff);
+    interface  w = toSink(wff);
+    interface  b = toSource(bff);
+    interface ar = toSink(arff);
+    interface  r = toSource(rff);
+  endinterface;
+endmodule
+
+// ================================================================
 // The module
 
 (* synthesize *)
@@ -158,6 +197,9 @@ module mkSoC_Top #(Reset dm_power_on_reset)
 
    // SoC Memory
    Mem_Controller_IFC  mem0_controller <- mkMem_Controller;
+   // Static delay FIFO to get closer to real DRAM performance
+   AXI4_ManagerSubordinate_Shim#(Wd_SId, Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
+      mem0_controller_delayer <- mkAXI4ManagerSubordinateShimDramDelay;
    // AXI4 Deburster in front of SoC Memory
    AXI4_Shim#(Wd_SId, Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
       mem0_controller_axi4_deburster <- mkBurstToNoBurst;
@@ -200,7 +242,11 @@ module mkSoC_Top #(Reset dm_power_on_reset)
 
    // Fabric to Mem Controller
    mkConnection(mem0_controller_axi4_deburster.master, mem0_controller.slave);
-   slave_vector[mem0_controller_slave_num] = mem0_controller_axi4_deburster.slave;
+   let subordinate_vector = slave_vector;
+   let mem0_controller_subordinate_num = mem0_controller_slave_num;
+   let mem0_controller_axi4_deburster_subordinate = mem0_controller_axi4_deburster.slave;
+   mkConnection(mem0_controller_delayer.manager, mem0_controller_axi4_deburster_subordinate);
+   subordinate_vector[mem0_controller_subordinate_num] = mem0_controller_delayer.subordinate;
    route_vector[mem0_controller_slave_num] = soc_map.m_mem0_controller_addr_range;
 
    // Fabric to UART0
