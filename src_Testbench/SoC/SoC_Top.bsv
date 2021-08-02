@@ -245,9 +245,9 @@ module mkSoC_Top #(Reset dm_power_on_reset)
    let subordinate_vector = slave_vector;
    let mem0_controller_subordinate_num = mem0_controller_slave_num;
    let mem0_controller_axi4_deburster_subordinate = mem0_controller_axi4_deburster.slave; //debugAXI4_Subordinate(mem0_controller_axi4_deburster.slave, $format("%m mem controller subordinate"));
-   //mkConnection(mem0_controller_delayer.manager, mem0_controller_axi4_deburster_subordinate);
+   mkConnection(mem0_controller_delayer.manager, mem0_controller_axi4_deburster_subordinate);
    //subordinate_vector[mem0_controller_subordinate_num] = debugAXI4_Subordinate(mem0_controller_axi4_deburster_subordinate, $format("%m DRAM controler delayer"));
-   slave_vector[mem0_controller_subordinate_num] = mem0_controller_axi4_deburster_subordinate;
+   subordinate_vector[mem0_controller_subordinate_num] = mem0_controller_delayer.subordinate;
    route_vector[mem0_controller_subordinate_num] = soc_map.m_mem0_controller_addr_range;
 
    // Fabric to UART0
