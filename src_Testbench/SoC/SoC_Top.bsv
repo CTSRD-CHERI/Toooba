@@ -48,8 +48,8 @@ import Cur_Cycle   :: *;
 import GetPut_Aux  :: *;
 import Routable    :: *;
 import AXI4        :: *;
-//import FF          :: *;
-//import SourceSink  :: *;
+import FF          :: *;
+import SourceSink  :: *;
 
 // ================================================================
 // Project imports
@@ -139,15 +139,15 @@ deriving (Bits, Eq, FShow);
 // DRAM Delay
 // Based on CAS Latency in: https://www.samsung.com/semiconductor/global.semi/file/resource/2017/11/4G_E_DDR4_Samsung_Spec_Rev1_6_Jan_17-0.pdf
 
-/*typedef 52 MyLatency;
-typedef 16 DelayFFDepth;
-module mkAXI4ManagerSubordinateShimDramDelay (AXI4_ManagerSubordinate_Shim#(id_, addr_, data_, awuser_, wuser_, buser_, aruser_, ruser_));
-  Bit#(16) latency = fromInteger(valueOf(MyLatency));
-  FF#(AXI4_AWFlit#(id_, addr_, awuser_), DelayFFDepth) awff <- mkUGFFDelay(latency);
-  let  wff <- mkSizedFIFOF(valueOf(DelayFFDepth));
-  let  bff <- mkSizedFIFOF(valueOf(DelayFFDepth));
-  FF#(AXI4_ARFlit#(id_, addr_, aruser_), DelayFFDepth) arff <- mkUGFFDelay(latency);
-  let  rff <- mkSizedFIFOF(valueOf(DelayFFDepth));
+//typedef 52 MyLatency;
+//typedef 16 DelayFFDepth;
+module mkAXI4ShimDramDelay (AXI4_Shim#(id_, addr_, data_, awuser_, wuser_, buser_, aruser_, ruser_));
+  //Bit#(16) latency = fromInteger(valueOf(MyLatency));
+  let awff <- mkFIFOF;
+  let  wff <- mkFIFOF;
+  let  bff <- mkFIFOF;
+  let arff <- mkFIFOF;
+  let  rff <- mkFIFOF;
   method clear = action
     awff.clear;
     wff.clear;
@@ -155,21 +155,21 @@ module mkAXI4ManagerSubordinateShimDramDelay (AXI4_ManagerSubordinate_Shim#(id_,
     arff.clear;
     rff.clear;
   endaction;
-  interface manager = interface AXI4_Manager;
+  interface master = interface AXI4_Master;
     interface aw = toSource(awff);
     interface  w = toSource(wff);
     interface  b = toSink(bff);
     interface ar = toSource(arff);
     interface  r = toSink(rff);
   endinterface;//, $format("AXI4_DramDelay_Manger"));
-  interface subordinate = interface AXI4_Subordinate;
+  interface slave = interface AXI4_Slave;
     interface aw = toSink(awff);
     interface  w = toSink(wff);
     interface  b = toSource(bff);
     interface ar = toSink(arff);
     interface  r = toSource(rff);
   endinterface;//, $format("AXI4_DramDelay_Subordinate"));
-endmodule*/
+endmodule
 
 // ================================================================
 // The module
@@ -199,7 +199,7 @@ module mkSoC_Top #(Reset dm_power_on_reset)
    Mem_Controller_IFC  mem0_controller <- mkMem_Controller;
    // Static delay FIFO to get closer to real DRAM performance
    AXI4_Shim#(Wd_SId, Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
-      mem0_controller_delayer <- mkAXI4ShimFF;
+      mem0_controller_delayer <- mkAXI4ShimDramDelay;
    // AXI4 Deburster in front of SoC Memory
    AXI4_Shim#(Wd_SId, Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
       mem0_controller_axi4_deburster <- mkBurstToNoBurst;
