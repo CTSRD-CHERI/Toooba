@@ -139,14 +139,16 @@ deriving (Bits, Eq, FShow);
 // DRAM Delay
 // Based on CAS Latency in: https://www.samsung.com/semiconductor/global.semi/file/resource/2017/11/4G_E_DDR4_Samsung_Spec_Rev1_6_Jan_17-0.pdf
 
-//typedef 52 MyLatency;
-//typedef 16 DelayFFDepth;
+typedef 52 MyLatency;
+typedef 16 DelayFFDepth;
 module mkAXI4ShimDramDelay (AXI4_Shim#(id_, addr_, data_, awuser_, wuser_, buser_, aruser_, ruser_));
-  //Bit#(16) latency = fromInteger(valueOf(MyLatency));
-  let awff <- mkFIFOF;
+  Bit#(16) latency = fromInteger(valueOf(MyLatency));
+  //let awff <- mkFIFOF;
+  FF#(AXI4_AWFlit#(id_, addr_, awuser_), DelayFFDepth) awff <- mkUGFFDelay(latency);
   let  wff <- mkFIFOF;
   let  bff <- mkFIFOF;
-  let arff <- mkFIFOF;
+  //let arff <- mkFIFOF;
+  FF#(AXI4_ARFlit#(id_, addr_, aruser_), DelayFFDepth) arff <- mkUGFFDelay(latency);
   let  rff <- mkFIFOF;
   method clear = action
     awff.clear;
