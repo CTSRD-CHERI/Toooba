@@ -198,8 +198,8 @@ module mkSoC_Top #(Reset dm_power_on_reset)
    // SoC Memory
    Mem_Controller_IFC  mem0_controller <- mkMem_Controller;
    // Static delay FIFO to get closer to real DRAM performance
-   //AXI4_ManagerSubordinate_Shim#(Wd_SId, Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
-   //   mem0_controller_delayer <- mkAXI4ManagerSubordinateShimFF;
+   AXI4_Shim#(Wd_SId, Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
+      mem0_controller_delayer <- mkAXI4ShimFF;
    // AXI4 Deburster in front of SoC Memory
    AXI4_Shim#(Wd_SId, Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
       mem0_controller_axi4_deburster <- mkBurstToNoBurst;
@@ -245,9 +245,9 @@ module mkSoC_Top #(Reset dm_power_on_reset)
    //let subordinate_vector = slave_vector;
    //let mem0_controller_subordinate_num = mem0_controller_slave_num;
    //let mem0_controller_axi4_deburster_subordinate = mem0_controller_axi4_deburster.slave; //debugAXI4_Subordinate(mem0_controller_axi4_deburster.slave, $format("%m mem controller subordinate"));
-   //mkConnection(mem0_controller_delayer.manager, mem0_controller_axi4_deburster_subordinate);
+   mkConnection(mem0_controller_delayer.master, mem0_controller_axi4_deburster.slave);
    //subordinate_vector[mem0_controller_subordinate_num] = debugAXI4_Subordinate(mem0_controller_axi4_deburster_subordinate, $format("%m DRAM controler delayer"));
-   slave_vector[mem0_controller_slave_num] = mem0_controller_axi4_deburster.slave;
+   slave_vector[mem0_controller_slave_num] = mem0_controller_delayer.slave;
    route_vector[mem0_controller_slave_num] = soc_map.m_mem0_controller_addr_range;
 
    // Fabric to UART0
