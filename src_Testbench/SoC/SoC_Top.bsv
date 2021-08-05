@@ -139,7 +139,7 @@ deriving (Bits, Eq, FShow);
 // DRAM Delay
 // Based on CAS Latency in: https://www.samsung.com/semiconductor/global.semi/file/resource/2017/11/4G_E_DDR4_Samsung_Spec_Rev1_6_Jan_17-0.pdf
 
-typedef 52 MyLatency;
+typedef 47 MyLatency;
 typedef 16 DelayFFDepth;
 module mkAXI4ShimDramDelay (AXI4_Shim#(id_, addr_, data_, awuser_, wuser_, buser_, aruser_, ruser_));
   Bit#(16) latency = fromInteger(valueOf(MyLatency));
