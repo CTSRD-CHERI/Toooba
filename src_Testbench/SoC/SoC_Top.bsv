@@ -143,8 +143,8 @@ deriving (Bits, Eq, FShow);
 // Core i9 x-series processor has a base clock frequency of 3.7 GHz
 // CAS latency in processor cycles is thus: 19/1.333*3.7 = 52.7
 
-typedef 52 MyLatency;
-typedef 64 DelayFFDepth;
+typedef 47 MyLatency;
+typedef 16 DelayFFDepth;
 module mkAXI4ManagerSubordinateShimDramDelay (AXI4_ManagerSubordinate_Shim#(id_, addr_, data_, awuser_, wuser_, buser_, aruser_, ruser_));
   Bit#(16) latency = fromInteger(valueOf(MyLatency));
   FF#(AXI4_AWFlit#(id_, addr_, awuser_), DelayFFDepth) awff <- mkUGFFDelay(latency);
