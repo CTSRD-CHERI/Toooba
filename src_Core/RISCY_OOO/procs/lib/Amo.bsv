@@ -56,6 +56,7 @@ function MemTaggedData amoExec( AmoInst amo_inst, Bit#(2) wordIdx
     Max:  return sMax(vOld, vIn);
     Minu: return uMin(vOld, vIn);
     Maxu: return uMax(vOld, vIn);
+    DecVersion: return vOld;
   endcase;
 
   Bit#(128) tmpData = pack(doOp(pack(current.data), pack(inpt.data)));
@@ -75,7 +76,12 @@ function MemTaggedData amoExec( AmoInst amo_inst, Bit#(2) wordIdx
   endcase
   Bit#(128) newData = (pack(current.data) & ~(mask << shftAmnt)) | (tmpData << shftAmnt);
 
-  Bool newTag = (amo_inst.func == Swap && amo_inst.width == QWord) ? inpt.tag.captag : False;
+  Bool newTag = case (amo_inst.func) matches
+    Swap: return amo_inst.width == QWord ? inpt.tag.captag : False;
+    DecVersion: return current.tag.captag;
+    default: return False;
+  endcase;
+
   return MemTaggedData { tag: MemTag {captag: newTag, version: current.tag.version} , data: unpack(newData) };
 endfunction
 

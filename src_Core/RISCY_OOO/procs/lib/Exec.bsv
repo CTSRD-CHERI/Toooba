@@ -108,8 +108,11 @@ endfunction
 function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn);
     function Maybe#(CSR_XCapCause) eAuth(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg: case (toCheck.check_authority_src) matches Src1: toCheck.rn1;
                                                                                                                                        Ddc: {1'b1, pack(scrAddrDDC)};
-                                                                                              endcase
-                                                                             , cheri_exc_code: e});
+    function Maybe#(CSR_XCapCause) eSrc2(CHERIException e) = 
+        Valid (CSR_XCapCause {
+            cheri_exc_reg: toCheck.rn2,
+            cheri_exc_code: e
+        });
     Maybe#(CSR_XCapCause) result = Invalid;
     match {.isLoad, .isStore} = case (mem_func)
         Ld, Lr: tuple2(True, False);
@@ -119,8 +122,12 @@ function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapCheck
     Bool storeValidCap = isStore && isValidCap(data) && byteOrTagEn == DataMemAccess(replicate(True));
     if      (!isValidCap(auth))
         result = eAuth(cheriExcTagViolation);
+    else if (toCheck.src2_tag && !isValidCap(data))
+        result = eSrc2(cheriExcTagViolation);
     else if (getKind(auth) != UNSEALED)
         result = eAuth(cheriExcSealViolation);
+    else if (toCheck.src2_unsealed && getKind(data) != UNSEALED)
+        result = eSrc2(cheriExcSealViolation);
     else if (byteOrTagEn == VerMemAccess && isVersioned(auth))
         result = eAuth(cheriExcVersionViolation);
     else if (isLoad && !getHardPerms(auth).permitLoad)

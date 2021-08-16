@@ -1009,6 +1009,25 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capChecks.src1_unversioned = True;
                             dInst.capFunc = CapModify (SetVersion);
                         end
+                        f7_cap_CAmoCDecVersion: begin
+                            dInst.iType = Amo;
+                            regs.dst = Valid(tagged Gpr rd);
+                            regs.src1 = Valid(tagged Gpr rs1);
+                            regs.src2 = Valid(tagged Gpr rs2);
+                            dInst.imm = Valid (0);
+                            dInst.execFunc = tagged Mem MemInst{
+                                mem_func: Amo,
+                                amo_func: DecVersion,
+                                unsignedLd: False,
+                                byteOrTagEn: VerMemAccess,
+                                aq: False,
+                                rl: False,
+                                reg_bounds: True };
+                            dInst.capChecks = memCapChecks(True);
+                            // NB capChecksMem takes care of src1 checks
+                            dInst.capChecks.src2_tag = True;
+                            dInst.capChecks.src2_unsealed = True;
+                        end
                         f7_cap_CSetBounds: begin
                             dInst.capChecks.src1_tag = True;
                             dInst.capChecks.src1_unsealed = True;

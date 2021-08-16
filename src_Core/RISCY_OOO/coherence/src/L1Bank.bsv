@@ -42,6 +42,9 @@ import Types::*;
 import MemoryTypes::*;
 import Amo::*;
 
+// For CapVersion
+import CHERICC_Fat::*;
+
 import Cntrs::*;
 import Vector::*;
 import ConfigReg::*;
@@ -634,6 +637,23 @@ endfunction
             data: unpack(signExtend(wordData[wordIdx]))
           };
         endcase;
+
+        if (req.amoInst.func == DecVersion) begin
+            CapVersion current_ver = current.tag.version;
+            CapVersion expected_ver = req.data.tag.version;
+            if (current_ver == expected_ver) begin
+                CapVersion new_ver = expected_ver - 1; // may underflow
+                // return 1 on success, -1 on success + reached 0
+                resp.data = unpack(new_ver == 0 ? ~0 : 1);
+                current.tag.version = new_ver; // amoExec just passes through current version, captag + data
+                newLine.versions[dataSel] = new_ver;
+            end else begin
+                // return 0 on version mismatch
+                resp.data = unpack(0);
+            end
+            resp.tag.captag = False;
+        end
+
         procResp.respLrScAmo(req.id, resp);
         // calculate new data to write
         let newData = amoExec(req.amoInst, wordIdx, current, req.data);

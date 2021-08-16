@@ -552,8 +552,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // get virtual addr & St/Sc/Amo data
         CapPipe vaddr = modifyOffset(x.rVal1, signExtend(x.imm), True).value;
         CapPipe data = x.rVal2;
-        // version to check from vaddr. May be copied from DDC in read_reg above
-        CapVersion authVersion = getVersion(vaddr);
+        ByteOrTagEn origBE = lsq.getOrigBE(x.ldstq_tag);
+        // For stores, we pass the the authorising version in version field of
+        // stored data. This comes from vaddr (which may be copied from DDC 
+        // in read_reg above).
+        // For StoreVersion the new version comes from addr bits of src2 (see
+        // respSt).
+        // For DecVersion we pass the expected version from src2 in store data.
+        CapVersion authVersion = x.mem_func == Amo && origBE == VerMemAccess ? getVersion(data) : getVersion(vaddr);
         match {.captag, .capdata} = toMem(data);
         MemTaggedData toMemData = MemTaggedData {
           tag : MemTag {
@@ -570,7 +576,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         // get shifted data and BE
         // we can use virtual addr to shift, since page size > dword size
-        ByteOrTagEn origBE = lsq.getOrigBE(x.ldstq_tag);
         function Tuple2#(MemDataByteEn, MemTaggedData) getShiftedBEData(
             Addr addr, MemDataByteEn be, MemTaggedData d);
             Bit#(TLog#(MemDataBytes)) byteOffset = truncate(addr);
@@ -1341,6 +1346,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
         // set wait bit
         waitLrScAmoMMIOResp <= ScAmo;
+
+        MemDataByteEn be = case (lsqDeqSt.shiftedBE) matches 
+            tagged DataMemAccess .dbe: return dbe;
+            tagged VerMemAccess: return unpack(~0); // treat DecVersion as QWord, although data is not written
+            default: ?;
+        endcase;
+
         // send to mem
         ProcRq#(DProcReqId) req = ProcRq {
             id: 0, // id does not matter
@@ -1350,13 +1362,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             // XXX Amo uses **original** data (firstSt.stData is the original
             // data for Amo). AMO doesn't use BE. Sc uses **shifted** BE and
             // data (firstSt.stData is shifted for Sc).
-            byteEn: lsqDeqSt.shiftedBE.DataMemAccess,
+            byteEn: be,
             data: lsqDeqSt.stData,
             amoInst: AmoInst {
                 func: lsqDeqSt.amoFunc,
-                width: (pack(lsqDeqSt.shiftedBE) == ~0) ? QWord :
-                       (pack(lsqDeqSt.shiftedBE)[15:8] == ~0) ? DWord :
-                       (pack(lsqDeqSt.shiftedBE)[7:0] == ~0) ? DWord : Word,
+                width: (pack(be) == ~0) ? QWord :
+                       (pack(be)[15:8] == ~0) ? DWord :
+                       (pack(be)[7:0] == ~0) ? DWord : Word,
                 aq: lsqDeqSt.acq,
                 rl: lsqDeqSt.rel
             },
