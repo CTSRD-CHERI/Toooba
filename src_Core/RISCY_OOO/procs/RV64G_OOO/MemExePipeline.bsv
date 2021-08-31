@@ -556,8 +556,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // For stores, we pass the the authorising version in version field of
         // stored data. This comes from vaddr (which may be copied from DDC 
         // in read_reg above).
-        // For StoreVersion the new version comes from addr bits of src2 (see
-        // respSt).
+        // For StoreVersion the new version comes from addr bits of src2/data
+        // (see respSt).
         // For DecVersion we pass the expected version from src2 in store data.
         CapVersion authVersion = x.mem_func == Amo && origBE == VerMemAccess ? getVersion(data) : getVersion(vaddr);
         match {.captag, .capdata} = toMem(data);
@@ -1063,8 +1063,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // get resp data (need shifting)
         let d <- toGet(respLrScAmoQ).get;
         MemTaggedData resp = gatherLoad(lsqDeqLd.paddr, lsqDeqLd.byteOrTagEn, lsqDeqLd.unsignedLd, d);
+
+        let auth_version = lsqDeqLd.auth_version;
+        Maybe#(Trap) versionFault = Invalid;
+        if (auth_version != 0 && (auth_version != d.tag.version)) begin
+            versionFault = Valid(Exception(excVersionFault));
+        end
+
         // write reg file & set ROB as Executed & wakeup rs
-        if(lsqDeqLd.dst matches tagged Valid .dst) begin
+        if(lsqDeqLd.dst matches tagged Valid .dst &&& !isValid(versionFault)) begin
             CapPipe dataUnpacked = fromMem(tuple2(resp.tag.captag, pack(resp.data)));
             dataUnpacked = setValidCap(dataUnpacked, lsqDeqLd.allowCap && isValidCap(dataUnpacked));
             inIfc.writeRegFile(dst.indx, dataUnpacked);
@@ -1075,7 +1082,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
         inIfc.rob_setExecuted_deqLSQ(
             lsqDeqLd.instTag,
-            Invalid,
+            versionFault,
             Invalid
 `ifdef RVFI
             , ExtraTraceBundle{
