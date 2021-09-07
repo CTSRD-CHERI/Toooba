@@ -534,6 +534,7 @@ endfunction
             Lr: begin
                 procResp.respLrScAmo(req.id, getTaggedDataAt(curLine, dataSel));
                 // set link addr
+                // XXX should prob. not set linkAddr if Lr fails due to version mismatch!
                 linkAddr <= Valid (getLineAddr(req.addr));
             end
             Amo: begin
@@ -542,11 +543,15 @@ endfunction
             Sc: begin
                 // check Sc succeeds or not
                 Bool succeed = linkAddr == Valid (getLineAddr(req.addr));
+                let auth_version = req.data.tag.version;
+                Bool version_match = auth_version == 0 || auth_version == curLine.versions[dataSel];
                 // resp to proc
                 MemTaggedData respVal = succeed ? fromInteger(valueof(ScSuccVal)) : fromInteger(valueof(ScFailVal));
+                // smuggle the version match result in version field
+                respVal.tag.version = version_match ? 0 : 1;
                 procResp.respLrScAmo(req.id, respVal);
                 // calculate new data to write
-                if(succeed) begin
+                if(version_match && succeed) begin
                     let taggedData = getTaggedDataAt(curLine, dataSel);
                     let newTaggedData =
                       mergeMemTaggedDataBE(taggedData, req.data, zeroExtend(pack(req.byteEn)));
@@ -638,7 +643,12 @@ endfunction
           };
         endcase;
 
+
+        let auth_version = req.data.tag.version;
+        Bool version_match = auth_version == 0 || auth_version == current.tag.version;
+
         if (req.amoInst.func == DecVersion) begin
+            version_match  =  True; // already know auth_version == 0, req version contains expected version
             CapVersion current_ver = current.tag.version;
             CapVersion expected_ver = req.data.tag.version;
             if (current_ver == expected_ver) begin
@@ -654,10 +664,14 @@ endfunction
             resp.tag.captag = False;
         end
 
+        // we signal version mismatch to mem pipeline by returning non-zero version
+        resp.tag.version = version_match ? 0 : 1;
+
         procResp.respLrScAmo(req.id, resp);
         // calculate new data to write
         let newData = amoExec(req.amoInst, wordIdx, current, req.data);
-        newLine = setTaggedDataAt(newLine, dataSel, newData);
+        if (version_match)
+            newLine = setTaggedDataAt(newLine, dataSel, newData);
         // deq pipeline or swap in successor
         pipeline.deqWrite(succ, RamData {
             info: CacheInfo {

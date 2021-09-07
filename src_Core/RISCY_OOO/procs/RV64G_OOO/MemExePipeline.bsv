@@ -1421,8 +1421,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         waitLrScAmoMMIOResp <= Invalid;
         // get resp data (no need to shift for Sc and Amo)
         MemTaggedData resp <- toGet(respLrScAmoQ).get;
+        Maybe#(Trap) versionFault = resp.tag.version == 0 ? Invalid : Valid(Exception(excVersionFault)); // cache writes non-zero version on failure due to version mismatch
         // write reg file & set ROB as Executed & wake up rs
-        if(lsqDeqSt.dst matches tagged Valid .dst) begin
+        if(lsqDeqSt.dst matches tagged Valid .dst &&& !isValid(versionFault)) begin
             CapPipe dataUnpacked = fromMem(tuple2(resp.tag.captag, pack(resp.data)));
             dataUnpacked = setValidCap(dataUnpacked, lsqDeqSt.allowCapAmoLd && isValidCap(dataUnpacked));
             inIfc.writeRegFile(dst.indx, dataUnpacked);
@@ -1431,7 +1432,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             inIfc.rob_setExecuted_doFinishMem_RegData (lsqDeqSt.instTag, resp);
 `endif
         end
-        inIfc.rob_setExecuted_deqLSQ(lsqDeqSt.instTag, Invalid, Invalid
+        inIfc.rob_setExecuted_deqLSQ(lsqDeqSt.instTag, versionFault, Invalid
 `ifdef RVFI
             , ExtraTraceBundle{
                 regWriteData: fromMemTaggedData(resp),
