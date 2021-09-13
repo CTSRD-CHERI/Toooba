@@ -292,7 +292,7 @@ module mkITlb(ITlb::ITlb);
                 eparvm_info.sanctum_evbase = maxBound;
                 eparvm_info.sanctum_evmask = 0;
                 if ((vm_info.prv == prvM ? (outOfProtectionDomain(parvm_info,vaddr) && outOfProtectionDomain(eparvm_info,vaddr)) : outOfProtectionDomain(vm_info, vaddr))) begin
-                    hitQ.enq(tuple2(?, Valid (excInstAccessFault)));
+                    hitQ.enq(tuple3(?, Valid (excInstAccessFault), False));
                 end
 `else
                 // No security check

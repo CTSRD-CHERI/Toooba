@@ -665,7 +665,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         let cause = x.cause;
         if(verbose) $display("[doRenaming] mem inst: ", fshow(x));
 
-        Addr fallthrough_pc = ((orig_inst[1:0] == 2'b11) ? pc + 4 : pc + 2);
+        CapMem fallthrough_pc = ((orig_inst[1:0] == 2'b11) ? pc + 4 : pc + 2);
 
         // update prev epoch
         epochManager.updatePrevEpoch[0].update(main_epoch);
@@ -730,7 +730,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 $display("pc : %x , hash(pc) : %x", pc, dum);
                 // put in ldstq
                 if(isLdQ) begin
-                    lsq.enqLd(inst_tag, mem_inst, allow_cap, phy_regs.dst, spec_bits, hash(getAddr(pc)));
+                    //lsq.enqLd(inst_tag, mem_inst, allow_cap, phy_regs.dst, spec_bits, hash(getAddr(pc)));
+                    lsq.enqLd(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)));
                 end
                 else begin
                     lsq.enqSt(inst_tag, mem_inst, phy_regs.dst, spec_bits);
@@ -755,11 +756,12 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 orig_inst: orig_inst,
                                 iType: dInst.iType,
                                 dst: arch_regs.dst,
-                                dst_data: ?,    // Available only after execution
 `ifdef INCLUDE_TANDEM_VERIF
+                                dst_data: ?,    // Available only after execution
                                 store_data: ?,
                                 store_data_BE: ?,
 `endif
+                                scr: dInst.scr,
                                 csr: dInst.csr,
                                 claimed_phy_reg: True, // XXX we always claim a free reg in rename
                                 trap: Invalid, // no trap

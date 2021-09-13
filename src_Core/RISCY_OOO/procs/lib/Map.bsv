@@ -140,12 +140,8 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     Reg#(Bool) clearReg <- mkReg(True);
     Reg#(ix) clearCount <- mkReg(0);
     (* fire_when_enabled, no_implicit_conditions *)
-    rule updateCanon;
-        if (clearReg) begin
-            for (Integer i = 0; i < a; i = i + 1) mem[i].wrReq(clearCount, unpack(0));
-            clearCount <= clearCount + 1;
-            if (clearCount == ~0) clearReg <= False;
-        end else if (updateFresh) begin
+    rule updateCanon(!clearReg);
+        if (updateFresh) begin
             let u = updateReg;
             Bit#(TLog#(as)) way = wayNext;
             for (Integer i = 0; i < a; i = i + 1)
@@ -158,6 +154,13 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
             wayNext <= (wayNext == fromInteger(a-1)) ? 0 : (wayNext + 1);
         end
     endrule
+    rule doClear(clearReg);
+            for (Integer i = 0; i < a; i = i + 1) mem[i].wrReq(clearCount, unpack(0));
+            clearCount <= clearCount + 1;
+            if (clearCount == ~0) clearReg <= False;
+
+    endrule
+
 
     method Action update(MapKeyIndex#(ky,ix) ki, vl value);
         updateReg <= MapKeyIndexValue{key: ki.key, index: ki.index, value: value};

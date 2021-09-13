@@ -98,6 +98,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
     Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CapMem), BtbAssociativity))
         records <- replicateM(mkMapLossyBRAM);
     RWire#(BtbUpdate) updateEn <- mkRWire;
+    PulseWire flushing <- mkPulseWire;
 
     function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
     function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
@@ -108,7 +109,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
 
     // no flush, accept update
     (* fire_when_enabled, no_implicit_conditions *)
-    rule canonUpdate(updateEn.wget matches tagged Valid .upd);
+    rule canonUpdate(!flushing &&& updateEn.wget matches tagged Valid .upd);
         let pc = upd.pc;
         let nextPc = upd.nextPc;
         let taken = upd.taken;
@@ -142,7 +143,8 @@ module mkBtbCore(NextAddrPred#(hashSz))
     endmethod
 
 `ifdef SECURITY
-    method Action flush method Action flush;
+    method Action flush;
+        flushing.send();
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) records[i].clear;
     endmethod
     method flush_done = records[0].clearDone;

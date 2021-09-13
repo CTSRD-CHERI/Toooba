@@ -107,10 +107,10 @@ typedef L1Way LLCRqId;
 
 `ifdef USE_LLC_MSHR_SECURE_MODEL
 module mkLastLvCRqMshr(
-    LLCRqMshr#(LLChildNum, LLCRqNum, LLWay, LLTag, cRqT)
+    LLCRqMshr#(LLCRqNum, LLWay, LLTag, Vector#(LLChildNum, DirPend), cRqT)
 ) provisos(
     Alias#(cRqT, LLRq#(LLCRqId, LLCDmaReqId, LLChild))
-);
+);    
     function Addr getAddr(cRqT r) = r.addr;
     LLCRqMshrSecureModel#(
         `SIM_LOG_LLC_MSHR_BANK_NUM, LLCRqNum, LLWay, LLTag, Vector#(LLChildNum, DirPend), cRqT

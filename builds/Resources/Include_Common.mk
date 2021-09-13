@@ -86,6 +86,9 @@ BSC_COMPILATION_FLAGS += \
 	-D MEM64 \
 	-D RISCV \
 	-D PERFORMANCE_MONITORING \
+	-D SECURITY \
+	-D SIM_LOG_LLC_MSHR_BANK_NUM=2 \
+	-D SIM_LLC_ARBITER_NUM=2 \
 	-D TSO_MM \
 	-keep-fires -aggressive-conditions -no-warn-action-shadowing -check-assert \
 	-suppress-warnings G0020 -steps-max-intervals 10000000   \
