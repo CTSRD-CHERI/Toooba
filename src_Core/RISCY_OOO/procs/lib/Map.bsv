@@ -183,5 +183,5 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
         return readVal;
     endmethod
     method clear if (!clearReg) = clearReg._write(True);
-    method clearDone = clearReg;
+    method clearDone = !clearReg;
 endmodule
