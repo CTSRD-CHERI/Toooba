@@ -67,6 +67,7 @@ import SplitLSQ::*;
 import CHERICap::*;
 import CHERICC_Fat::*;
 import ISA_Decls_CHERI::*;
+import StatCounters::*;
 
 import Cur_Cycle :: *;
 
@@ -324,8 +325,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     );
         fetchStage.pipelines[0].deq;
 `ifdef INCLUDE_GDB_CONTROL
-        fa_step_check;
-
        if (verbosity >= 1) begin
           if (firstTrap == tagged Valid (tagged Interrupt intrDebugHalt))
              $display ("%0d: %m.renameStage.doRenaming_Trap: intrDebugHalt", cur_cycle);
@@ -394,6 +393,17 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         else if (firstTrap == tagged Valid (tagged Exception excBreakpoint)) begin
             inIfc.issueCsrInstOrInterrupt;
         end
+`endif
+
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+        let validPc = (x.orig_inst[1:0] != 2'b11) ? addPc(pc,2) : addPc(pc,4);
+        if((ppc != validPc)) begin
+            EventsTransExe events = unpack(0);
+            events.evt_WILD_EXCEPTION = 1;
+            events_reg <= events;
+        end
+`endif
 `endif
 
 `ifdef CHECK_DEADLOCK
@@ -1177,7 +1187,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 `endif
 `ifdef PERFORMANCE_MONITORING
         EventsTransExe events = unpack(0);
-        events.evt_RENAMED_INST = renameCnt;
+        events.evt_RENAMED_INST = zeroExtend(renameCnt);
         events_reg <= events;
 `endif
 

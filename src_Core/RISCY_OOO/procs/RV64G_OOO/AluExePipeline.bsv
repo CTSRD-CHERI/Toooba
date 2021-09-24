@@ -44,6 +44,7 @@ import BuildVector::*;
 import Cntrs::*;
 import Types::*;
 import ProcTypes::*;
+import DReg::*;
 import SynthParam::*;
 import Exec::*;
 import Performance::*;
@@ -58,6 +59,11 @@ import Bypass::*;
 import CHERICap::*;
 import CHERICC_Fat::*;
 import ISA_Decls_CHERI::*;
+`ifdef PERFORMANCE_MONITORING
+import BlueUtils::*;
+import StatCounters::*;
+`endif
+
 
 import Cur_Cycle :: *;
 
@@ -194,6 +200,15 @@ interface AluExeInput;
 
     // performance
     method Bool doStats;
+
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+    // check previous branch targets
+    method Bool checkTarget(CapMem ppc);
+    // check (previous) return targets
+    method Bool checkReturnTarget(CapMem ppc);
+`endif
+`endif
 endinterface
 
 interface AluExePipeline;
@@ -202,10 +217,16 @@ interface AluExePipeline;
     interface ReservationStationAlu rsAluIfc;
     interface SpeculationUpdate specUpdate;
     method Data getPerf(ExeStagePerfType t);
+
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+    method EventsTransExe events;
+`endif
+`endif
 endinterface
 
 module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
-    Bool verbose = False;
+    Bool verbose = True;
     Integer verbosity = 0;
 
     // alu reservation station
@@ -219,6 +240,12 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
     // index to send bypass, ordering doesn't matter
     Integer exeSendBypassPort = 0;
     Integer finishSendBypassPort = 1;
+
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+    Array#(Reg#(EventsTransExe)) events_reg <- mkDRegOR(2, unpack(0));
+`endif
+`endif
 
 `ifdef PERF_COUNT
     // performance counters
@@ -281,6 +308,33 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
         let pc = inIfc.rob_getPC(x.tag);
         let ppc = inIfc.rob_getPredPC(x.tag);
         let orig_inst = inIfc.rob_getOrig_Inst (x.tag);
+
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+        let ppc_addr = getAddr(ppc);
+        let pc_addr = getAddr(pc);
+        EventsTransExe events = unpack(0);
+        if(x.dInst.iType == Br || x.dInst.iType == CJAL || x.dInst.iType == J) begin
+            Bit#(32) imm = fromMaybe(32'h00000000, x.dInst.imm);
+            let val = pc_addr + signExtend(imm);
+            if((val != ppc_addr) && (ppc_addr != pc_addr + 2) && (ppc_addr != pc_addr + 4)) begin
+                events.evt_WILD_JUMP = 1;
+                events_reg[1] <= events;
+            end
+        end
+
+        
+
+        else if(x.dInst.iType == CJALR || x.dInst.iType == Jr) begin
+            let res_targets = inIfc.checkTarget(ppc);
+            let res_ret_targets = inIfc.checkReturnTarget(ppc);
+            if(!res_targets && !res_ret_targets && (ppc_addr != pc_addr + 2) && (ppc_addr != pc_addr + 4)) begin
+                events.evt_WILD_JUMP = 1;
+                events_reg[1] <= events;
+            end
+        end
+`endif
+`endif
 
         // go to next stage
         regToExeQ.enq(ToSpecFifo {
@@ -395,6 +449,20 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
 `endif
         );
 
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+        // get PC and PPC
+        let pc = getAddr(x.controlFlow.pc);
+        let ppc = getAddr(x.controlFlow.nextPc);
+        let validPc = x.isCompressed ? (pc + 2) : (pc + 4);
+        if(x.capException matches tagged Valid .exc &&& (ppc != validPc)) begin
+            EventsTransExe events = unpack(0);
+            events.evt_WILD_EXCEPTION = 1;
+            events_reg[0] <= events;
+        end
+`endif
+`endif
+
         // handle spec tags for branch predictions
         // TODO what happens here if we trap?
         (* split *)
@@ -467,4 +535,11 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
             default: 0;
         endcase);
     endmethod
+
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+    method events = events_reg[0];
+`endif
+`endif
+
 endmodule

@@ -39,6 +39,7 @@
 
 `include "ProcConfig.bsv"
 
+
 import Vector::*;
 import BuildVector::*;
 import DefaultValue::*;
@@ -62,6 +63,8 @@ import Performance::*;
 `ifdef PERFORMANCE_MONITORING
 import PerformanceMonitor::*;
 import BlueUtils::*;
+import StatCounters::*;
+import GenerateHPMVector::*;
 `endif
 import HasSpecBits::*;
 import Exec::*;
@@ -101,6 +104,8 @@ import CommitStage::*;
 import Bypass::*;
 import CHERICap::*;
 import CHERICC_Fat::*;
+import Bag::*;
+import VnD::*;
 
 `ifdef RVFI_DII
 import Toooba_RVFI_DII_Bridge::*;
@@ -206,8 +211,8 @@ interface Core;
 `endif
 
 `ifdef PERFORMANCE_MONITORING
-    method Action events_llc(EventsCache events);
-    method Action events_tgc(Vector#(7, Bit#(1)) events);
+    method Action events_llc(EventsLL events);
+    method Action events_tgc(EventsCacheCore events);
 `endif
 endinterface
 
@@ -220,6 +225,10 @@ interface CoreFixPoint;
     interface Reg#(Bool) doStatsIfc;
 endinterface
 
+`ifdef CONTRACTS_VERIFY
+typedef 32 BagSz;
+`endif
+
 typedef enum {
 `ifdef INCLUDE_GDB_CONTROL
    CORE_HALTING,
@@ -229,24 +238,6 @@ typedef enum {
    } Core_Run_State
 deriving (Bits, Eq, FShow);
 
-`ifdef PERFORMANCE_MONITORING
-instance BitVectorable #(EventsCore, SizeOf#(SupCnt), EventsCoreElements) provisos (Bits #(EventsCore, m));
-   function Vector#(EventsCoreElements, SupCnt) to_vector(EventsCore e) =
-      reverse(unpack(pack(e)));
-endinstance
-instance BitVectorable #(EventsCoreMem, SizeOf#(HpmRpt), EventsCoreMemElements) provisos (Bits #(EventsCoreMem, m));
-   function Vector#(EventsCoreMemElements, HpmRpt) to_vector(EventsCoreMem e) =
-      reverse(unpack(pack(e)));
-endinstance
-instance BitVectorable #(EventsTransExe, SizeOf#(SupCnt), EventsTransExeElements) provisos (Bits #(EventsTransExe, m));
-   function Vector#(EventsTransExeElements, SupCnt) to_vector(EventsTransExe e) =
-      reverse(unpack(pack(e)));
-endinstance
-instance BitVectorable #(EventsCache, SizeOf#(HpmRpt), EventsCacheElements) provisos (Bits #(EventsCache, m));
-   function Vector#(EventsCacheElements, HpmRpt) to_vector(EventsCache e) =
-      reverse(unpack(pack(e)));
-endinstance
-`endif
 
 (* synthesize *)
 module mkCore#(CoreId coreId)(Core);
@@ -303,6 +294,19 @@ module mkCore#(CoreId coreId)(Core);
     EpochManager epochManager <- mkEpochManager;
     SpecTagManager specTagManager <- mkSpecTagManager;
     ReorderBufferSynth rob <- mkReorderBufferSynth;
+
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+    Vector#(SupSize, Bag#(BagSz, CapMem, CapMem)) bags;
+    for(Integer i = 0; i < valueof(SupSize); i=i+1) begin
+        bags[i] <- mkSmallBag;
+    end
+    Vector#(SupSize, Bag#(BagSz, CapMem, CapMem)) returnBags;
+    for(Integer i = 0; i < valueof(SupSize); i=i+1) begin
+        returnBags[i] <- mkSmallBag;
+    end
+`endif
+`endif
 
     // We have two scoreboards: one conservative and other aggressive
     // - Aggressive sb is checked at rename stage, so inst after rename may be issued early
@@ -423,6 +427,24 @@ module mkCore#(CoreId coreId)(Core);
                 endmethod
                 method correctSpec = globalSpecUpdate.correctSpec[finishAluCorrectSpecPort(i)].put;
                 method doStats = doStatsReg._read;
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+                method Bool checkTarget(CapMem ppc);
+                    Bool ret = False;
+                    for(Integer j = 0; j < valueof(SupSize); j=j+1) begin
+                        ret = ret || bags[j].isMember(ppc).v;
+                    end
+                    return ret;
+                endmethod
+                method Bool checkReturnTarget(CapMem ppc);
+                    Bool ret = False;
+                    for(Integer j = 0; j < valueof(SupSize); j=j+1) begin
+                        ret = ret || returnBags[j].isMember(ppc).v;
+                    end
+                    return ret;
+                endmethod
+`endif
+`endif
             endinterface);
             aluExe[i] <- mkAluExePipeline(aluExeInput);
             // truly call fetch method to train branch predictor
@@ -475,6 +497,12 @@ module mkCore#(CoreId coreId)(Core);
             method setRegReadyAggr_forward = writeAggr(forwardWrAggrPort);
             method writeRegFile = writeCons(memWrConsPort);
             method doStats = doStatsReg._read;
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+            method rob_getPredPC = rob.getOrigPredPC[valueof(AluExeNum)].get; // last getOrigPredPC port
+            method rob_getOrig_Inst = rob.getOrig_Inst[valueof(AluExeNum)].get; // last getOrig_Inst port
+`endif
+`endif
         endinterface);
         let memExe <- mkMemExePipeline(memExeInput);
 
@@ -675,6 +703,26 @@ module mkCore#(CoreId coreId)(Core);
 `endif
         endmethod
 
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+        method Action updateTargets(Vector#(SupSize, Maybe#(CapMem)) targets);
+            for(Integer i = 0; i < valueof(SupSize); i=i+1) begin
+                if(targets[i] matches tagged Valid .tar) begin
+                    bags[i].insert(tar, tar);
+                end
+            end
+        endmethod
+
+        method Action updateReturnTargets(Vector#(SupSize, Maybe#(CapMem)) returnTargets);
+            for(Integer i = 0; i < valueof(SupSize); i=i+1) begin
+                if(returnTargets[i] matches tagged Valid .retTar) begin
+                    returnBags[i].insert(retTar, retTar);
+                end
+            end
+        endmethod
+`endif
+`endif
+
 `ifdef INCLUDE_TANDEM_VERIF
        interface v_to_TV = map (toPut, v_f_to_TV);
 `endif
@@ -809,9 +857,6 @@ module mkCore#(CoreId coreId)(Core);
 `endif // SELF_INV_CACHE
 
     rule readyToFetch(
-`ifdef INCLUDE_GDB_CONTROL
-        (rg_core_run_state == CORE_RUNNING) &&
-`endif
         !flush_reservation && !flush_tlbs && !update_vm_info
         && iTlb.flush_done && dTlb.flush_done
 `ifdef SECURITY_OR_INCLUDE_GDB_CONTROL
@@ -827,16 +872,19 @@ module mkCore#(CoreId coreId)(Core);
 `endif
     );
         fetchStage.done_flushing();
+    endrule
 
 `ifdef INCLUDE_GDB_CONTROL
-        if (commitStage.is_debug_halted) begin
-           started           <= False;
-           rg_core_run_state <= CORE_HALTING;
-           if (verbosity >= 1)
-              $display ("%0d: %m.rule readyToFetch: halting for debug mode", cur_cycle);
-        end
-`endif
+    rule readyToHalt(
+        (rg_core_run_state == CORE_RUNNING) &&
+        commitStage.is_debug_halted
+    );
+        started           <= False;
+        rg_core_run_state <= CORE_HALTING;
+        if (verbosity >= 1)
+           $display ("%0d: %m.rule readyToHalt: halting for debug mode", cur_cycle);
     endrule
+`endif
 
 `ifdef PERF_COUNT
     // incr cycle count
@@ -1101,33 +1149,43 @@ module mkCore#(CoreId coreId)(Core);
      // Each cache and TLB pair uses the same struct (EventsCache), but the cache accesses
      // different fields than the TLB, which makes it safe to combine them
 
-     Reg#(EventsCache) events_llc_reg <- mkRegU;
-     Reg#(Vector#(7, Bit#(1))) events_tgc_reg <- mkRegU;
+     Reg#(EventsLL) events_llc_reg <- mkRegU;
+     Reg#(EventsCacheCore) events_tgc_reg <- mkRegU;
      rule report_events;
          EventsCore events = unpack(pack(commitStage.events));
          events.evt_REDIRECT = zeroExtend(pack(fetchStage.redirect_evt));
          hpm_core_events[1] <= events;
      endrule
 
-     Vector #(1, Bit #(Report_Width)) null_evt = replicate (0);
-     Vector #(31, Bit #(Report_Width)) mem_core_evts_vec =  to_large_vector (coreFix.memExeIfc.events);
-     Vector #(31, Bit #(Report_Width)) other_core_evts_vec = to_large_vector (hpm_core_events[0]);
-     Vector #(31, Bit #(Report_Width)) core_evts_vec = unpack(pack(mem_core_evts_vec) | pack(other_core_evts_vec));
-     EventsCache instMem = unpack(pack(iMem.events) | pack(iTlb.events));
-     Vector #(16, Bit #(Report_Width)) imem_evts_vec = to_large_vector (instMem);
-     EventsCache dataMem = unpack(pack(dMem.events) | pack(dTlb.events));
-     Vector #(16, Bit #(Report_Width)) dmem_evts_vec = to_large_vector (dataMem);
-     Vector #(32, Bit #(Report_Width)) tgc_evts_vec = to_large_vector (events_tgc_reg);
-     EventsCache llMem = unpack(pack(events_llc_reg) | pack(l2Tlb.events));
-     Vector #(16, Bit #(Report_Width)) llc_evts_vec = to_large_vector (llMem);
-     Vector #(16, Bit #(Report_Width)) trans_exe_evts_vec = to_large_vector (renameStage.events);
+     EventsCore core_evts = unpack(pack(coreFix.memExeIfc.events) | pack(hpm_core_events[0]));
+     EventsL1I imem_evts = unpack(pack(iMem.events) | pack(iTlb.events));
+     EventsL1D dmem_evts = unpack(pack(dMem.events) | pack(dTlb.events));
+     EventsCacheCore tgc_evts = events_tgc_reg;
+     EventsLL llmem_evts = unpack(pack(events_llc_reg) | pack(l2Tlb.events));
+     Maybe#(EventsTransExe) mab_trans_exe = tagged Invalid;
 
-     let events = append (null_evt, core_evts_vec);
-     events = append (events, imem_evts_vec);
-     events = append (events, dmem_evts_vec);
-     events = append (events, tgc_evts_vec);
-     events = append (events, llc_evts_vec);
-     events = append (events, trans_exe_evts_vec);
+
+`ifdef CONTRACTS_VERIFY
+     EventsTransExe texe_evts = renameStage.events;
+     Bit#(Report_Width) wildJumps = 0;
+     Bit#(Report_Width) wildExceptions = texe_evts.evt_WILD_EXCEPTION;
+     for(Integer i = 0; i < valueof(AluExeNum); i = i+1) begin
+          let alu_events = coreFix.aluExeIfc[i].events;
+          wildJumps = wildJumps + alu_events.evt_WILD_JUMP;
+          wildExceptions = wildExceptions + alu_events.evt_WILD_EXCEPTION;
+     end
+
+     texe_evts.evt_WILD_JUMP = wildJumps;
+     texe_evts.evt_WILD_EXCEPTION = wildExceptions;
+     mab_trans_exe = tagged Valid texe_evts;
+`endif
+
+     let ev_struct = HPMEvents{mab_EventsCore: tagged Valid core_evts, mab_EventsL1I: tagged Valid imem_evts,
+                               mab_EventsL1D: tagged Valid dmem_evts, mab_EventsLL: tagged Valid llmem_evts,
+                               mab_EventsCacheCore: tagged Valid tgc_evts, mab_EventsTransExe: mab_trans_exe,
+                               mab_AXI4_Slave_Events: tagged Invalid, mab_AXI4_Master_Events: tagged Invalid};
+
+     let events = generateHPMVector(ev_struct);
 
      (* fire_when_enabled, no_implicit_conditions *)
      rule rl_send_perf_evts;

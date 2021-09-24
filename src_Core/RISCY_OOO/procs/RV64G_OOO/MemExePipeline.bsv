@@ -72,6 +72,8 @@ import CacheUtils::*;
 `ifdef PERFORMANCE_MONITORING
 import PerformanceMonitor::*;
 import BlueUtils::*;
+import StatCounters::*;
+import DReg::*;
 `endif
 
 import Cur_Cycle :: *;
@@ -219,6 +221,13 @@ interface MemExeInput;
 
     // performance
     method Bool doStats;
+
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+    method CapMem rob_getPredPC(InstTag t);
+    method Bit #(32) rob_getOrig_Inst (InstTag t);
+`endif
+`endif
 endinterface
 
 interface MemExePipeline;
@@ -235,7 +244,10 @@ interface MemExePipeline;
 `endif
     method Data getPerf(ExeStagePerfType t);
 `ifdef PERFORMANCE_MONITORING
-    method EventsCoreMem events;
+    method EventsCore events;
+`ifdef CONTRACTS_VERIFY
+    method EventsTransExe events_trans;
+`endif
 `endif
 endinterface
 
@@ -277,7 +289,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
 
 `ifdef PERFORMANCE_MONITORING
-    Array #(Reg #(EventsCoreMem)) events_reg <- mkDRegOR (5, unpack (0));
+    Array #(Reg #(EventsCore)) events_reg <- mkDRegOR (5, unpack (0));
+`ifdef CONTRACTS_VERIFY
+    Reg#(EventsTransExe) events_trans_reg <- mkDReg(unpack(0));
+`endif
 `endif
 
     // reservation station
@@ -347,7 +362,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end
 `endif
 `ifdef PERFORMANCE_MONITORING
-            EventsCoreMem events = unpack(0);
+            EventsCore events = unpack(0);
             events.evt_LOAD_WAIT = saturating_truncate(lat);
             events.evt_MEM_CAP_LOAD_TAG_SET = (d.tag) ? 1 : 0;
             events_reg[1] <= events;
@@ -375,7 +390,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end
 `endif
 `ifdef PERFORMANCE_MONITORING
-            EventsCoreMem events = unpack(0);
+            EventsCore events = unpack(0);
             if (pack(waitSt.shiftedBE) == -1) events.evt_MEM_CAP_STORE = 1;
             events.evt_STORE_WAIT = saturating_truncate(lat);
             events_reg[2] <= events;
@@ -402,7 +417,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end
 `endif
 `ifdef PERFORMANCE_MONITORING
-            EventsCoreMem events = unpack(0);
+            EventsCore events = unpack(0);
             if (pack(e.byteEn) == -1) events.evt_MEM_CAP_STORE = 1;
             events.evt_STORE_WAIT = saturating_truncate(lat);
             events_reg[2] <= events;
@@ -549,7 +564,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             MemTaggedData d = x.mem_func == Amo ? toMemData : shiftData; // XXX don't shift for AMO
             lsq.updateData(stTag, d);
 `ifdef PERFORMANCE_MONITORING
-            EventsCoreMem events = unpack(0);
+            EventsCore events = unpack(0);
             events.evt_MEM_CAP_STORE_TAG_SET = (d.tag) ? 1 : 0;
             events_reg[4] <= events;
 `endif
@@ -672,6 +687,23 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
                                          );
 
+`ifdef PERFORMANCE_MONITORING
+`ifdef CONTRACTS_VERIFY
+        function Bool is_16b_inst (Bit #(n) inst);
+            return (inst [1:0] != 2'b11);
+        endfunction
+        let pc = inIfc.rob_getPC(x.tag);
+        let ppc = inIfc.rob_getPredPC(x.tag);
+        let inst = inIfc.rob_getOrig_Inst(x.tag);
+        let validPc = is_16b_inst(inst) ? addPc(pc,2) : addPc(pc,4);
+        if(cause matches tagged Valid .c &&& (ppc != validPc)) begin
+            EventsTransExe events_trans = unpack(0);
+            events_trans.evt_WILD_EXCEPTION = 1;
+            events_trans_reg <= events_trans;
+        end
+`endif
+`endif
+
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE
@@ -724,7 +756,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         SBSearchRes sbRes = stb.search(info.paddr, info.shiftedBE);
 `endif
 `ifdef PERFORMANCE_MONITORING
-        EventsCoreMem events = unpack(0);
+        EventsCore events = unpack(0);
         if (info.shiftedBE == DataMemAccess (unpack(~0))) events.evt_MEM_CAP_LOAD = 1;
 `endif
         // search LSQ
@@ -1341,7 +1373,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
 `endif
 `ifdef PERFORMANCE_MONITORING
-        EventsCoreMem events = unpack(0);
+        EventsCore events = unpack(0);
         events.evt_SC_SUCCESS = 1;
         events_reg[3] <= events;
 `endif
@@ -1581,5 +1613,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endmethod
 `ifdef PERFORMANCE_MONITORING
     method events = events_reg[0];
+`ifdef CONTRACTS_VERIFY
+    method events_trans = events_trans_reg;
+`endif
 `endif
 endmodule

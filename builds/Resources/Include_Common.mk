@@ -33,6 +33,21 @@ help:
 all: compile  simulator
 
 # ================================================================
+# Path to RISCY-OOO sources
+
+RISCY_HOME ?= ../../src_Core/RISCY_OOO
+# RISCY_HOME ?= $(HOME)/Projects/RISCV/MIT-riscy/riscy-OOO
+
+RISCY_DIRS = $(RISCY_HOME)/procs/RV64G_OOO:$(RISCY_HOME)/procs/lib:$(RISCY_HOME)/coherence/src:$(RISCY_HOME)/fpgautils/lib
+
+CONNECTAL_DIRS = $(RISCY_HOME)/connectal/bsv:$(RISCY_HOME)/connectal/tests/spi:$(RISCY_HOME)/connectal/lib/bsv
+
+CHERI_DIRS = $(RISCY_HOME)/../../libs/cheri-cap-lib
+
+# ALL_RISCY_DIRS = $(RISCY_DIRS)
+ALL_RISCY_DIRS = $(EXTRA_DIRS):$(RISCY_DIRS):$(CONNECTAL_DIRS):$(CHERI_DIRS)
+
+# ================================================================
 # Search path for bsc for .bsv files
 
 CORE_DIRS = $(REPO)/src_Core/CPU:$(REPO)/src_Core/ISA:$(REPO)/src_Core/Core:$(REPO)/src_Core/PLIC:$(REPO)/src_Core/Debug_Module:$(REPO)/src_Core/BSV_Additional_Libs
@@ -43,7 +58,9 @@ BLUESTUFF_DIRS = $(REPO)/libs/BlueStuff:$(REPO)/libs/BlueStuff/AXI:$(REPO)/libs/
 
 TAGCONTROLLER_DIRS = $(REPO)/libs/TagController/TagController:$(REPO)/libs/TagController/TagController/CacheCore
 
-BSC_PATH = $(BLUESTUFF_DIRS):$(ALL_RISCY_DIRS):$(CORE_DIRS):$(TESTBENCH_DIRS):$(TAGCONTROLLER_DIRS):+
+RISCV_HPM_Events_DIR = $(REPO)/libs/RISCV_HPM_Events
+
+BSC_PATH = $(BLUESTUFF_DIRS):$(ALL_RISCY_DIRS):$(CORE_DIRS):$(TESTBENCH_DIRS):$(TAGCONTROLLER_DIRS):$(RISCV_HPM_Events_DIR):+
 
 # ----------------
 # Top-level file and module
@@ -55,6 +72,23 @@ TOPMODULE ?= mkTop_HW_Side
 # bsc compilation flags
 
 BSC_COMPILATION_FLAGS += \
+	-D BSIM \
+	-D RV64 \
+	-D ISA_PRIV_M  -D ISA_PRIV_U  -D ISA_PRIV_S  \
+	-D SV39  \
+	-D ISA_I  -D ISA_M  -D ISA_A  -D ISA_F  -D ISA_D  -D ISA_FD_DIV  -D ISA_C  \
+	-D SHIFT_BARREL    \
+	-D MULT_SYNTH    \
+	-D Near_Mem_Caches    \
+	-D FABRIC64    \
+	-D CheriBusBytes=8 \
+	-D CheriMasterIDWidth=1 \
+	-D CheriTransactionIDWidth=5 \
+	-D CAP128 -D BLUESIM \
+	-D MEM64 \
+	-D RISCV \
+	-D PERFORMANCE_MONITORING \
+	-D TSO_MM \
 	-keep-fires -aggressive-conditions -no-warn-action-shadowing -check-assert \
 	-suppress-warnings G0020 -steps-max-intervals 10000000   \
 	-steps-warn-interval 1000000 \
@@ -104,18 +138,34 @@ TagTableStructure.bsv: $(REPO)/libs/TagController/tagsparams.py
 	@echo "INFO: Re-generating CHERI tag controller parameters"
 	$^ -v -c $(CAPSIZE) -s $(TAGS_STRUCT:"%"=%) -a $(TAGS_ALIGN) --data-store-base-addr 0x80000000 -b $@ 0x3fffc000 0xbffff000
 	@echo "INFO: Re-generated CHERI tag controller parameters"
-compile: tagsparams
+
+
+.PHONY: generate_hpm_vector
+generate_hpm_vector: GenerateHPMVector.bsv
+GenerateHPMVector.bsv: $(RISCV_HPM_Events_DIR)/parse_counters.py
+	@echo "INFO: Re-generating GenerateHPMVector bluespec file"
+	$^ $(RISCV_HPM_Events_DIR)/counters.yaml Toooba -b $@
+	@echo "INFO: Re-generated GenerateHPMVector bluespec file"
+
+
+.PHONY: stat_counters
+stat_counters: StatCounters.bsv
+StatCounters.bsv: $(RISCV_HPM_Events_DIR)/parse_counters.py
+	@echo "INFO: Re-generating HPM events struct bluepsec file"
+	$^ $(RISCV_HPM_Events_DIR)/counters.yaml Toooba -s $@
+	@echo "INFO: Re-generated HPM events struct bluespec file"
+compile: tagsparams #stat_counters generate_hpm_vector
 
 # ================================================================
 
 .PHONY: clean
 clean:
 	rm -r -f  *~  Makefile_*  symbol_table.txt  build_dir/*  obj_dir Verilog_RTL/*
-	rm -f TagTableStructure.bsv
+	rm -f TagTableStructure.bsv StatCounters.bsv GenerateHPMVector.bsv
 
 .PHONY: full_clean
 full_clean: clean
 	rm -r -f  $(SIM_EXE_FILE)*  *.log  *.vcd  *.hex  Logs/
-	rm -f TagTableStructure.bsv .depends.mk
+	rm -f TagTableStructure.bsv GenerateHPMVector.bsv .depends.mk
 
 # ================================================================
