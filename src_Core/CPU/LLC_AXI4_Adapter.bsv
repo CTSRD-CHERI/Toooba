@@ -120,6 +120,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
 
    FIFOF #(LdMemRq #(idT, childT)) f_pending_reads <- mkFIFOF;
    Reg #(CLine) rg_cline <- mkRegU;
+   Reg #(Vector#(8, Bit#(2))) rg_rusers <- mkRegU;
 
    rule rl_handle_read_req (llc.toM.first matches tagged Ld .ld
                             &&& (ctr_wr_rsps_pending.value == 0));
@@ -151,14 +152,22 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       end
 
       // Shift next 64 bits from fabric into the cache line being assembled
-      let new_cline_tag = { mem_rsp.ruser, pack(getCapTags(rg_cline)) [3:1] };
+      let new_rusers = shiftInAtN(rg_rusers, mem_rsp.ruser);
       let new_cline_data = { mem_rsp.rdata, pack(rg_cline.data) [511:64] };
-      let new_cline = CLine { captags: rg_rd_rsp_beat[0] == 0 ? unpack(new_cline_tag) : rg_cline.captags
-                            , versions: unpack(0) // XXX
+      let new_cline = CLine { captags: ?
+                            , versions: ?
                             , data: unpack(new_cline_data) };
 
       if (mem_rsp.rlast) begin
          let ldreq <- pop (f_pending_reads);
+         Vector#(4, Bit#(4)) packedTags = unpack(pack(new_rusers));
+         function MemTag unpackTag(Bit#(4) v) = MemTag {
+            captag: unpack(v[0]),
+            version: zeroExtend(v[3:1])
+         };
+         Vector#(4, MemTag) memTags = map(unpackTag, packedTags);
+         new_cline.captags = map(getMemTagCapTag, memTags);
+         new_cline.versions = map(getMemTagVersion, memTags);
          MemRsMsg #(idT, childT) resp = MemRsMsg {data:  new_cline,
                                                   child: ldreq.child,
                                                   id:    ldreq.id};
@@ -170,9 +179,11 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
 
          rg_rd_rsp_beat <= 0;
          rg_cline <= unpack(0);
+         rg_rusers <= unpack(0);
       end else begin
          rg_rd_rsp_beat <= rg_rd_rsp_beat + 1;
          rg_cline <= new_cline;
+         rg_rusers <= new_rusers;
       end
    endrule
 
@@ -220,12 +231,16 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       // ================
       Vector #(8, Bit #(8)) line_strb = unpack(pack(wb.byteEn));
       Vector #(4, MemTaggedData) line_data = clineToMemTaggedDataVector(wb.data);
+      function Bit#(4) packTag(MemTag t) = {truncate(t.version), pack(t.captag)};
+      Vector #(4, Bit#(4)) packedTags = map(packTag, map(getTag, line_data));
+      Vector #(8, Bit#(2)) packedTags2 = unpack(pack(packedTags));
       // send AXI4 W flit
       masterPortShim.slave.w.put(AXI4_WFlit {
         wdata:  line_data[rg_wr_req_beat[2:1]].data[rg_wr_req_beat[0]],
         wstrb:  line_strb[rg_wr_req_beat],
         wlast:  rg_wr_req_beat == 7,
-        wuser:  pack(line_data[rg_wr_req_beat[2:1]].tag.captag)});
+        wuser:  packedTags2[rg_wr_req_beat]
+      });
    endrule
 
    // ----------------

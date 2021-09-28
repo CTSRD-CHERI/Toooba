@@ -128,7 +128,7 @@ isa_tests:
 
 # ================================================================
 # Generate Bluespec CHERI tag controller source file
-CAPSIZE = 128
+CAPSIZE = 32
 TAGS_STRUCT = 0 64
 TAGS_ALIGN = 32
 .PHONY: tagsparams

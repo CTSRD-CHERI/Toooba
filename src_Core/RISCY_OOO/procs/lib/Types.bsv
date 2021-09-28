@@ -89,6 +89,7 @@ instance Literal#(MemTaggedData);
   function inLiteralRange(x, i) = i < 2**valueOf(MemDataSz);
 endinstance
 function Bool getMemTagCapTag(MemTag t) = t.captag;
+function CapVersion getMemTagVersion(MemTag t) = t.version;
 function Bool getMemTaggedCapTag(MemTaggedData d) = d.tag.captag;
 function CapVersion getMemTaggedVersion(MemTaggedData t) = t.tag.version;
 function data_res mergeDataBE(data_t0 oldData, data_t1 newData, be_t be)
