@@ -5,6 +5,7 @@
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jessica Clarke
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2021 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -66,6 +67,9 @@ typedef Bit#(TLog#(BtbIndices)) BtbIndex;
 typedef Bit#(TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)) BtbTag;
 typedef Bit#(hashSz) HashedTag#(numeric type hashSz);
 
+typedef 8 CompNumber;
+typedef Bit#(TLog#(CompNumber)) CompIndex;
+
 typedef struct {
     BtbTag tag;
     BtbIndex index;
@@ -83,11 +87,35 @@ typedef struct {
     data d;
 } VnD#(type data) deriving(Bits, Eq, FShow);
 
+typedef struct {
+    Bool v;
+    data d;
+    c_type c;
+} VnDnC#(type data, type c_type) deriving (Bits, Eq, FShow);
+
 (* synthesize *)
 module mkBtb(NextAddrPred#(16));
-    NextAddrPred#(16) btb <- mkBtbCore;
+    NextAddrPred#(16) btb <- mkBtbCoreCID;
     return btb;
 endmodule
+
+//(* synthesize *)
+//module mkBtb(NextAddrPred#(16));
+//    Vector#(CompNumber, NextAddrPred#(16)) btbs <- replicateM(mkBtbCore);
+//    Reg#(CompIndex) cid <- mkReg(0);
+//    method Action put_pc(CapMem pc);
+//        btbs[cid].put_pc(pc);
+//    endmethod
+//    interface pred = btbs[cid].pred;
+//    method Action update(CapMem pc, CapMem brTarget, Bool taken);
+//        btbs[cid].update(pc, brTarget, taken);
+//    endmethod
+//    method Action flush;
+//        btbs[cid].flush;
+//    endmethod
+//    method Bool flush_done = btbs[cid].flush_done;
+//endmodule
+
 
 module mkBtbCore(NextAddrPred#(hashSz))
     provisos (NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
@@ -133,6 +161,72 @@ module mkBtbCore(NextAddrPred#(hashSz))
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1)
             if (records[i].lookupRead matches tagged Valid .record)
                 ppcs[i] = record.v ? Valid(record.d):Invalid;
+        ppcs = rotateBy(ppcs,unpack(-firstBank_reg)); // Rotate firstBank down to zeroeth element.
+        return ppcs;
+    endmethod
+
+    method Action update(CapMem pc, CapMem nextPc, Bool taken);
+        updateEn.wset(BtbUpdate {pc: pc, nextPc: nextPc, taken: taken});
+    endmethod
+
+`ifdef SECURITY
+    method Action flush method Action flush;
+        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) records[i].clear;
+    endmethod
+    method flush_done = records[0].clearDone;
+`else
+    method flush = noAction;
+    method flush_done = True;
+`endif
+endmodule
+
+
+
+module mkBtbCoreCID(NextAddrPred#(hashSz))
+    provisos (NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
+        Add#(1, a__, TDiv#(tagSz, hashSz)),
+    Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
+    // Read and Write ordering doesn't matter since this is a predictor
+    Reg#(BtbBank) firstBank_reg <- mkRegU;
+    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnDnC#(CapMem, CompIndex), BtbAssociativity))
+        records <- replicateM(mkMapLossyBRAM);
+    RWire#(BtbUpdate) updateEn <- mkRWire;
+    Reg#(CompIndex) cid <- mkReg(0);
+
+    function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
+    function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
+    function BtbIndex getIndex(CapMem pc) = getBtbAddr(pc).index;
+    function BtbTag getTag(CapMem pc) = getBtbAddr(pc).tag;
+    function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(CapMem pc) =
+        MapKeyIndex{key: hash(getTag(pc)), index: getIndex(pc)};
+
+    // no flush, accept update
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule canonUpdate(updateEn.wget matches tagged Valid .upd);
+        let pc = upd.pc;
+        let nextPc = upd.nextPc;
+        let taken = upd.taken;
+        /*$display("MapUpdate in BTB - pc %x, bank: %x, taken: %x, next: %x, time: %t",
+                  pc, getBank(pc), taken, nextPc, $time);*/
+        records[getBank(pc)].update(lookupKey(pc), VnDnC{v:taken, d:nextPc, c:cid});
+    endrule
+
+    method Action put_pc(CapMem pc);
+        BtbAddr addr = getBtbAddr(pc);
+        firstBank_reg <= addr.bank;
+        // Start SupSizeX2 BTB lookups, but ensure to lookup in the appropriate
+        // bank for the alignment of each potential branch.
+        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
+            BtbAddr a = unpack(pack(addr) + fromInteger(i));
+            records[a.bank].lookupStart(MapKeyIndex{key: hash(a.tag), index: a.index});
+        end
+    endmethod
+
+    method Vector#(SupSizeX2, Maybe#(CapMem)) pred;
+        Vector#(SupSizeX2, Maybe#(CapMem)) ppcs = replicate(Invalid);
+        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1)
+            if (records[i].lookupRead matches tagged Valid .record)
+                ppcs[i] = (record.v && record.c == cid) ? Valid(record.d):Invalid;
         ppcs = rotateBy(ppcs,unpack(-firstBank_reg)); // Rotate firstBank down to zeroeth element.
         return ppcs;
     endmethod

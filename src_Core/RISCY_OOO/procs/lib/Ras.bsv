@@ -4,6 +4,7 @@
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2021 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -43,6 +44,10 @@ import Ehr::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
 
+//export ReturnAddrStack(..);
+//export mkRas;
+//export RAS;
+
 interface RAS;
     method CapMem first;
     // first pop, then push
@@ -59,8 +64,18 @@ endinterface
 typedef 8 RasEntries;
 typedef Bit#(TLog#(RasEntries)) RasIndex;
 
+typedef 8 CompNumber;
+typedef Bit#(TLog#(CompNumber)) CompIndex;
+
 (* synthesize *)
-module mkRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
+module mkRas(ReturnAddrStack);
+    ReturnAddrStack ras <- mkRasPartition();
+    return ras;
+endmodule
+
+
+
+module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
     Vector#(RasEntries, Ehr#(TAdd#(SupSize, 1), CapMem)) stack <- replicateM(mkEhr(nullCap));
     // head points past valid data
     // to gracefully overflow, head is allowed to overflow to 0 and overwrite the oldest data
@@ -93,6 +108,61 @@ module mkRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEn
                     stack[h][i] <= addr;
                 end
                 head[i] <= h;
+            endmethod
+        endinterface);
+    end
+
+    interface ras = rasIfc;
+
+`ifdef SECURITY
+    method Action flush if(flushDone);
+        flushDone <= False;
+    endmethod
+    method flush_done = flushDone._read;
+`else
+    method flush = noAction;
+    method flush_done = True;
+`endif
+endmodule
+
+
+module mkRasPartition(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
+    Vector#(CompNumber, Vector#(RasEntries, Ehr#(TAdd#(SupSize, 1), CapMem))) stack;
+    for(Integer i = 0; i < valueOf(CompNumber); i = i + 1)
+            stack[i] <- replicateM(mkEhr(nullCap));
+    // head points past valid data
+    // to gracefully overflow, head is allowed to overflow to 0 and overwrite the oldest data
+    Vector#(CompNumber, Ehr#(TAdd#(SupSize, 1), RasIndex)) head <- replicateM(mkEhr(0));
+
+    Reg#(CompIndex) cid <- mkReg(0);
+
+`ifdef SECURITY
+    Reg#(Bool) flushDone <- mkReg(True);
+
+    rule doFlush(!flushDone);
+        writeVReg(getVEhrPort(stack, valueof(SupSize)), replicate(0));
+        head[valueof(SupSize)] <= 0;
+        flushDone <= True;
+    endrule
+`endif
+
+    Vector#(SupSize, RAS) rasIfc;
+    for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+        rasIfc[i] = (interface RAS;
+            method CapMem first;
+                return stack[cid][head[cid][i]][i];
+            endmethod
+            method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
+                // first pop, then push
+                RasIndex h = head[cid][i];
+                if(pop) begin
+                    h = h - 1;
+                end
+                if(pushAddr matches tagged Valid .addr) begin
+                    h = h + 1;
+                    stack[cid][h][i] <= addr;
+                end
+                head[cid][i] <= h;
             endmethod
         endinterface);
     end
