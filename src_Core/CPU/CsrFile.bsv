@@ -718,6 +718,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
    Reg #(Data) rg_tdata1  = concatReg3 (rg_tdata1_type, rg_tdata1_dmode, rg_tdata1_data);
    Reg #(Data) rg_tdata2  <- mkConfigRegU;
    Reg #(Data) rg_tdata3  <- mkConfigRegU;
+   Reg #(Data) rg_cid     <- mkConfigRegU;
 
 `ifdef INCLUDE_GDB_CONTROL
    // DCSR is 32b even in RV64
@@ -912,6 +913,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrTDATA1:     rg_tdata1;
             csrAddrTDATA2:     rg_tdata2;
             csrAddrTDATA3:     rg_tdata3;
+            csrAddrCID:        rg_cid;
 
 `ifdef INCLUDE_GDB_CONTROL
             csrAddrDCSR:       rg_dcsr;    // TODO: take NMI into account (cf. Piccolo/Flute)

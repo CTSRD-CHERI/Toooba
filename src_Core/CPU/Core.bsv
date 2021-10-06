@@ -271,8 +271,18 @@ module mkCore#(CoreId coreId)(Core);
 
    // ================================================================
 
+
+    // Bluespec: CsrFile including external interrupt request methods
+    CsrFile csrf <- mkCsrFile(zeroExtend(coreId)); // hartid in CSRF should be core id
+
     // front end
-    FetchStage fetchStage <- mkFetchStage;
+    FetchInput fetchInIfc = (interface FetchInput;
+        method CompIndex readCID();
+            //$display("readCID: ", fshow(csrf.rd(csrAddrCID)));
+            return truncate(csrf.rd(csrAddrCID));
+        endmethod
+    endinterface);
+    FetchStage fetchStage <- mkFetchStage(fetchInIfc);
     ITlb iTlb = fetchStage.iTlbIfc;
     ICoCache iMem = fetchStage.iMemIfc;
 
@@ -286,9 +296,6 @@ module mkCore#(CoreId coreId)(Core);
 
     // back end
     RFileSynth rf <- mkRFileSynth;
-
-    // Bluespec: CsrFile including external interrupt request methods
-    CsrFile csrf <- mkCsrFile(zeroExtend(coreId)); // hartid in CSRF should be core id
 
     RegRenamingTable regRenamingTable <- mkRegRenamingTable;
     EpochManager epochManager <- mkEpochManager;

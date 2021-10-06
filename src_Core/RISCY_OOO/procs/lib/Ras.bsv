@@ -54,6 +54,10 @@ interface RAS;
     method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
 endinterface
 
+interface RasInput;
+    method CompIndex readCID();
+endinterface
+
 interface ReturnAddrStack;
     interface Vector#(SupSize, RAS) ras;
     method Action flush;
@@ -64,12 +68,9 @@ endinterface
 typedef 8 RasEntries;
 typedef Bit#(TLog#(RasEntries)) RasIndex;
 
-typedef 8 CompNumber;
-typedef Bit#(TLog#(CompNumber)) CompIndex;
-
-(* synthesize *)
-module mkRas(ReturnAddrStack);
-    ReturnAddrStack ras <- mkRasPartition();
+//(* synthesize *)
+module mkRas#(RasInput inIfc)(ReturnAddrStack);
+    ReturnAddrStack ras <- mkRasPartition(inIfc);
     return ras;
 endmodule
 
@@ -126,7 +127,7 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
 endmodule
 
 
-module mkRasPartition(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
+module mkRasPartition#(RasInput inIfc)(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
     Vector#(CompNumber, Vector#(RasEntries, Ehr#(TAdd#(SupSize, 1), CapMem))) stack;
     for(Integer i = 0; i < valueOf(CompNumber); i = i + 1)
             stack[i] <- replicateM(mkEhr(nullCap));
@@ -134,7 +135,7 @@ module mkRasPartition(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries
     // to gracefully overflow, head is allowed to overflow to 0 and overwrite the oldest data
     Vector#(CompNumber, Ehr#(TAdd#(SupSize, 1), RasIndex)) head <- replicateM(mkEhr(0));
 
-    Reg#(CompIndex) cid <- mkReg(0);
+    //Reg#(CompIndex) cid <- mkReg(0);
 
 `ifdef SECURITY
     Reg#(Bool) flushDone <- mkReg(True);
@@ -150,10 +151,11 @@ module mkRasPartition(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         rasIfc[i] = (interface RAS;
             method CapMem first;
-                return stack[cid][head[cid][i]][i];
+                return stack[inIfc.readCID()][head[inIfc.readCID()][i]][i];
             endmethod
             method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
                 // first pop, then push
+                let cid = inIfc.readCID();
                 RasIndex h = head[cid][i];
                 if(pop) begin
                     h = h - 1;

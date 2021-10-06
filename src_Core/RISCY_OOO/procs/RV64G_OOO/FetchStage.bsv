@@ -160,6 +160,10 @@ interface FetchStage;
 `endif
 endinterface
 
+interface FetchInput;
+    method CompIndex readCID;
+endinterface
+
 // PC "compression" types to facilitate storing common upper PC bits in a
 // shared structure
 typedef 12 PcLsbSz; // Defines PC block size for PCs that will share an index for upper bits.
@@ -325,8 +329,8 @@ deriving (Bits, Eq, FShow);
 
 // ================================================================
 
-(* synthesize *)
-module mkFetchStage(FetchStage);
+//(* synthesize *)
+module mkFetchStage#(FetchInput inIfc)(FetchStage);
     // rule ordering: Fetch1 (BTB+TLB) < Fetch3 (decode & dir pred) < redirect method
     // Fetch1 < Fetch3 to avoid bypassing path on PC and epochs
 
@@ -373,9 +377,19 @@ module mkFetchStage(FetchStage);
        // Can the fifo size be smaller?
 
     // Branch Predictors
-    let             nextAddrPred <- mkBtb;
+    BtbInput btbInIfc = (interface BtbInput;
+        method CompIndex readCID();
+            return inIfc.readCID();
+        endmethod
+    endinterface);
+    RasInput rasInIfc = (interface RasInput;
+        method CompIndex readCID();
+            return inIfc.readCID();
+        endmethod
+    endinterface);
+    let             nextAddrPred <- mkBtb(btbInIfc);
     let             dirPred      <- mkDirPredictor;
-    ReturnAddrStack ras          <- mkRas;
+    ReturnAddrStack ras          <- mkRas(rasInIfc);
     // Wire to train next addr pred (NAP)
     RWire#(TrainNAP) napTrainByExe <- mkRWire;
     RWire#(TrainNAP) napTrainByDec <- mkRWire;

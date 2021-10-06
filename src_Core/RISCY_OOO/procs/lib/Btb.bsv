@@ -46,6 +46,7 @@ import CHERICap::*;
 
 export NextAddrPred(..);
 export mkBtb;
+export BtbInput(..);
 
 interface NextAddrPred#(numeric type hashSz);
     method Action put_pc(CapMem pc);
@@ -54,6 +55,10 @@ interface NextAddrPred#(numeric type hashSz);
     // security
     method Action flush;
     method Bool flush_done;
+endinterface
+
+interface BtbInput;
+    method CompIndex readCID();
 endinterface
 
 // Local BTB Typedefs
@@ -66,9 +71,6 @@ typedef TDiv#(TDiv#(BtbEntries,SupSizeX2),BtbAssociativity) BtbIndices;
 typedef Bit#(TLog#(BtbIndices)) BtbIndex;
 typedef Bit#(TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)) BtbTag;
 typedef Bit#(hashSz) HashedTag#(numeric type hashSz);
-
-typedef 8 CompNumber;
-typedef Bit#(TLog#(CompNumber)) CompIndex;
 
 typedef struct {
     BtbTag tag;
@@ -93,28 +95,28 @@ typedef struct {
     c_type c;
 } VnDnC#(type data, type c_type) deriving (Bits, Eq, FShow);
 
-(* synthesize *)
-module mkBtb(NextAddrPred#(16));
-    NextAddrPred#(16) btb <- mkBtbCoreCID;
-    return btb;
-endmodule
-
 //(* synthesize *)
 //module mkBtb(NextAddrPred#(16));
-//    Vector#(CompNumber, NextAddrPred#(16)) btbs <- replicateM(mkBtbCore);
-//    Reg#(CompIndex) cid <- mkReg(0);
-//    method Action put_pc(CapMem pc);
-//        btbs[cid].put_pc(pc);
-//    endmethod
-//    interface pred = btbs[cid].pred;
-//    method Action update(CapMem pc, CapMem brTarget, Bool taken);
-//        btbs[cid].update(pc, brTarget, taken);
-//    endmethod
-//    method Action flush;
-//        btbs[cid].flush;
-//    endmethod
-//    method Bool flush_done = btbs[cid].flush_done;
+//    NextAddrPred#(16) btb <- mkBtbCoreCID;
+//    return btb;
 //endmodule
+
+//(* synthesize *)
+module mkBtb#(BtbInput inIfc)(NextAddrPred#(16));
+    Vector#(CompNumber, NextAddrPred#(16)) btbs <- replicateM(mkBtbCore);
+    method Action put_pc(CapMem pc);
+        btbs[inIfc.readCID()].put_pc(pc);
+        $display("readCID: ", fshow(inIfc.readCID()));
+    endmethod
+    interface pred = btbs[inIfc.readCID()].pred;
+    method Action update(CapMem pc, CapMem brTarget, Bool taken);
+        btbs[inIfc.readCID()].update(pc, brTarget, taken);
+    endmethod
+    method Action flush;
+        btbs[inIfc.readCID()].flush;
+    endmethod
+    method Bool flush_done = btbs[inIfc.readCID()].flush_done;
+endmodule
 
 
 module mkBtbCore(NextAddrPred#(hashSz))

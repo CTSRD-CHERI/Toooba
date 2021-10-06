@@ -1054,6 +1054,9 @@ typedef  64 Counter_Width;
 typedef  29 No_Of_Ctrs;
 `endif
 
+typedef 8 CompNumber;
+typedef Bit#(TLog#(CompNumber)) CompIndex;
+
 function Bit#(outWidth) hash(Bit#(inWidth) in)
     provisos(Add#(a__, inWidth, TMul#(TDiv#(inWidth, outWidth), outWidth)),
              Add#(1, b__, TDiv#(inWidth, outWidth)));
