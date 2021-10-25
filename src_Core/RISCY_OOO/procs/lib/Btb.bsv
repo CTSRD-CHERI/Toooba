@@ -46,19 +46,15 @@ import CHERICap::*;
 
 export NextAddrPred(..);
 export mkBtb;
-export BtbInput(..);
 
 interface NextAddrPred#(numeric type hashSz);
+    method Action setCID(CompIndex cid);
     method Action put_pc(CapMem pc);
     interface Vector#(SupSizeX2, Maybe#(CapMem)) pred;
     method Action update(CapMem pc, CapMem brTarget, Bool taken);
     // security
     method Action flush;
     method Bool flush_done;
-endinterface
-
-interface BtbInput;
-    method CompIndex readCID();
 endinterface
 
 // Local BTB Typedefs
@@ -96,27 +92,30 @@ typedef struct {
 } VnDnC#(type data, type c_type) deriving (Bits, Eq, FShow);
 
 //(* synthesize *)
-module mkBtb#(BtbInput inIfc)(NextAddrPred#(16));
-    NextAddrPred#(16) btb <- mkBtbCoreCID(inIfc);
-    return btb;
-endmodule
-
-//(* synthesize *)
 //module mkBtb#(BtbInput inIfc)(NextAddrPred#(16));
-//    Vector#(CompNumber, NextAddrPred#(16)) btbs <- replicateM(mkBtbCore);
-//    method Action put_pc(CapMem pc);
-//        btbs[inIfc.readCID()].put_pc(pc);
-//        $display("readCID: ", fshow(inIfc.readCID()));
-//    endmethod
-//    interface pred = btbs[inIfc.readCID()].pred;
-//    method Action update(CapMem pc, CapMem brTarget, Bool taken);
-//        btbs[inIfc.readCID()].update(pc, brTarget, taken);
-//    endmethod
-//    method Action flush;
-//        btbs[inIfc.readCID()].flush;
-//    endmethod
-//    method Bool flush_done = btbs[inIfc.readCID()].flush_done;
+//    NextAddrPred#(16) btb <- mkBtbCoreCID(inIfc);
+//    return btb;
 //endmodule
+
+(* synthesize *)
+module mkBtb(NextAddrPred#(16));
+    Vector#(CompNumber, NextAddrPred#(16)) btbs <- replicateM(mkBtbCore);
+    Reg#(CompIndex) rg_cid <- mkReg(0);
+    method Action setCID(CompIndex cid);
+        rg_cid <= cid;
+    endmethod
+    method Action put_pc(CapMem pc);
+        btbs[rg_cid].put_pc(pc);
+    endmethod
+    interface pred = btbs[rg_cid].pred;
+    method Action update(CapMem pc, CapMem brTarget, Bool taken);
+        btbs[rg_cid].update(pc, brTarget, taken);
+    endmethod
+    method Action flush;
+        btbs[rg_cid].flush;
+    endmethod
+    method Bool flush_done = btbs[rg_cid].flush_done;
+endmodule
 
 
 module mkBtbCore(NextAddrPred#(hashSz))
@@ -171,6 +170,8 @@ module mkBtbCore(NextAddrPred#(hashSz))
         updateEn.wset(BtbUpdate {pc: pc, nextPc: nextPc, taken: taken});
     endmethod
 
+    method setCID(CompIndex cid) = noAction;
+
 `ifdef SECURITY
     method Action flush method Action flush;
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) records[i].clear;
@@ -184,7 +185,7 @@ endmodule
 
 
 
-module mkBtbCoreCID#(BtbInput inIfc)(NextAddrPred#(hashSz))
+module mkBtbCoreCID(NextAddrPred#(hashSz))
     provisos (NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
         Add#(1, a__, TDiv#(tagSz, hashSz)),
     Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
@@ -193,6 +194,7 @@ module mkBtbCoreCID#(BtbInput inIfc)(NextAddrPred#(hashSz))
     Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnDnC#(CapMem, CompIndex), BtbAssociativity))
         records <- replicateM(mkMapLossyBRAM);
     RWire#(BtbUpdate) updateEn <- mkRWire;
+    Reg#(CompIndex) rg_cid <- mkReg(0);
 
     function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
     function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
@@ -209,8 +211,12 @@ module mkBtbCoreCID#(BtbInput inIfc)(NextAddrPred#(hashSz))
         let taken = upd.taken;
         /*$display("MapUpdate in BTB - pc %x, bank: %x, taken: %x, next: %x, time: %t",
                   pc, getBank(pc), taken, nextPc, $time);*/
-        records[getBank(pc)].update(lookupKey(pc), VnDnC{v:taken, d:nextPc, c:inIfc.readCID()});
+        records[getBank(pc)].update(lookupKey(pc), VnDnC{v:taken, d:nextPc, c:rg_cid});
     endrule
+
+    method Action setCID(CompIndex cid);
+        rg_cid <= cid;
+    endmethod
 
     method Action put_pc(CapMem pc);
         BtbAddr addr = getBtbAddr(pc);
@@ -227,7 +233,7 @@ module mkBtbCoreCID#(BtbInput inIfc)(NextAddrPred#(hashSz))
         Vector#(SupSizeX2, Maybe#(CapMem)) ppcs = replicate(Invalid);
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1)
             if (records[i].lookupRead matches tagged Valid .record)
-                ppcs[i] = (record.v && record.c == inIfc.readCID()) ? Valid(record.d):Invalid;
+                ppcs[i] = (record.v && record.c == rg_cid) ? Valid(record.d):Invalid;
         ppcs = rotateBy(ppcs,unpack(-firstBank_reg)); // Rotate firstBank down to zeroeth element.
         return ppcs;
     endmethod

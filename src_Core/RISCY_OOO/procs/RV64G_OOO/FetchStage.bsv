@@ -377,19 +377,9 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
        // Can the fifo size be smaller?
 
     // Branch Predictors
-    BtbInput btbInIfc = (interface BtbInput;
-        method CompIndex readCID();
-            return inIfc.readCID();
-        endmethod
-    endinterface);
-    RasInput rasInIfc = (interface RasInput;
-        method CompIndex readCID();
-            return inIfc.readCID();
-        endmethod
-    endinterface);
-    let             nextAddrPred <- mkBtb(btbInIfc);
+    let             nextAddrPred <- mkBtb;
     let             dirPred      <- mkDirPredictor;
-    ReturnAddrStack ras          <- mkRas(rasInIfc);
+    ReturnAddrStack ras          <- mkRas;
     // Wire to train next addr pred (NAP)
     RWire#(TrainNAP) napTrainByExe <- mkRWire;
     RWire#(TrainNAP) napTrainByDec <- mkRWire;
@@ -416,6 +406,12 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
     Count#(Data) decRedirectOtherCnt <- mkCount(0);
     // perf resp FIFO
     Fifo#(1, PerfResp#(DecStagePerfType)) perfRespQ <- mkCFFifo;
+
+    rule doSetCit;
+        let cid = inIfc.readCID();
+        ras.setCID(cid);
+        btb.setCID(cid);
+    endrule
 
     rule doPerfReq;
         let t <- toGet(perfReqQ).get;

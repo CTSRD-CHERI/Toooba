@@ -54,12 +54,9 @@ interface RAS;
     method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
 endinterface
 
-interface RasInput;
-    method CompIndex readCID();
-endinterface
-
 interface ReturnAddrStack;
     interface Vector#(SupSize, RAS) ras;
+    method Action setCID(CompIndex cid);
     method Action flush;
     method Bool flush_done;
 endinterface
@@ -69,12 +66,22 @@ typedef 8 RasEntries;
 typedef Bit#(TLog#(RasEntries)) RasIndex;
 
 //(* synthesize *)
-module mkRas#(RasInput inIfc)(ReturnAddrStack);
-    ReturnAddrStack ras <- mkRasPartition(inIfc);
-    return ras;
+//module mkRas(ReturnAddrStack);
+//    ReturnAddrStack ras <- mkRasPartition(inIfc);
+//    return ras;
+//endmodule
+
+(* synthesize *)
+module mkRas(ReturnAddrStack);
+    Vector#(CompNumber, ReturnAddrStack) rases <- replicateM(mkRasSingle);
+    Reg#(CompIndex) rg_cid <- mkReg(0);
+    interface ras = rases[rg_cid].ras;
+    method Action setCID(CompIndex cid);
+        rg_cid <= cid;
+    endmethod
+    method flush = rases[rg_cid].flush;
+    method flush_done = rases[rg_cid].flush_done;
 endmodule
-
-
 
 module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
     Vector#(RasEntries, Ehr#(TAdd#(SupSize, 1), CapMem)) stack <- replicateM(mkEhr(nullCap));
@@ -127,7 +134,7 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
 endmodule
 
 
-module mkRasPartition#(RasInput inIfc)(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
+module mkRasPartition(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
     Vector#(CompNumber, Vector#(RasEntries, Ehr#(TAdd#(SupSize, 1), CapMem))) stack;
     for(Integer i = 0; i < valueOf(CompNumber); i = i + 1)
             stack[i] <- replicateM(mkEhr(nullCap));
@@ -135,7 +142,7 @@ module mkRasPartition#(RasInput inIfc)(ReturnAddrStack) provisos(NumAlias#(TExp#
     // to gracefully overflow, head is allowed to overflow to 0 and overwrite the oldest data
     Vector#(CompNumber, Ehr#(TAdd#(SupSize, 1), RasIndex)) head <- replicateM(mkEhr(0));
 
-    //Reg#(CompIndex) cid <- mkReg(0);
+    Reg#(CompIndex) rg_cid <- mkReg(0);
 
 `ifdef SECURITY
     Reg#(Bool) flushDone <- mkReg(True);
@@ -151,20 +158,19 @@ module mkRasPartition#(RasInput inIfc)(ReturnAddrStack) provisos(NumAlias#(TExp#
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         rasIfc[i] = (interface RAS;
             method CapMem first;
-                return stack[inIfc.readCID()][head[inIfc.readCID()][i]][i];
+                return stack[rg_cid][head[rg_cid][i]][i];
             endmethod
             method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
                 // first pop, then push
-                let cid = inIfc.readCID();
-                RasIndex h = head[cid][i];
+                RasIndex h = head[rg_cid][i];
                 if(pop) begin
                     h = h - 1;
                 end
                 if(pushAddr matches tagged Valid .addr) begin
                     h = h + 1;
-                    stack[cid][h][i] <= addr;
+                    stack[rg_cid][h][i] <= addr;
                 end
-                head[cid][i] <= h;
+                head[rg_cid][i] <= h;
             endmethod
         endinterface);
     end
