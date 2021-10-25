@@ -276,13 +276,7 @@ module mkCore#(CoreId coreId)(Core);
     CsrFile csrf <- mkCsrFile(zeroExtend(coreId)); // hartid in CSRF should be core id
 
     // front end
-    FetchInput fetchInIfc = (interface FetchInput;
-        method CompIndex readCID();
-            //$display("readCID: ", fshow(csrf.rd(csrAddrCID)));
-            return truncate(csrf.rd(csrAddrCID));
-        endmethod
-    endinterface);
-    FetchStage fetchStage <- mkFetchStage(fetchInIfc);
+    FetchStage fetchStage <- mkFetchStage;
     ITlb iTlb = fetchStage.iTlbIfc;
     ICoCache iMem = fetchStage.iMemIfc;
 
@@ -787,6 +781,10 @@ module mkCore#(CoreId coreId)(Core);
             l2Tlb.updateVMInfo(vmI, vmD);
            // $display ("%0d: %m.rule prepareCachesAndTlbs: updating VMInfo", cur_cycle);
         end
+    endrule
+
+    rule doSetCID;
+        fetchStage.setCID(truncate(csrf.rd(csrAddrCID)));
     endrule
 
 `ifdef SECURITY_OR_INCLUDE_GDB_CONTROL

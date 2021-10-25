@@ -121,6 +121,8 @@ interface FetchStage;
     interface Client#(Dii_Parcel_Id, Dii_Parcels) diiIfc;
 `endif
 
+    method Action setCID(CompIndex cid);
+
     // starting and stopping
     method Action start(CapMem pc
 `ifdef RVFI_DII
@@ -329,8 +331,8 @@ deriving (Bits, Eq, FShow);
 
 // ================================================================
 
-//(* synthesize *)
-module mkFetchStage#(FetchInput inIfc)(FetchStage);
+(* synthesize *)
+module mkFetchStage(FetchStage);
     // rule ordering: Fetch1 (BTB+TLB) < Fetch3 (decode & dir pred) < redirect method
     // Fetch1 < Fetch3 to avoid bypassing path on PC and epochs
 
@@ -407,11 +409,6 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
     // perf resp FIFO
     Fifo#(1, PerfResp#(DecStagePerfType)) perfRespQ <- mkCFFifo;
 
-    rule doSetCit;
-        let cid = inIfc.readCID();
-        ras.setCID(cid);
-        btb.setCID(cid);
-    endrule
 
     rule doPerfReq;
         let t <- toGet(perfReqQ).get;
@@ -872,6 +869,11 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
 `ifdef RVFI_DII
     interface diiIfc = dii.toCore;
 `endif
+
+    method Action setCID(CompIndex cid);
+        ras.setCID(cid);
+        nextAddrPred.setCID(cid);
+    endmethod
 
     method Action start(
         CapMem start_pc
