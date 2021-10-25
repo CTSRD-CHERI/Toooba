@@ -78,6 +78,8 @@ module mkBht(DirPredictor#(BhtTrainInfo));
 
     interface pred = predIfc;
 
+    method Action setCID(CompIndex cid) = noAction;
+
     method Action update(CapMem pc, Bool taken, BhtTrainInfo train, Bool mispred);
         let index = getIndex(pc);
         let current_hist = hist.sub(index);

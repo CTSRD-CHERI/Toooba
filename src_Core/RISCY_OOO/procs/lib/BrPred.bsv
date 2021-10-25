@@ -79,6 +79,7 @@ endinterface
 interface DirPredictor#(type trainInfoT);
     interface Vector#(SupSize, DirPred#(trainInfoT)) pred;
     method Action update(CapMem pc, Bool taken, trainInfoT train, Bool mispred);
+    method Action setCID(CompIndex cid);
     method Action flush;
     method Bool flush_done;
 endinterface

@@ -255,6 +255,8 @@ module mkTourPredSecure(DirPredictor#(TourTrainInfo));
 
     interface pred = predIfc;
 
+    method Action setCID(CompIndex cid) = noAction;
+
     method Action update(CapMem pc, Bool taken, TourTrainInfo train, Bool mispred);
         updateEn.wset(TourUpdate {pc: pc, taken: taken, train: train, mispred: mispred});
     endmethod

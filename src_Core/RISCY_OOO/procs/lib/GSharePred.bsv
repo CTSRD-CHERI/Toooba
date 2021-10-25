@@ -142,6 +142,8 @@ module mkGSharePred(DirPredictor#(GShareTrainInfo));
 
     interface pred = predIfc;
 
+    method Action setCID(CompIndex cid) = noAction;
+
     method Action update(CapMem pc, Bool taken, GShareTrainInfo train, Bool mispred);
         // update history if mispred
         if(mispred) begin

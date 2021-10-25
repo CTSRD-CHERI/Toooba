@@ -4,6 +4,7 @@
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2021 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -79,8 +80,20 @@ module mkTourGHistReg(TourGHistReg);
     return m;
 endmodule
 
-(* synthesize *)
 module mkTourPred(DirPredictor#(TourTrainInfo));
+    Vector#(CompNumber, DirPredictor#(TourTrainInfo)) preds <- replicateM(mkTourPredCore);
+    Reg#(CompIndex) rg_cid <- mkReg(0);
+    interface pred = preds[rg_cid].pred;
+    method Action setCID(CompIndex cid);
+        rg_cid <= cid;
+    endmethod
+    method update = preds[rg_cid].update;
+    method flush = preds[rg_cid].flush;
+    method flush_done = preds[rg_cid].flush_done;
+endmodule
+
+(* synthesize *)
+module mkTourPredCore(DirPredictor#(TourTrainInfo));
     // local history: MSB is the latest branch
     RegFile#(PCIndex, TourLocalHist) localHistTab <- mkRegFileWCF(0, maxBound);
     // local sat counters
@@ -165,6 +178,8 @@ module mkTourPred(DirPredictor#(TourTrainInfo));
     endrule
 
     interface pred = predIfc;
+
+    method Action setCID(CompIndex cid) = noAction;
 
     method Action update(CapMem pc, Bool taken, TourTrainInfo train, Bool mispred);
         // update history if mispred
