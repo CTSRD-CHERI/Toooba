@@ -122,6 +122,8 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
 
     interface ras = rasIfc;
 
+    method Action setCID(CompIndex cid) = noAction;
+
 `ifdef SECURITY
     method Action flush if(flushDone);
         flushDone <= False;
@@ -176,6 +178,10 @@ module mkRasPartition(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries
     end
 
     interface ras = rasIfc;
+
+    method Action setCID(CompIndex cid);
+        rg_cid <= cid;
+    endmethod
 
 `ifdef SECURITY
     method Action flush if(flushDone);
