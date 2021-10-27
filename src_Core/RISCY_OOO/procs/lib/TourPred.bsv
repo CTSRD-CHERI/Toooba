@@ -80,6 +80,7 @@ module mkTourGHistReg(TourGHistReg);
     return m;
 endmodule
 
+(* synthesize *)
 module mkTourPred(DirPredictor#(TourTrainInfo));
     Vector#(CompNumber, DirPredictor#(TourTrainInfo)) preds <- replicateM(mkTourPredCore);
     Reg#(CompIndex) rg_cid <- mkReg(0);
@@ -92,7 +93,6 @@ module mkTourPred(DirPredictor#(TourTrainInfo));
     method flush_done = preds[rg_cid].flush_done;
 endmodule
 
-(* synthesize *)
 module mkTourPredCore(DirPredictor#(TourTrainInfo));
     // local history: MSB is the latest branch
     RegFile#(PCIndex, TourLocalHist) localHistTab <- mkRegFileWCF(0, maxBound);
