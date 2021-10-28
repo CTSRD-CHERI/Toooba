@@ -44,9 +44,9 @@ import Ehr::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
 
-//export ReturnAddrStack(..);
-//export mkRas;
-//export RAS;
+export ReturnAddrStack(..);
+export mkRas;
+export RAS(..);
 
 interface RAS;
     method CapMem first;
