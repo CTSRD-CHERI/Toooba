@@ -162,10 +162,6 @@ interface FetchStage;
 `endif
 endinterface
 
-interface FetchInput;
-    method CompIndex readCID;
-endinterface
-
 // PC "compression" types to facilitate storing common upper PC bits in a
 // shared structure
 typedef 12 PcLsbSz; // Defines PC block size for PCs that will share an index for upper bits.
