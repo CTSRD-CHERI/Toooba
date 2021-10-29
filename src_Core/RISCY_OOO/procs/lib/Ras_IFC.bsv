@@ -43,19 +43,24 @@ import Vector::*;
 import Ehr::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
-import RasSingle::*;
-import Ras_IFC::*;
 
+export ReturnAddrStack(..);
+export RAS(..);
 
-(* synthesize *)
-module mkRas(ReturnAddrStack);
-    Vector#(CompNumber, ReturnAddrStack) rases <- replicateM(mkRasSingle);
-    Reg#(CompIndex) rg_cid <- mkReg(0);
-    interface ras = rases[rg_cid].ras;
+interface RAS;
+    method CapMem first;
+    // first pop, then push
+    method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
+endinterface
+
+interface ReturnAddrStack;
+    interface Vector#(SupSize, RAS) ras;
     method Action setCID(CompIndex cid);
-        rg_cid <= cid;
-    endmethod
-    method flush = rases[rg_cid].flush;
-    method flush_done = rases[rg_cid].flush_done;
-endmodule
+    method Action flush;
+    method Bool flush_done;
+endinterface
+
+// Local RAS Typedefs SHOULD BE A POWER OF TWO.
+typedef 8 RasEntries;
+typedef Bit#(TLog#(RasEntries)) RasIndex;
 

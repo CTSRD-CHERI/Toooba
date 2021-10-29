@@ -56,6 +56,7 @@ import ProcTypes::*;
 import CCTypes::*;
 import DefaultValue::*;
 import Ras::*;
+import Ras_IFC::*;
 import EpochManager::*;
 import Performance::*;
 import Vector::*;
