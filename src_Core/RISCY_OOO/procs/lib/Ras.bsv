@@ -44,18 +44,21 @@ import Ehr::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
 import RasSingle::*;
+import CircularRas::*;
 import Ras_IFC::*;
 
 
 (* synthesize *)
 module mkRas(ReturnAddrStack);
-    Vector#(CompNumber, ReturnAddrStack) rases <- replicateM(mkRasSingle);
-    Reg#(CompIndex) rg_cid <- mkReg(0);
-    interface ras = rases[rg_cid].ras;
-    method Action setCID(CompIndex cid);
-        rg_cid <= cid;
-    endmethod
-    method flush = rases[rg_cid].flush;
-    method flush_done = rases[rg_cid].flush_done;
+    //Vector#(CompNumber, ReturnAddrStack) rases <- replicateM(mkRasSingle);
+    //Reg#(CompIndex) rg_cid <- mkReg(0);
+    //interface ras = rases[rg_cid].ras;
+    //method Action setCID(CompIndex cid);
+    //    rg_cid <= cid;
+    //endmethod
+    //method flush = rases[rg_cid].flush;
+    //method flush_done = rases[rg_cid].flush_done;
+    let m <- mkCircularRas;
+    return m;
 endmodule
 
