@@ -43,34 +43,49 @@ import Map::*;
 import Vector::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
-import Btb_IFC::*;
-import BtbCore::*;
 
-export mkBtb;
 
-//(* synthesize *)
-//module mkBtb#(BtbInput inIfc)(NextAddrPred#(16));
-//    NextAddrPred#(16) btb <- mkBtbCoreCID(inIfc);
-//    return btb;
-//endmodule
-
-(* synthesize *)
-module mkBtb(NextAddrPred#(16));
-    Vector#(CompNumber, NextAddrPred#(16)) btbs <- replicateM(mkBtbCore);
-    Reg#(CompIndex) rg_cid <- mkReg(0);
+interface NextAddrPred#(numeric type hashSz);
     method Action setCID(CompIndex cid);
-        rg_cid <= cid;
-    endmethod
     method Action put_pc(CapMem pc);
-        btbs[rg_cid].put_pc(pc);
-    endmethod
-    interface pred = btbs[rg_cid].pred;
+    interface Vector#(SupSizeX2, Maybe#(CapMem)) pred;
     method Action update(CapMem pc, CapMem brTarget, Bool taken);
-        btbs[rg_cid].update(pc, brTarget, taken);
-    endmethod
+    // security
     method Action flush;
-        btbs[rg_cid].flush;
-    endmethod
-    method Bool flush_done = btbs[rg_cid].flush_done;
-endmodule
+    method Bool flush_done;
+endinterface
+
+// Local BTB Typedefs
+typedef 1 PcLsbsIgnore;
+typedef 1024 BtbEntries;
+typedef 2 BtbAssociativity;
+typedef Bit#(TLog#(SupSizeX2)) BtbBank;
+// Total entries/lanes of superscalar lookup/associativity
+typedef TDiv#(TDiv#(BtbEntries,SupSizeX2),BtbAssociativity) BtbIndices;
+typedef Bit#(TLog#(BtbIndices)) BtbIndex;
+typedef Bit#(TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)) BtbTag;
+typedef Bit#(hashSz) HashedTag#(numeric type hashSz);
+
+typedef struct {
+    BtbTag tag;
+    BtbIndex index;
+    BtbBank bank;
+} BtbAddr deriving(Bits, Eq, FShow);
+
+typedef struct {
+    CapMem pc;
+    CapMem nextPc;
+    Bool taken;
+} BtbUpdate deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bool v;
+    data d;
+} VnD#(type data) deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bool v;
+    data d;
+    c_type c;
+} VnDnC#(type data, type c_type) deriving (Bits, Eq, FShow);
 

@@ -42,6 +42,7 @@
 
 import BrPred::*;
 import DirPredictor::*;
+import Btb_IFC::*;
 import Btb::*;
 import ClientServer::*;
 import Connectable::*;
