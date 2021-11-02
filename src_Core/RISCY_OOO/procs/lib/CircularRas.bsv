@@ -79,7 +79,7 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
         CompIndex id = 0;
         Age a = 15;
         for(Integer i = 0; i < valueOf(SegNumber); i = i + 1) begin
-            if(ages[i].age <= a) begin
+            if(ages[i].age == a) begin
                id = fromInteger(i);
                a = ages[i].age;
             end
@@ -92,12 +92,26 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
     endrule
 
     rule canonUpdate(updateCID.wget matches tagged Valid .upd);
-       rg_cid <= upd;
+        rg_cid <= upd;
         let p = pointers[upd];
+        let p_old = pointers[rg_cid];
+        Age amount_comps = zeroExtend(p_old.length) >> 4;
+        Age start_seg = zeroExtend(p_old.start) >> 4;
+        Age counter = amount_comps - 1;
+        for(Integer i = 0; i < valueOf(SegNumber); i = i + 1) begin
+            if(fromInteger(i) < amount_comps) begin
+                Age cur_seg =  amount_comps + fromInteger(i);
+                let a_old = ages[cur_seg];
+                a_old.age = zeroExtend(8'h80 >> (amount_comps - counter));
+                counter = counter - 1;
+                ages[cur_seg] <= a_old;
+            end
+        end
         if(!p.v) begin
             CompIndex id = findFreeSeg();
             p.start = zeroExtend(id) << 4;
             p.length = 16;
+            p.v = True;
             pointers[upd] <= p;
         end
 
@@ -125,6 +139,13 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
                 else begin
                     p.length = p.length - 16;
                     p.start = p.start + 16;
+                end
+            end
+            else begin
+                let a = ages[i];
+                Bit#(4) comp = truncate((p.start + p.length) >> 4);
+                if(comp == fromInteger(i) && (a.age == 1 || a.age == 0)) begin
+                    p.length = p.length + 16;
                 end
             end
             pointers[i] <= p;
