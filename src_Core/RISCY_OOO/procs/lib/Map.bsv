@@ -135,10 +135,21 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     Reg#(MapKeyIndexValue#(ky,ix,vl)) updateReg <- mkRegU;
     Reg#(Bool) updateFresh <- mkDReg(False);
     Reg#(Bit#(TLog#(as))) wayNext <- mkReg(0);
+    Vector#(as,Reg#(Bool)) avWays <- replicateM(mkReg(False));
     Integer a = valueof(as);
 
     Reg#(Bool) clearReg <- mkReg(True);
     Reg#(ix) clearCount <- mkReg(0);
+
+    function Bit#(TLog#(as)) getNextWay();
+        let cur = wayNext;
+        Bit#(TLog#(as)) n = wayNext;
+        for(Integer i = 0; i < a; i = i + 1) begin
+            if(avWays[fromInteger(i) + cur] && (cur == n)) n = fromInteger(i);
+        end
+        return n;
+    endfunction
+
     (* fire_when_enabled, no_implicit_conditions *)
     rule updateCanon;
         if (clearReg) begin
@@ -155,24 +166,30 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
                      u.index, u.key, u.value, way);*/
             mem[way].wrReq(u.index, MapKeyValue{key: u.key, value: u.value});
             updateKeys[way].wrReq(u.index, u.key);
-            wayNext <= (wayNext == fromInteger(a-1)) ? 0 : (wayNext + 1);
+            wayNext <= getNextWay;
         end
     endrule
 
     method Action update(MapKeyIndex#(ky,ix) ki, vl value);
         updateReg <= MapKeyIndexValue{key: ki.key, index: ki.index, value: value};
         updateFresh <= True;
-        for (Integer i = 0; i < a; i = i + 1) updateKeys[i].rdReq(ki.index);
+        for (Integer i = 0; i < a; i = i + 1)begin
+            if(avWays[i]) updateKeys[i].rdReq(ki.index);
+        end
     endmethod
     method Action lookupStart(MapKeyIndex#(ky,ix) ki);
         lookupReg <= ki;
-        for (Integer i = 0; i < a; i = i + 1) mem[i].rdReq(ki.index);
+        for (Integer i = 0; i < a; i = i + 1)begin
+            if(avWays[i]) mem[i].rdReq(ki.index);
+        end
     endmethod
     method Maybe#(vl) lookupRead;
         Maybe#(vl) readVal = Invalid;
         for (Integer i = 0; i < a; i = i + 1) begin
-            let resp = mem[i].rdResp;
-            if (lookupReg.key == resp.key) readVal = Valid(resp.value);
+            if(avWays[i]) begin
+                let resp = mem[i].rdResp;
+                if (lookupReg.key == resp.key) readVal = Valid(resp.value);
+            end
         end
         // If there has been a recent write, take that one.
         if (updateReg.index == lookupReg.index && updateReg.key == lookupReg.key)
