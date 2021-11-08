@@ -45,6 +45,7 @@ import CHERICC_Fat::*;
 import CHERICap::*;
 import Btb_IFC::*;
 import BtbCore::*;
+import BtbDynamic::*;
 
 export mkBtb;
 
