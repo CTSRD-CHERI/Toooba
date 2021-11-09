@@ -117,7 +117,7 @@ Bitwise#(ix), Eq#(ix), Arith#(ix));
     method clearDone = clearReg;
 endmodule
 
-interface MapSplit#(type ky, type ix, type vl, numeric type as);
+interface MapSplitCore#(type ky, type ix, type vl, numeric type as, numeric type en);
     method Action update(MapKeyIndex#(ky,ix) key, vl value);
     method Action lookupStart(MapKeyIndex#(ky,ix) lookup_key);
     method Maybe#(vl) lookupRead;
@@ -125,7 +125,18 @@ interface MapSplit#(type ky, type ix, type vl, numeric type as);
     method Bool clearDone;
 endinterface
 
-module mkMapLossyBRAM(MapSplit#(ky,ix,vl,as)) provisos (
+typedef MapSplitCore#(ky, ix, vl, as, as) MapSplit#(type ky, type ix, type vl, numeric type as);
+
+module mkMapLossyBRAM(MapSplit#(ky, ix, vl, as)) provisos (
+Bits#(ky,ky_sz), Bits#(vl,vl_sz), Eq#(ky), Arith#(ky),
+Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
+Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
+
+    let m <- mkMapLossyBRAMCore;
+    return m;
+endmodule
+
+module mkMapLossyBRAMCore(MapSplitCore#(ky,ix,vl,as, en)) provisos (
 Bits#(ky,ky_sz), Bits#(vl,vl_sz), Eq#(ky), Arith#(ky),
 Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
 Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
@@ -135,7 +146,11 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     Reg#(MapKeyIndexValue#(ky,ix,vl)) updateReg <- mkRegU;
     Reg#(Bool) updateFresh <- mkDReg(False);
     Reg#(Bit#(TLog#(as))) wayNext <- mkReg(0);
-    Vector#(as,Reg#(Bool)) avWays <- replicateM(mkReg(False));
+    Vector#(as,Reg#(Bool)) avWays;
+    for(Integer i = 0; i < valueOf(as); i = i + 1) begin
+        if(i < valueOf(en)) avWays[i] <- mkReg(True);
+        else avWays[i] <- mkReg(False);
+    end
     Integer a = valueof(as);
 
     Reg#(Bool) clearReg <- mkReg(True);
