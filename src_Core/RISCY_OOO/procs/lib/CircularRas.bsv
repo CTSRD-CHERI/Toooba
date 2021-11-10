@@ -58,8 +58,9 @@ typedef struct {
         Age age;
 } SegAge deriving (Bits, Eq, FShow);
 
-module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), Entries));
-    Vector#(Entries, Ehr#(TAdd#(SupSize, 2), CapMem)) stack <- replicateM(mkEhr(0));
+module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), Entries),
+    NumAlias#(TAdd#(SupSize, 1), nStackIFC));
+    Vector#(Entries, Ehr#(nStackIFC, CapMem)) stack <- replicateM(mkEhr(0));
     Vector#(CompNumber, Reg#(CompPointer)) pointers <- replicateM(mkRegU);
     Vector#(SegNumber, Reg#(SegAge)) segs <- replicateM(mkRegU);
     Vector#(CompNumber, Ehr#(TAdd#(SupSize, 1), EntriesIndex)) heads <- replicateM(mkEhr(0));
@@ -120,6 +121,10 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
                 a.age = (a.age >> 1);
                 if(a.age == 0) begin
                     v[a.cid] = True;
+                    EntriesIndex idx = fromInteger(i) << valueOf(SegBits);
+                    for(Integer j = 0; j < valueOf(SegSize); j = j + 1) begin
+                        stack[idx + fromInteger(j)][valueOf(nStackIFC) - 1] <= 0;
+                    end
                 end
             end
             segs[i] <= a;
