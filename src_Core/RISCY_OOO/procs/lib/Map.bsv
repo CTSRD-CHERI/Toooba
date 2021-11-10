@@ -1,5 +1,6 @@
 
 // Copyright (c) 2021 Jonathan Woodruff
+// Copyright (c) 2021 Franz Fuchs
 //
 // All rights reserved.
 //
@@ -36,6 +37,14 @@ import RegFile::*;
 import Vector::*;
 import RWBramCore::*;
 import Ehr::*;
+
+//export MapKeyIndex(..);
+//export MapKeyValue(..);
+//export MapKeyIndexValue(..);
+//export MapSplit(..);
+//export MapSplitCore(..);
+//export mkMapLossyBRAM;
+//export mkMapLossyBRAMCore;
 
 typedef struct {
     ky key;
@@ -121,6 +130,7 @@ interface MapSplitCore#(type ky, type ix, type vl, numeric type as, numeric type
     method Action update(MapKeyIndex#(ky,ix) key, vl value);
     method Action lookupStart(MapKeyIndex#(ky,ix) lookup_key);
     method Maybe#(vl) lookupRead;
+    method Action changeWays(Vector#(as, Bool) v);
     method Action clear;
     method Bool clearDone;
 endinterface
@@ -210,6 +220,11 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
         if (updateReg.index == lookupReg.index && updateReg.key == lookupReg.key)
             readVal = Valid(updateReg.value);
         return readVal;
+    endmethod
+    method Action changeWays(Vector#(as, Bool) v);
+        for(Integer i = 0; i < a; i = i + 1) begin
+            avWays[i] <= v[i];
+        end
     endmethod
     method clear if (!clearReg) = clearReg._write(True);
     method clearDone = clearReg;
