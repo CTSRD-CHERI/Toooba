@@ -39,12 +39,13 @@ import Ras_IFC::*;
 typedef 128 Entries;
 typedef 16 SegSize;
 typedef 1024 TimeoutSize;
-typedef 16 SomeSize;
 typedef TDiv#(Entries, SegSize) SegNumber;
-typedef TLog#(SegNumber) SegBits;
+typedef TLog#(SegSize) SegBits;
 typedef Bit#(TLog#(Entries)) EntriesIndex;
+typedef Bit#(SegBits) SegIndex;
 typedef Bit#(SegBits) Age;
 typedef Bit#(TLog#(TimeoutSize)) TimeoutIndex;
+typedef TSub#(SegSize, 1) MaxAge;
 
 typedef struct {
     EntriesIndex start;
@@ -55,12 +56,12 @@ typedef struct {
 typedef struct {
         CompIndex cid;
         Age age;
-} CompAge deriving (Bits, Eq, FShow);
+} SegAge deriving (Bits, Eq, FShow);
 
 module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), Entries));
-    Vector#(Entries, Ehr#(TAdd#(SupSize, 1), CapMem)) stack <- replicateM(mkEhr(0));
+    Vector#(Entries, Ehr#(TAdd#(SupSize, 2), CapMem)) stack <- replicateM(mkEhr(0));
     Vector#(CompNumber, Reg#(CompPointer)) pointers <- replicateM(mkRegU);
-    Vector#(SegNumber, Reg#(CompAge)) ages <- replicateM(mkRegU);
+    Vector#(SegNumber, Reg#(SegAge)) segs <- replicateM(mkRegU);
     Vector#(CompNumber, Ehr#(TAdd#(SupSize, 1), EntriesIndex)) heads <- replicateM(mkEhr(0));
 
     Reg#(CompIndex) rg_cid <- mkRegU;
@@ -68,13 +69,13 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
 
     RWire#(CompIndex) updateCID <- mkRWire;
 
-    function CompIndex findFreeSeg();
-        CompIndex id = 0;
+    function SegIndex findNextSeg();
+        SegIndex id = 0;
         Age a = fromInteger(valueOf(TSub#(SegNumber, 1)));
         for(Integer i = 0; i < valueOf(SegNumber); i = i + 1) begin
-            if(ages[i].age == a) begin
+            if(segs[i].age < a) begin
                id = fromInteger(i);
-               a = ages[i].age;
+               a = segs[i].age;
             end
         end
         return id;
@@ -88,20 +89,20 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
         rg_cid <= upd;
         let p = pointers[upd];
         let p_old = pointers[rg_cid];
-        Age amount_comps = truncate((p_old.length) >> fromInteger(valueOf(SegBits)));
-        Age start_seg = truncate ((p_old.start) >> fromInteger(valueOf(SegBits)));
-        Age counter = amount_comps - 1;
+        SegIndex amount_comps = truncate((p_old.length) >> fromInteger(valueOf(SegBits)));
+        SegIndex start_seg = truncate ((p_old.start) >> fromInteger(valueOf(SegBits)));
+        SegIndex counter = amount_comps - 1;
         for(Integer i = 0; i < valueOf(SegNumber); i = i + 1) begin
             if(fromInteger(i) < amount_comps) begin
-                Age cur_seg =  amount_comps + fromInteger(i);
-                let a_old = ages[cur_seg];
-                a_old.age = truncate(8'h80 >> (amount_comps - counter));
+                SegIndex cur_seg =  amount_comps + fromInteger(i);
+                let a_old = segs[cur_seg];
+                a_old.age = fromInteger(valueOf(MaxAge));
                 counter = counter - 1;
-                ages[cur_seg] <= a_old;
+                segs[cur_seg] <= a_old;
             end
         end
         if(!p.v) begin
-            CompIndex id = findFreeSeg();
+            SegIndex id = findNextSeg();
             p.start = zeroExtend(id) << fromInteger(valueOf(SegBits));
             p.length = fromInteger(valueOf(SegSize));
             p.v = True;
@@ -114,31 +115,31 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
         $display("Aging happening");
         Vector#(CompNumber, Bool) v = replicate(False);
         for(Integer i = 0; i < valueOf(SegNumber); i = i + 1) begin
-            let a = ages[i];
+            let a = segs[i];
             if(a.cid != rg_cid) begin
                 a.age = (a.age >> 1);
                 if(a.age == 0) begin
                     v[a.cid] = True;
                 end
             end
-            ages[i] <= a;
+            segs[i] <= a;
         end
         for(Integer i = 0; i < valueOf(CompNumber); i = i + 1) begin
             let p = pointers[i];
             if(v[i]) begin
-                if(p.length == fromInteger(valueOf(SegNumber))) begin
+                if(p.length == fromInteger(valueOf(SegSize))) begin
                     p.v = False;
                 end
                 else begin
-                    p.length = p.length - fromInteger(valueOf(SegNumber));
-                    p.start = p.start + fromInteger(valueOf(SegNumber));
+                    p.length = p.length - fromInteger(valueOf(SegSize));
+                    p.start = p.start + fromInteger(valueOf(SegSize));
                 end
             end
             else begin
-                let a = ages[i];
-                Bit#(4) comp = truncate((p.start + p.length) >> fromInteger(valueOf(SegBits)));
+                let a = segs[i];
+                Bit#(SegBits) comp = truncate((p.start + p.length) >> fromInteger(valueOf(SegBits)));
                 if(comp == fromInteger(i) && (a.age == 1 || a.age == 0)) begin
-                    p.length = p.length + fromInteger(valueOf(SegNumber));
+                    p.length = p.length + fromInteger(valueOf(SegSize));
                 end
             end
             pointers[i] <= p;
