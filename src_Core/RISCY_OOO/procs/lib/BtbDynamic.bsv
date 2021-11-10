@@ -120,14 +120,13 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
 
     rule doCIDUpdate(cidUpdate.wget matches tagged Valid .upd);
         rg_cid <= upd;
-        AvailVector#(BtbAssociativity) v;
+        Vector#(BtbAssociativity, Bool) v;
         for(Integer i = 0; i < valueOf(BtbAssociativity); i = i + 1) begin
             if(compWays[i].cid == rg_cid) v[i] = True;
             else v[i] = False;
         end
         for(Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
-            //records.changeWays(v);
-            $display("faf");
+            records[i].changeWays(v);
         end
     endrule
 
