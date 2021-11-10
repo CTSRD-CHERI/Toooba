@@ -103,16 +103,24 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
         records[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:nextPc});
     endrule
 
-    rule doCycleInc;
+    rule doCycleInc(cidUpdate.wget matches tagged Invalid);
         timeout <= timeout + 1;
     endrule
 
 // TODO
-    rule doAging(timeout == fromInteger(valueOf(TSub#(TimeoutCycles, 1))));
+    rule doAging(timeout == fromInteger(valueOf(TSub#(TimeoutCycles, 1))) &&& cidUpdate.wget matches tagged Invalid);
+        Bool allocated = False;
         for(Integer i = 0; i < valueOf(BtbAssociativity); i = i + 1) begin
             let s = compWays[i];
             if(s.v && s.cid != rg_cid && s.age != 0) begin
                 s.age = s.age - 1;
+            end
+            if(s.age == 0 && !allocated) begin
+                // free to take
+                // and we have not given a new way to this compartment in this cycle
+                allocated = True;
+                s.age = fromInteger(valueOf(AgeSize)) - 1;
+                s.cid = rg_cid;
             end
             compWays[i] <= s;
         end
@@ -122,8 +130,11 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
         rg_cid <= upd;
         Vector#(BtbAssociativity, Bool) v;
         for(Integer i = 0; i < valueOf(BtbAssociativity); i = i + 1) begin
-            if(compWays[i].cid == rg_cid) v[i] = True;
+            let c = compWays[i];
+            if(c.cid == upd) v[i] = True;
             else v[i] = False;
+            if(c.cid == rg_cid) c.age = fromInteger(valueOf(AgeSize)) - 1;
+            compWays[i] <= c;
         end
         for(Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             records[i].changeWays(v);
