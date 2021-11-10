@@ -38,13 +38,16 @@ import Vector::*;
 import RWBramCore::*;
 import Ehr::*;
 
-//export MapKeyIndex(..);
-//export MapKeyValue(..);
-//export MapKeyIndexValue(..);
-//export MapSplit(..);
-//export MapSplitCore(..);
-//export mkMapLossyBRAM;
-//export mkMapLossyBRAMCore;
+export MapKeyIndex(..);
+export MapKeyValue(..);
+export MapKeyIndexValue(..);
+export Map(..);
+export MapSplit(..);
+export MapSplitCore(..);
+export mkMapLossy;
+export mkMapLossyBRAM;
+export mkMapLossyBRAMCore;
+export AvailVector(..);
 
 typedef struct {
     ky key;
@@ -59,6 +62,8 @@ typedef struct {
     ix index;
     vl value;
 } MapKeyIndexValue#(type ky, type ix, type vl) deriving(Bits, Eq, FShow);
+
+typedef Vector#(as, Bool) AvailVector#(numeric type as);
 
 // Type parameters are for index and key (which together are the "address"),
 // the value stored in the map, and the associativity of the storage.
@@ -130,7 +135,7 @@ interface MapSplitCore#(type ky, type ix, type vl, numeric type as, numeric type
     method Action update(MapKeyIndex#(ky,ix) key, vl value);
     method Action lookupStart(MapKeyIndex#(ky,ix) lookup_key);
     method Maybe#(vl) lookupRead;
-    method Action changeWays(Vector#(as, Bool) v);
+    method Action changeWays(AvailVector#(as) v);
     method Action clear;
     method Bool clearDone;
 endinterface
@@ -221,7 +226,7 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
             readVal = Valid(updateReg.value);
         return readVal;
     endmethod
-    method Action changeWays(Vector#(as, Bool) v);
+    method Action changeWays(AvailVector#(as) v);
         for(Integer i = 0; i < a; i = i + 1) begin
             avWays[i] <= v[i];
         end
