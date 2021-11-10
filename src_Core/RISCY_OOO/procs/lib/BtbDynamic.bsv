@@ -42,8 +42,10 @@ import BtbCore::*;
 
 
 typedef 1024 TimeoutCycles;
+typedef TSub#(TimeoutCycles, 1) MaxTimeout;
 typedef 0 BtbInitAvailability;
 typedef 128 AgeSize;
+typedef TSub#(AgeSize, 1) MaxAge;
 
 //typedef 4 TimeoutSize
 typedef Bit#(TLog#(TimeoutCycles)) TimeoutCyclesIndex;
@@ -107,8 +109,7 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
         timeout <= timeout + 1;
     endrule
 
-// TODO
-    rule doAging(timeout == fromInteger(valueOf(TSub#(TimeoutCycles, 1))) &&& cidUpdate.wget matches tagged Invalid);
+    rule doAging(timeout == fromInteger(valueOf(MaxTimeout)) &&& cidUpdate.wget matches tagged Invalid);
         Bool allocated = False;
         for(Integer i = 0; i < valueOf(BtbAssociativity); i = i + 1) begin
             let s = compWays[i];
@@ -119,7 +120,7 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
                 // free to take
                 // and we have not given a new way to this compartment in this cycle
                 allocated = True;
-                s.age = fromInteger(valueOf(AgeSize)) - 1;
+                s.age = fromInteger(valueOf(MaxTimeout));
                 s.cid = rg_cid;
             end
             compWays[i] <= s;
@@ -133,7 +134,7 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
             let c = compWays[i];
             if(c.cid == upd) v[i] = True;
             else v[i] = False;
-            if(c.cid == rg_cid) c.age = fromInteger(valueOf(AgeSize)) - 1;
+            if(c.cid == rg_cid) c.age = fromInteger(valueOf(MaxTimeout));
             compWays[i] <= c;
         end
         for(Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin

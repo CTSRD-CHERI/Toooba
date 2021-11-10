@@ -39,6 +39,7 @@ import Ras_IFC::*;
 typedef 128 Entries;
 typedef 16 SegSize;
 typedef 1024 TimeoutSize;
+typedef TSub#(TimeoutSize, 1) MaxTimeoutNumber;
 typedef TDiv#(Entries, SegSize) SegNumber;
 typedef TLog#(SegSize) SegBits;
 typedef Bit#(TLog#(Entries)) EntriesIndex;
@@ -72,7 +73,7 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
 
     function SegIndex findNextSeg();
         SegIndex id = 0;
-        Age a = fromInteger(valueOf(TSub#(SegNumber, 1)));
+        Age a = fromInteger(valueOf(MaxAge));
         for(Integer i = 0; i < valueOf(SegNumber); i = i + 1) begin
             if(segs[i].age < a) begin
                id = fromInteger(i);
@@ -112,7 +113,7 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
 
     endrule
 
-    rule doAging(timeout == fromInteger(valueOf(TSub#(TimeoutSize, 1))) &&& updateCID.wget matches tagged Invalid);
+    rule doAging(timeout == fromInteger(valueOf(MaxTimeoutNumber)) &&& updateCID.wget matches tagged Invalid);
         $display("Aging happening");
         Vector#(CompNumber, Bool) v = replicate(False);
         for(Integer i = 0; i < valueOf(SegNumber); i = i + 1) begin
