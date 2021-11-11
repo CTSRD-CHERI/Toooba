@@ -132,9 +132,9 @@ endinterface
 typedef MapSplitCore#(ky, ix, vl, as, as) MapSplit#(type ky, type ix, type vl, numeric type as);
 
 module mkMapLossyBRAM(MapSplit#(ky, ix, vl, as)) provisos (
-Bits#(ky,ky_sz), Bits#(vl,vl_sz), Eq#(ky), Arith#(ky),
-Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
-Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
+    Bits#(ky,ky_sz), Bits#(vl,vl_sz), Eq#(ky), Arith#(ky),
+    Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
+    Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
 
     let m <- mkMapLossyBRAMCore;
     return m;
