@@ -213,7 +213,10 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
         // If there has been a recent write, take that one.
         if (updateReg.index == lookupReg.index && updateReg.key == lookupReg.key)
             readVal = Valid(updateReg.value);
-        return readVal;
+        // done for security reasons:
+        // do not return anything valid when we are still clearing
+        if(clearReg) return tagged Invalid;
+        else return readVal;
     endmethod
     method Action changeWays(Vector#(as,Bool) v);
         for(Integer i = 0; i < a; i = i + 1) begin
