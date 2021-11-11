@@ -118,19 +118,25 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
 
     rule doAging(timeout == fromInteger(valueOf(MaxTimeout)) &&& cidUpdate.wget matches tagged Invalid);
         Bool allocated = False;
+        Vector#(BtbAssociativity, Bool) v;
         for(Integer i = 0; i < valueOf(BtbAssociativity); i = i + 1) begin
             let s = compWays[i];
             if(s.v && s.cid != rg_cid && s.age != 0) begin
                 s.age = s.age - 1;
             end
+            if(s.age == 0) v[i] = True;
+            else v[i] = False;
             if(s.age == 0 && !allocated) begin
                 // free to take
                 // and we have not given a new way to this compartment in this cycle
                 allocated = True;
-                s.age = fromInteger(valueOf(MaxTimeout));
+                s.age = fromInteger(valueOf(MaxAge));
                 s.cid = rg_cid;
             end
             compWays[i] <= s;
+        end
+        for(Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
+            records[i].clearWays(v);
         end
     endrule
 
@@ -141,10 +147,12 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
             let c = compWays[i];
             if(c.cid == upd) v[i] = True;
             else v[i] = False;
-            if(c.cid == rg_cid) c.age = fromInteger(valueOf(MaxTimeout));
+            if(c.cid == rg_cid) c.age = fromInteger(valueOf(MaxAge));
             compWays[i] <= c;
         end
         for(Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
+            // after this cycle all writes and reads to the ways of the
+            // new compartment
             records[i].changeWays(v);
         end
     endrule

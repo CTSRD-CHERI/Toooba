@@ -49,29 +49,35 @@ import BtbDynamic::*;
 
 export mkBtb;
 
+(* synthesize *)
+module mkBtb(NextAddrPred#(16));
+    NextAddrPred#(16) btb <- mkBtbDynamic;
+    return btb;
+endmodule
+
 //(* synthesize *)
 //module mkBtb#(BtbInput inIfc)(NextAddrPred#(16));
 //    NextAddrPred#(16) btb <- mkBtbCoreCID(inIfc);
 //    return btb;
 //endmodule
 
-(* synthesize *)
-module mkBtb(NextAddrPred#(16));
-    Vector#(CompNumber, NextAddrPred#(16)) btbs <- replicateM(mkBtbCore);
-    Reg#(CompIndex) rg_cid <- mkReg(0);
-    method Action setCID(CompIndex cid);
-        rg_cid <= cid;
-    endmethod
-    method Action put_pc(CapMem pc);
-        btbs[rg_cid].put_pc(pc);
-    endmethod
-    interface pred = btbs[rg_cid].pred;
-    method Action update(CapMem pc, CapMem brTarget, Bool taken);
-        btbs[rg_cid].update(pc, brTarget, taken);
-    endmethod
-    method Action flush;
-        btbs[rg_cid].flush;
-    endmethod
-    method Bool flush_done = btbs[rg_cid].flush_done;
-endmodule
+//(* synthesize *)
+//module mkBtb(NextAddrPred#(16));
+//    Vector#(CompNumber, NextAddrPred#(16)) btbs <- replicateM(mkBtbCore);
+//    Reg#(CompIndex) rg_cid <- mkReg(0);
+//    method Action setCID(CompIndex cid);
+//        rg_cid <= cid;
+//    endmethod
+//    method Action put_pc(CapMem pc);
+//        btbs[rg_cid].put_pc(pc);
+//    endmethod
+//    interface pred = btbs[rg_cid].pred;
+//    method Action update(CapMem pc, CapMem brTarget, Bool taken);
+//        btbs[rg_cid].update(pc, brTarget, taken);
+//    endmethod
+//    method Action flush;
+//        btbs[rg_cid].flush;
+//    endmethod
+//    method Bool flush_done = btbs[rg_cid].flush_done;
+//endmodule
 

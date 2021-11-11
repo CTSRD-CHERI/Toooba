@@ -126,6 +126,7 @@ interface MapSplitCore#(type ky, type ix, type vl, numeric type as, numeric type
     method Maybe#(vl) lookupRead;
     method Action changeWays(Vector#(as, Bool) v);
     method Action clear;
+    method Action clearWays(Vector#(as, Bool) v);
     method Bool clearDone;
 endinterface
 
@@ -157,8 +158,9 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     end
     Integer a = valueof(as);
 
-    Reg#(Bool) clearReg <- mkReg(True);
+    Ehr#(2, Bool) clearReg <- mkEhr(True);
     Reg#(ix) clearCount <- mkReg(0);
+    Vector#(as, Ehr#(2, Bool)) rg_clearWays <- replicateM(mkEhr(False));
 
     function Bit#(TLog#(as)) getNextWay();
         let cur = wayNext;
@@ -171,10 +173,12 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule updateCanon;
-        if (clearReg) begin
-            for (Integer i = 0; i < a; i = i + 1) mem[i].wrReq(clearCount, unpack(0));
+        if (clearReg[0]) begin
+            for (Integer i = 0; i < a; i = i + 1) begin
+                if(rg_clearWays[i][0]) mem[i].wrReq(clearCount, unpack(0));
+            end
             clearCount <= clearCount + 1;
-            if (clearCount == ~0) clearReg <= False;
+            if (clearCount == ~0) clearReg[0] <= False;
         end else if (updateFresh) begin
             let u = updateReg;
             Bit#(TLog#(as)) way = wayNext;
@@ -215,7 +219,7 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
             readVal = Valid(updateReg.value);
         // done for security reasons:
         // do not return anything valid when we are still clearing
-        if(clearReg) return tagged Invalid;
+        if(clearReg[0]) return tagged Invalid;
         else return readVal;
     endmethod
     method Action changeWays(Vector#(as,Bool) v);
@@ -223,6 +227,13 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
             avWays[i] <= v[i];
         end
     endmethod
-    method clear if (!clearReg) = clearReg._write(True);
-    method clearDone = clearReg;
+    method Action clear if (!clearReg[0]);
+        for(Integer i = 0; i < a; i = i + 1) rg_clearWays[i][1] <= True;
+        clearReg[0] <= True;
+    endmethod
+    method Action clearWays(Vector#(as, Bool) v) if(!clearReg[0]);
+        for(Integer i = 0; i < a; i = i + 1) rg_clearWays[i][1] <= v[i];
+        clearReg[1] <= True;
+    endmethod
+    method clearDone = clearReg[0];
 endmodule
