@@ -109,6 +109,13 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
         timeout <= timeout + 1;
     endrule
 
+    rule doPrinting(timeout == 512);
+        $display("BTB-doPrinting");
+        for(Integer i = 0; i < valueOf(BtbAssociativity); i = i + 1) begin
+            $display(fshow(compWays[i]));
+        end
+    endrule
+
     rule doAging(timeout == fromInteger(valueOf(MaxTimeout)) &&& cidUpdate.wget matches tagged Invalid);
         Bool allocated = False;
         for(Integer i = 0; i < valueOf(BtbAssociativity); i = i + 1) begin

@@ -87,6 +87,17 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
         timeout <= timeout + 1;
     endrule
 
+    rule doPrinting(timeout == 512);
+        $display("RSB-doPrinting");
+        for(Integer i = 0; i < valueOf(SegNumber); i = i + 1) begin
+            $display(fshow(segs[i]));
+            for(Integer j = 0; j < valueOf(SegSize); j = j + 1) begin
+                $display("stack[%d] = ", fromInteger((i * 16) + j), fshow(stack[i * 16 + j][0]));
+            end
+            $display("");
+        end
+    endrule
+
     rule canonUpdate(updateCID.wget matches tagged Valid .upd);
         rg_cid <= upd;
         let p = pointers[upd];
