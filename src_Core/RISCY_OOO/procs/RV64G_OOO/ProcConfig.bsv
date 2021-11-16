@@ -348,3 +348,6 @@
 //
 // ==== derived parameters ====
 //
+
+// microarchitectural compartmentalisation enabled
+`define CID

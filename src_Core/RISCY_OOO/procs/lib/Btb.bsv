@@ -51,7 +51,11 @@ export mkBtb;
 
 (* synthesize *)
 module mkBtb(NextAddrPred#(16));
+`ifdef CID
     NextAddrPred#(16) btb <- mkBtbDynamic;
+`else
+    NextAddrPred#(16) btb <- mkBtbCore;
+`endif
     return btb;
 endmodule
 

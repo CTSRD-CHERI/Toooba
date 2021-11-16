@@ -58,7 +58,11 @@ module mkRas(ReturnAddrStack);
     //endmethod
     //method flush = rases[rg_cid].flush;
     //method flush_done = rases[rg_cid].flush_done;
+`ifdef CID
     let m <- mkCircularRas;
+`else
+    let m <- mkRasCore;
+`endif
     return m;
 endmodule
 
