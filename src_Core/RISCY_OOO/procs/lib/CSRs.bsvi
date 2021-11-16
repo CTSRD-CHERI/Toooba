@@ -164,4 +164,6 @@
 `CSR(DSCRATCH1,   12'h7B3)    // Debug scratch1
 `endif
 
+`ifdef CID
 `CSR(CID,         12'h7cb) // random number for CID
+`endif

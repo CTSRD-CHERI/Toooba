@@ -783,9 +783,11 @@ module mkCore#(CoreId coreId)(Core);
         end
     endrule
 
+`ifdef CID
     rule doSetCID;
         fetchStage.setCID(truncate(csrf.rd(csrAddrCID)));
     endrule
+`endif
 
 `ifdef SECURITY_OR_INCLUDE_GDB_CONTROL
     // Use wires to capture flush regs and empty signals. This is ok because
