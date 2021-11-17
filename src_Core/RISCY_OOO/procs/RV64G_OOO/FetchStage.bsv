@@ -407,7 +407,6 @@ module mkFetchStage(FetchStage);
     // perf resp FIFO
     Fifo#(1, PerfResp#(DecStagePerfType)) perfRespQ <- mkCFFifo;
 
-
     rule doPerfReq;
         let t <- toGet(perfReqQ).get;
         Data d = (case(t)
