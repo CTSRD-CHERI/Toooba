@@ -785,7 +785,9 @@ module mkCore#(CoreId coreId)(Core);
 
 `ifdef CID
     rule doSetCID;
-        fetchStage.setCID(truncate(csrf.rd(csrAddrCID)));
+        CompIndex cid = truncate(csrf.rd(csrAddrCID));
+        fetchStage.setCID(cid);
+        coreFix.memExeIfc.setCID(cid);
     endrule
 `endif
 

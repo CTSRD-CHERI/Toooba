@@ -459,6 +459,7 @@ interface SplitLSQ;
     // for security: we cannot flush D$ until all wrong-path loads have
     // returned from D$
     method Bool noWrongPathLoads;
+    method Action setCID(CompIndex cid);
 endinterface
 
 // --- auxiliary types and functions ---
@@ -962,8 +963,13 @@ module mkSplitLSQ(SplitLSQ);
     RWire#(void) wrongSpec_wakeBySB_conflict <- mkRWire;
     // make wrongSpec more urgent than firstSt (resolve bsc error)
     Wire#(Bool) wrongSpec_urgent_firstSt <- mkDWire(True);
-    Map#(Bit#(10),Bit#(6),Int#(3),2) ldKillMap <- mkMapLossy(minBound);
+`ifdef CID
+    Vector#(CompNumber, Map#(Bit#(10),Bit#(6),Int#(3),2)) ldKillMap <- replicateM(mkMapLossy(minBound));
+`else
+    Map#(Bit#(10),Bit#(6),Int#(3),2) ldKillMap <- replicateM(mkMapLossy(minBound);
+`endif
     Reg#(Bit#(16)) rand_count <- mkReg(0);
+    Reg#(CompIndex) rg_cid <- mkRegU;
     rule inc_rand_count;
         rand_count <= rand_count + 1;
     endrule
@@ -1495,7 +1501,11 @@ module mkSplitLSQ(SplitLSQ);
         ld_done_enq[ld_enqP] <= False;
         ld_killed_enq[ld_enqP] <= Invalid;
         ld_pc_hash[ld_enqP] <= pc_hash;
+`ifdef CID
+        ld_waitForOlderSt[ld_enqP] <= fromMaybe(minBound, ldKillMap[rg_cid].lookup(unpack(pc_hash))) == maxBound;
+`else
         ld_waitForOlderSt[ld_enqP] <= fromMaybe(minBound, ldKillMap.lookup(unpack(pc_hash))) == maxBound;
+`endif
         ld_readFrom_enq[ld_enqP] <= Invalid;
         ld_depLdQDeq_enq[ld_enqP] <= Invalid;
         ld_depStQDeq_enq[ld_enqP] <= Invalid;
@@ -2142,7 +2152,11 @@ module mkSplitLSQ(SplitLSQ);
         Int#(3) inc = -1; // Subtract one by default.
         if (waited) inc = 0; // Don't train if we waited for stores.
         else if (killedLd) inc = 2;  // Double train if we flushed the pipe.
+`ifdef CID
+        ldKillMap[rg_cid].updateWithFunc(unpack(ld_pc_hash[deqP]), // Key
+`else
         ldKillMap.updateWithFunc(unpack(ld_pc_hash[deqP]), // Key
+`endif
                                  inc,                      // value; don't train if we waited.
                                  boundedPlus, // function to combine this value with existing
                                  killedLd || rand_inv      // insert if doesn't exist
@@ -2464,5 +2478,9 @@ module mkSplitLSQ(SplitLSQ);
 
     method Bool noWrongPathLoads;
         return all( \== (False) , readVReg(ld_waitWPResp_noWP) );
+    endmethod
+
+    method Action setCID(CompIndex cid);
+        rg_cid <= cid;
     endmethod
 endmodule
