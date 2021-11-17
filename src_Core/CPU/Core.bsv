@@ -271,7 +271,6 @@ module mkCore#(CoreId coreId)(Core);
 
    // ================================================================
 
-
     // front end
     FetchStage fetchStage <- mkFetchStage;
     ITlb iTlb = fetchStage.iTlbIfc;
