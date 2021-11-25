@@ -165,5 +165,5 @@
 `endif
 
 `ifdef CID
-`CSR(CID,         12'h7cb) // random number for CID
+`CSR(CID,         12'h810) // random number for CID
 `endif
