@@ -52,8 +52,8 @@ import Ras_IFC::*;
 (* synthesize *)
 module mkRas(ReturnAddrStack);
 `ifdef CID
-    let m <- mkCircularRas;
-    //let m <- mkRasPartition;
+    //let m <- mkCircularRas;
+    let m <- mkRasPartition;
 `else
     let m <- mkRasCore;
 `endif
