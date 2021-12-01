@@ -383,7 +383,7 @@ module mkFetchStage(FetchStage);
     // Wire to train next addr pred (NAP)
     RWire#(TrainNAP) napTrainByExe <- mkRWire;
     RWire#(TrainNAP) napTrainByDec <- mkRWire;
-    Fifo#(1, TrainNAP) napTrainByDecQ <- mkPipelineFifo; // cut off critical path
+    FIFOF#(TrainNAP) napTrainByDecQ <- mkUGFIFOF; // cut off critical path
 
     // TLB and Cache connections
     ITlb iTlb <- mkITlb;
@@ -817,7 +817,7 @@ module mkFetchStage(FetchStage);
 `endif
       decode_epoch[0] <= decode_epoch_local;
       // send training data for next addr pred
-      if (trainNAP matches tagged Valid .x) begin
+      if (trainNAP matches tagged Valid .x &&& napTrainByDecQ.notFull) begin
          napTrainByDecQ.enq(x);
       end
 `ifdef PERF_COUNT
@@ -837,7 +837,7 @@ module mkFetchStage(FetchStage);
     // This prevents napTrainByDecQ from clogging doDecode rule when
     // superscalar size is large
     (* fire_when_enabled *)
-    rule setTrainNAPByDec;
+    rule setTrainNAPByDec(napTrainByDecQ.notEmpty);
         napTrainByDecQ.deq;
         napTrainByDec.wset(napTrainByDecQ.first);
     endrule
