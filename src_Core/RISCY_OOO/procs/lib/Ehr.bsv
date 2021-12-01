@@ -13,7 +13,7 @@
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
 //-
-// 
+//
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without
@@ -21,10 +21,10 @@
 // modify, merge, publish, distribute, sublicense, and/or sell copies
 // of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be
 // included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -61,38 +61,25 @@ function Vector#(n, Reg#(t)) getVEhrPort(Vector#(n, Ehr#(m, t)) ehrs, Integer p)
 endfunction
 
 module mkEhr#(t init)(Ehr#(n, t)) provisos(Bits#(t, tSz));
-  Vector#(n, RWire#(t)) lat <- replicateM(mkUnsafeRWire);
-  Reg#(t) rl <- mkReg(init);
+  Vector#(n, RWire#(t)) write <- replicateM(mkUnsafeRWire);
+  Reg#(t) rg <- mkReg(init);
   Ehr#(n, t) r = newVector;
+
+  Vector#(n, t) read = ?;
+  for(Integer i = 0; i < valueOf(n); i = i + 1)
+    read[i] = (i==0) ? rg : fromMaybe(read[i - 1], write[i-1].wget);
 
   (* fire_when_enabled, no_implicit_conditions *)
   rule canon;
-    t upd = rl;
-    for(Integer i = 0; i < valueOf(n); i = i + 1)
-      if(lat[i].wget matches tagged Valid .x)
-        upd = x;
-    rl <= upd;
+    // either write the final write value, if there is one, or the final read value.
+    rg <= fromMaybe(read[valueOf(n)-1], write[valueOf(n)-1].wget);
   endrule
 
   for(Integer i = 0; i < valueOf(n); i = i + 1)
     r[i] = (interface Reg;
-              method Action _write(t x);
-                lat[i].wset(x);
-              endmethod
-
-              method t _read;
-                t upd = rl;
-                for(Integer j = 0; j < i; j = j + 1)
-                begin
-                  if(lat[j].wget matches tagged Valid .x)
-                    upd = x;
-                end
-                return upd;
-                // use a non-? val here! otherwise new BSV compiler will stop optimize at ? val
-                // this affects judging if two rules are exclusive
-              endmethod
+              method Action _write(t x) = write[i].wset(x);
+              method t _read = read[i];
             endinterface);
 
    return r;
 endmodule
-
