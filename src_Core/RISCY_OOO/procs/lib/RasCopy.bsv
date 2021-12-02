@@ -42,7 +42,6 @@ import Vector::*;
 import Ehr::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
-import BRAMCore::*;
 
 interface RAS;
     method CapMem first;
@@ -61,6 +60,52 @@ typedef 8 RasEntries;
 typedef Bit#(TLog#(RasEntries)) RasIndex;
 
 (* synthesize *)
-module mkRas(ReturnAddrStack); // provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
-    BRAM_DUAL_PORT#(RasIndex, CapMem) bram <- mkBRAMCore2(valueOf(TExp#(TLog#(RasEntries))), False); 
+module mkRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
+    Vector#(RasEntries, Ehr#(TAdd#(SupSize, 1), CapMem)) stack <- replicateM(mkEhr(nullCap));
+    // head points past valid data
+    // to gracefully overflow, head is allowed to overflow to 0 and overwrite the oldest data
+    Ehr#(TAdd#(SupSize, 1), RasIndex) head <- mkEhr(0);
+
+`ifdef SECURITY
+    Reg#(Bool) flushDone <- mkReg(True);
+
+    rule doFlush(!flushDone);
+        writeVReg(getVEhrPort(stack, valueof(SupSize)), replicate(0));
+        head[valueof(SupSize)] <= 0;
+        flushDone <= True;
+    endrule
+`endif
+
+    Vector#(SupSize, RAS) rasIfc;
+    for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+        rasIfc[i] = (interface RAS;
+            method CapMem first;
+                return stack[head[i]][i];
+            endmethod
+            method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
+                // first pop, then push
+                RasIndex h = head[i];
+                if(pop) begin
+                    h = h - 1;
+                end
+                if(pushAddr matches tagged Valid .addr) begin
+                    h = h + 1;
+                    stack[h][i] <= addr;
+                end
+                head[i] <= h;
+            endmethod
+        endinterface);
+    end
+
+    interface ras = rasIfc;
+
+`ifdef SECURITY
+    method Action flush if(flushDone);
+        flushDone <= False;
+    endmethod
+    method flush_done = flushDone._read;
+`else
+    method flush = noAction;
+    method flush_done = True;
+`endif
 endmodule

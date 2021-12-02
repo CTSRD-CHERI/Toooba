@@ -36,6 +36,8 @@
 
 import BRAMCore::*;
 import Fifos::*;
+import Vector::*;
+import RWire::*;
 
 interface RWBramCore#(type addrT, type dataT);
     method Action wrReq(addrT a, dataT d);
@@ -44,6 +46,18 @@ interface RWBramCore#(type addrT, type dataT);
     method Bool rdRespValid;
     method Action deqRdResp;
 endinterface
+
+interface RWBramCoreVector#(type addrT, type dataT, numeric type n);
+    method Action wrReq(addrT a, Vector#(n, Maybe#(dataT)) d);
+    method Action rdReq(addrT a);
+    method Vector#(n, dataT) rdResp;
+    //method Bool rdRespValid;
+endinterface
+
+typedef struct {
+    addrT a;
+    Bit#(TLog#(n)) bramAddr;
+} VectorRdRq#(type addrT, numeric type n) deriving (Bits, Eq, FShow);
 
 module mkRWBramCore(RWBramCore#(addrT, dataT)) provisos(
     Bits#(addrT, addrSz), Bits#(dataT, dataSz)
@@ -100,4 +114,77 @@ module mkRWBramCoreUG(RWBramCore#(addrT, dataT)) provisos(
     method Action deqRdResp;
         noAction;
     endmethod
+endmodule
+
+
+
+module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
+    NumAlias#(TExp#(TLog#(n)), num),
+    NumAlias #(TSub#(addrSz,TLog#(n)), bramAddrSz),
+    Bits#(addrT, addrSz), Bits#(dataT, dataSz),
+    Arith#(addrT),
+    Literal#(dataT),
+    Add#(TDiv#(addrSz, n), a__, addrSz),
+    Add#(b__, TLog#(n), addrSz)
+    //Literal#(Vector#(n, VectorRdRq#(addrT, n)))
+);
+
+    // port a is used for writing
+    // port b is used for reading
+    Vector#(n, BRAM_DUAL_PORT#(Bit#(bramAddrSz), dataT)) brams <- replicateM(mkBRAMCore2(valueOf(TExp#(bramAddrSz)), False));
+    function Vector#(n, Bit#(bramAddrSz)) computeAddrs (addrT x);
+    // n = 4 , wordsInTotal = 400, wordsPerBRAM = 100
+    // linesInTotal = wordsInTotal / n = 100
+    // 200
+    // starting index = bottom log(n) bits
+        Bit#(bramAddrSz) startAddr = truncateLSB(pack(x)) + 1;
+        Bit#(TLog#(n)) off = truncate(pack(x));
+        Vector#(n, Bit#(bramAddrSz)) v = replicate(0);
+        for (Integer i = 0; i < valueOf(n); i = i + 1) begin
+            //v[i] = 0;
+            if(off == fromInteger(i)) startAddr = startAddr - 1;
+            v[i] = startAddr;
+        end
+        //return replicate (truncateLSB(pack(x)));
+        return v;
+    endfunction
+
+
+
+    //Vector#(n, Reg#(VectorRdRq#(addrT, n))) lastRdRq <- replicateM(mkRegU);
+    Reg#(Bit#(TLog#(n))) lastRqStart <- mkRegU;
+
+    method Action wrReq(addrT a, Vector#(n, Maybe#(dataT)) ds);
+      let addrs = computeAddrs (a);
+      Bit#(bramAddrSz) startAddr = truncateLSB(pack(a)) + 1;
+      Bit#(TLog#(n)) off = truncate(pack(a));
+      for(Integer i = 0; i < valueOf(n); i = i + 1) begin
+          if(ds[i] matches tagged Valid .data) brams[fromInteger(i) + off].a.put(True, startAddr, data);
+          if((fromInteger(i) + off) == fromInteger(valueOf(TSub#(n,1)))) startAddr = startAddr + 1;
+      end
+    endmethod
+
+    method Action rdReq(addrT a);
+      let addrs = computeAddrs (a);
+      $display("RWBRAMCoreVector read addresses:");
+      $display(fshow(addrs));
+
+      Bit#(TLog#(n)) off = truncate(pack(a));
+      lastRqStart <= off;
+      for(Integer i = 0; i < valueOf(n); i = i + 1) begin
+          brams[i].b.put(False, addrs[i], ?);
+      end
+      //function f (bram, addr) = bram.b.put(False, addr, ?);
+      //zipWithM (f, brams, addrs);
+    endmethod
+
+    method Vector#(n, dataT) rdResp;
+      Vector#(n, dataT) v;
+      for(Integer i = 0; i < valueOf(n); i = i + 1) begin
+          v[i] = brams[fromInteger(i) + lastRqStart].a.read;
+      end
+//      function dataT f (BRAM_DUAL_PORT#(Bit#(bramAddrSz), dataT) bram) = bram.b.read;
+      return v;
+    endmethod
+
 endmodule
