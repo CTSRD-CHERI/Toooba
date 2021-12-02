@@ -55,8 +55,7 @@ module mkRas(ReturnAddrStack);
     //let m <- mkCircularRas;
     let m <- mkRasPartition;
 `else
-    let m <- mkRasCore;
+    let m <- mkRasSingle;
 `endif
     return m;
 endmodule
-

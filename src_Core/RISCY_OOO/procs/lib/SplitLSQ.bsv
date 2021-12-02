@@ -966,7 +966,7 @@ module mkSplitLSQ(SplitLSQ);
 `ifdef CID
     Vector#(CompNumber, Map#(Bit#(10),Bit#(6),Int#(3),2)) ldKillMap <- replicateM(mkMapLossy(minBound));
 `else
-    Map#(Bit#(10),Bit#(6),Int#(3),2) ldKillMap <- replicateM(mkMapLossy(minBound);
+    Map#(Bit#(10),Bit#(6),Int#(3),2) ldKillMap <- mkMapLossy(minBound);
 `endif
     Reg#(Bit#(16)) rand_count <- mkReg(0);
     Reg#(CompIndex) rg_cid <- mkRegU;
