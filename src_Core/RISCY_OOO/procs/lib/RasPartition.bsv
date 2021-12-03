@@ -26,7 +26,7 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
-
+`ifdef CID
 `include "ProcConfig.bsv"
 import Types::*;
 import ProcTypes::*;
@@ -50,4 +50,5 @@ module mkRasPartition(ReturnAddrStack);
     method flush = rases[rg_cid].flush;
     method flush_done = rases[rg_cid].flush_done;
 endmodule
+`endif
 

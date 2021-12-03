@@ -100,7 +100,9 @@ module mkBtbCore(NextAddrPred#(hashSz))
         updateEn.wset(BtbUpdate {pc: pc, nextPc: nextPc, taken: taken});
     endmethod
 
+`ifdef CID
     method setCID(CompIndex cid) = noAction;
+`endif
 
 `ifdef SECURITY
     method Action flush method Action flush;
@@ -114,7 +116,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
 endmodule
 
 
-
+`ifdef CID
 module mkBtbCoreCID(NextAddrPred#(hashSz))
     provisos (NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
         Add#(1, a__, TDiv#(tagSz, hashSz)),
@@ -182,3 +184,4 @@ module mkBtbCoreCID(NextAddrPred#(hashSz))
     method flush_done = True;
 `endif
 endmodule
+`endif

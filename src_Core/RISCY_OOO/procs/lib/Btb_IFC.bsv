@@ -46,7 +46,9 @@ import CHERICap::*;
 
 
 interface NextAddrPred#(numeric type hashSz);
+`ifdef CID
     method Action setCID(CompIndex cid);
+`endif
     method Action put_pc(CapMem pc);
     interface Vector#(SupSizeX2, Maybe#(CapMem)) pred;
     method Action update(CapMem pc, CapMem brTarget, Bool taken);

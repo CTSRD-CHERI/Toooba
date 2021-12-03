@@ -142,7 +142,9 @@ module mkGSelectPred(DirPredictor#(GSelectTrainInfo));
 
     interface pred = predIfc;
 
+`ifdef CID
     method Action setCID(CompIndex cid) = noAction;
+`endif
 
     method Action update(CapMem pc, Bool taken, GSelectTrainInfo train, Bool mispred);
         // update history if mispred

@@ -82,6 +82,17 @@ endmodule
 
 (* synthesize *)
 module mkTourPred(DirPredictor#(TourTrainInfo));
+`ifdef CID
+    let m <- mkTourPredPartition;
+`else
+    let m <- mkTourPredCore;
+`endif
+    return m;
+endmodule
+
+`ifdef CID
+(* synthesize *)
+module mkTourPredPartition(DirPredictor#(TourTrainInfo));
     Vector#(CompNumber, DirPredictor#(TourTrainInfo)) preds <- replicateM(mkTourPredCore);
     Reg#(CompIndex) rg_cid <- mkReg(0);
     interface pred = preds[rg_cid].pred;
@@ -92,6 +103,7 @@ module mkTourPred(DirPredictor#(TourTrainInfo));
     method flush = preds[rg_cid].flush;
     method flush_done = preds[rg_cid].flush_done;
 endmodule
+`endif
 
 module mkTourPredCore(DirPredictor#(TourTrainInfo));
     // local history: MSB is the latest branch
@@ -179,7 +191,9 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
 
     interface pred = predIfc;
 
+`ifdef CID
     method Action setCID(CompIndex cid) = noAction;
+`endif
 
     method Action update(CapMem pc, Bool taken, TourTrainInfo train, Bool mispred);
         // update history if mispred

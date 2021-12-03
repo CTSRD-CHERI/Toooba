@@ -239,7 +239,9 @@ interface MemExePipeline;
     interface StoreBuffer stbIfc;
     interface DCoCache dMemIfc;
     interface SpeculationUpdate specUpdate;
+`ifdef CID
     method Action setCID(CompIndex cid);
+`endif
 `ifdef SELF_INV_CACHE
     interface Server#(void, void) reconcile;
 `endif
@@ -1572,9 +1574,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         lsq.specUpdate
     ));
 
+`ifdef CID
     method Action setCID(CompIndex cid);
         lsq.setCID(cid);
     endmethod
+`endif
 
 `ifdef SELF_INV_CACHE
     interface Server reconcile;

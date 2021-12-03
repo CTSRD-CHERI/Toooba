@@ -1060,10 +1060,8 @@ typedef `NUM_COMPS NumEpochs;
 `else
 typedef 8 CompNumber;
 `endif
-`else
-typedef 1 CompNumber;
-`endif
 typedef Bit#(TLog#(CompNumber)) CompIndex;
+`endif
 
 function Bit#(outWidth) hash(Bit#(inWidth) in)
     provisos(Add#(a__, inWidth, TMul#(TDiv#(inWidth, outWidth), outWidth)),

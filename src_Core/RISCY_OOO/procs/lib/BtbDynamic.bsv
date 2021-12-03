@@ -29,7 +29,7 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
-
+`ifdef CID
 import Types::*;
 import ProcTypes::*;
 import ConfigReg::*;
@@ -198,4 +198,4 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
 
 endmodule
 
-
+`endif

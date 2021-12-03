@@ -459,7 +459,9 @@ interface SplitLSQ;
     // for security: we cannot flush D$ until all wrong-path loads have
     // returned from D$
     method Bool noWrongPathLoads;
+`ifdef CID
     method Action setCID(CompIndex cid);
+`endif
 endinterface
 
 // --- auxiliary types and functions ---
@@ -969,7 +971,9 @@ module mkSplitLSQ(SplitLSQ);
     Map#(Bit#(10),Bit#(6),Int#(3),2) ldKillMap <- mkMapLossy(minBound);
 `endif
     Reg#(Bit#(16)) rand_count <- mkReg(0);
+`ifdef CID
     Reg#(CompIndex) rg_cid <- mkRegU;
+`endif
     rule inc_rand_count;
         rand_count <= rand_count + 1;
     endrule
@@ -2480,7 +2484,9 @@ module mkSplitLSQ(SplitLSQ);
         return all( \== (False) , readVReg(ld_waitWPResp_noWP) );
     endmethod
 
+`ifdef CID
     method Action setCID(CompIndex cid);
         rg_cid <= cid;
     endmethod
+`endif
 endmodule

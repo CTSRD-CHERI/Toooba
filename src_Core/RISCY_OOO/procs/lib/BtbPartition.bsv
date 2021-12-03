@@ -46,9 +46,11 @@ export mkBtbPartition;
 module mkBtbPartition(NextAddrPred#(16));
     Vector#(CompNumber, NextAddrPred#(16)) btbs <- replicateM(mkBtbCore);
     Reg#(CompIndex) rg_cid <- mkReg(0);
+`ifdef CID
     method Action setCID(CompIndex cid);
         rg_cid <= cid;
     endmethod
+`endif
     method Action put_pc(CapMem pc);
         btbs[rg_cid].put_pc(pc);
     endmethod

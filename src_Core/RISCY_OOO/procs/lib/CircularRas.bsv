@@ -26,6 +26,7 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
+`ifdef CID
 `include "ProcConfig.bsv"
 import ProcTypes::*;
 import RegFile::*;
@@ -197,3 +198,4 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
 
 
 endmodule
+`endif

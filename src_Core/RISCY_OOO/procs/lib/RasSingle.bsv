@@ -95,7 +95,9 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
 
     interface ras = rasIfc;
 
+`ifdef CID
     method Action setCID(CompIndex cid) = noAction;
+`endif
 
 `ifdef SECURITY
     method Action flush if(flushDone);
@@ -109,6 +111,7 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
 endmodule
 
 
+`ifdef CID
 module mkRasPartition(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
     Vector#(CompNumber, Vector#(RasEntries, Ehr#(TAdd#(SupSize, 1), CapMem))) stack;
     for(Integer i = 0; i < valueOf(CompNumber); i = i + 1)
@@ -166,3 +169,4 @@ module mkRasPartition(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries
     method flush_done = True;
 `endif
 endmodule
+`endif

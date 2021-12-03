@@ -55,7 +55,9 @@ endinterface
 
 interface ReturnAddrStack;
     interface Vector#(SupSize, RAS) ras;
+`ifdef CID
     method Action setCID(CompIndex cid);
+`endif
     method Action flush;
     method Bool flush_done;
 endinterface

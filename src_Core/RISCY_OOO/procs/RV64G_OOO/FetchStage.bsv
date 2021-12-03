@@ -123,7 +123,9 @@ interface FetchStage;
     interface Client#(Dii_Parcel_Id, Dii_Parcels) diiIfc;
 `endif
 
+`ifdef CID
     method Action setCID(CompIndex cid);
+`endif
 
     // starting and stopping
     method Action start(CapMem pc
@@ -867,10 +869,12 @@ module mkFetchStage(FetchStage);
     interface diiIfc = dii.toCore;
 `endif
 
+`ifdef CID
     method Action setCID(CompIndex cid);
         ras.setCID(cid);
         nextAddrPred.setCID(cid);
     endmethod
+`endif
 
     method Action start(
         CapMem start_pc

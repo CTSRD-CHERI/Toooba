@@ -78,7 +78,9 @@ module mkBht(DirPredictor#(BhtTrainInfo));
 
     interface pred = predIfc;
 
+`ifdef CID
     method Action setCID(CompIndex cid) = noAction;
+`endif
 
     method Action update(CapMem pc, Bool taken, BhtTrainInfo train, Bool mispred);
         let index = getIndex(pc);
