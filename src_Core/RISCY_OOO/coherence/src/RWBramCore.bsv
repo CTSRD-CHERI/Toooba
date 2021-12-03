@@ -12,7 +12,15 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
-//-
+//
+// Vector extensions:
+//     Copyright (c) 2021 Franz Fuchs
+//     All rights reserved.
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
 //
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
@@ -126,17 +134,12 @@ module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
     Literal#(dataT),
     Add#(TDiv#(addrSz, n), a__, addrSz),
     Add#(b__, TLog#(n), addrSz)
-    //Literal#(Vector#(n, VectorRdRq#(addrT, n)))
 );
 
     // port a is used for writing
     // port b is used for reading
     Vector#(n, BRAM_DUAL_PORT#(Bit#(bramAddrSz), dataT)) brams <- replicateM(mkBRAMCore2(valueOf(TExp#(bramAddrSz)), False));
     function Vector#(n, Bit#(bramAddrSz)) computeAddrs (addrT x);
-    // n = 4 , wordsInTotal = 400, wordsPerBRAM = 100
-    // linesInTotal = wordsInTotal / n = 100
-    // 200
-    // starting index = bottom log(n) bits
         Bit#(bramAddrSz) startAddr = truncateLSB(pack(x)) + 1;
         Bit#(TLog#(n)) off = truncate(pack(x));
         Vector#(n, Bit#(bramAddrSz)) v = replicate(0);
@@ -145,13 +148,9 @@ module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
             if(off == fromInteger(i)) startAddr = startAddr - 1;
             v[i] = startAddr;
         end
-        //return replicate (truncateLSB(pack(x)));
         return v;
     endfunction
 
-
-
-    //Vector#(n, Reg#(VectorRdRq#(addrT, n))) lastRdRq <- replicateM(mkRegU);
     Reg#(Bit#(TLog#(n))) lastRqStart <- mkRegU;
 
     method Action wrReq(addrT a, Vector#(n, Maybe#(dataT)) ds);
@@ -183,7 +182,6 @@ module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
       for(Integer i = 0; i < valueOf(n); i = i + 1) begin
           v[i] = brams[fromInteger(i) + lastRqStart].a.read;
       end
-//      function dataT f (BRAM_DUAL_PORT#(Bit#(bramAddrSz), dataT) bram) = bram.b.read;
       return v;
     endmethod
 
