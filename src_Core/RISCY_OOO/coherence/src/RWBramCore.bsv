@@ -64,8 +64,8 @@ endinterface
 
 typedef struct {
     addrT a;
-    Bit#(TLog#(n)) bramAddr;
-} VectorRdRq#(type addrT, numeric type n) deriving (Bits, Eq, FShow);
+    dataT d;
+} AddrData#(type addrT, type dataT) deriving (Bits, Eq, FShow);
 
 module mkRWBramCore(RWBramCore#(addrT, dataT)) provisos(
     Bits#(addrT, addrSz), Bits#(dataT, dataSz)
@@ -125,7 +125,6 @@ module mkRWBramCoreUG(RWBramCore#(addrT, dataT)) provisos(
 endmodule
 
 
-
 module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
     NumAlias#(TExp#(TLog#(n)), num),
     NumAlias #(TSub#(addrSz,TLog#(n)), bramAddrSz),
@@ -133,54 +132,63 @@ module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
     Arith#(addrT),
     Literal#(dataT),
     Add#(TDiv#(addrSz, n), a__, addrSz),
-    Add#(b__, TLog#(n), addrSz)
+    Add#(b__, TLog#(n), addrSz),
+    //Literal#(RWBramCore::AddrData#(Bit#(TSub#(addrSz, TLog#(n))), dataT)),
+    FShow#(dataT)
 );
 
     // port a is used for writing
     // port b is used for reading
     Vector#(n, BRAM_DUAL_PORT#(Bit#(bramAddrSz), dataT)) brams <- replicateM(mkBRAMCore2(valueOf(TExp#(bramAddrSz)), False));
-    function Vector#(n, Bit#(bramAddrSz)) computeAddrs (addrT x);
-        Bit#(bramAddrSz) startAddr = truncateLSB(pack(x)) + 1;
+    Reg#(Bit#(TLog#(n))) lastOff <- mkRegU;
+    RWire#(Vector#(n, AddrData#(Bit#(bramAddrSz), dataT))) lastWrReq <- mkRWire;
+    Reg#(Vector#(n, AddrData#(Bit#(bramAddrSz), dataT))) lastRqReq <- mkRegU;
+
+
+    function Vector#(n, AddrData#(Bit#(bramAddrSz), dataT)) computeAddrs (addrT x, Vector#(n, Maybe#(dataT)) ds);
+        Bit#(bramAddrSz) startAddr = truncateLSB(pack(x));
         Bit#(TLog#(n)) off = truncate(pack(x));
-        Vector#(n, Bit#(bramAddrSz)) v = replicate(0);
+        Vector#(n, AddrData#(Bit#(bramAddrSz), dataT)) v = replicate(AddrData{a: 0, d: 0});
         for (Integer i = 0; i < valueOf(n); i = i + 1) begin
-            //v[i] = 0;
-            if(off == fromInteger(i)) startAddr = startAddr - 1;
-            v[i] = startAddr;
+            if(ds[i] matches tagged Valid .data) v[fromInteger(i) + off] = AddrData{a: startAddr, d:data};
+            else v[fromInteger(i) + off] = AddrData{a: 0, d: 0};
+            if((fromInteger(i) + off) == fromInteger(valueOf(TSub#(n,1)))) startAddr = startAddr + 1;
         end
         return v;
     endfunction
 
-    Reg#(Bit#(TLog#(n))) lastRqStart <- mkRegU;
-
     method Action wrReq(addrT a, Vector#(n, Maybe#(dataT)) ds);
-      let addrs = computeAddrs (a);
-      Bit#(bramAddrSz) startAddr = truncateLSB(pack(a)) + 1;
-      Bit#(TLog#(n)) off = truncate(pack(a));
+      let aD = computeAddrs (a, ds);
+      lastWrReq.wset(aD);
       for(Integer i = 0; i < valueOf(n); i = i + 1) begin
-          if(ds[i] matches tagged Valid .data) brams[fromInteger(i) + off].a.put(True, startAddr, data);
-          if((fromInteger(i) + off) == fromInteger(valueOf(TSub#(n,1)))) startAddr = startAddr + 1;
+          brams[i].a.put(True, aD[i].a, aD[i].d);
       end
     endmethod
 
     method Action rdReq(addrT a);
-      let addrs = computeAddrs (a);
+      let aD = computeAddrs (a, ?);
+      lastRqReq <= aD;
       $display("RWBRAMCoreVector read addresses:");
-      $display(fshow(addrs));
+      $display(fshow(aD));
 
       Bit#(TLog#(n)) off = truncate(pack(a));
-      lastRqStart <= off;
+      lastOff <= off;
       for(Integer i = 0; i < valueOf(n); i = i + 1) begin
-          brams[i].b.put(False, addrs[i], ?);
+          brams[i].b.put(False, aD[i].a, ?);
       end
-      //function f (bram, addr) = bram.b.put(False, addr, ?);
-      //zipWithM (f, brams, addrs);
     endmethod
 
     method Vector#(n, dataT) rdResp;
-      Vector#(n, dataT) v;
+      Vector#(n, dataT) v = replicate(0);
+      let aD = lastRqReq;
+      let lR = lastWrReq.wget();
       for(Integer i = 0; i < valueOf(n); i = i + 1) begin
-          v[i] = brams[fromInteger(i) + lastRqStart].a.read;
+          v[i] = brams[fromInteger(i) + lastOff].a.read;
+          if(lR matches tagged Valid .req) begin
+              for(Integer j = 0; j < valueOf(n); j = j + 1) begin
+                  if(aD[i].a == req[j].a) v[i] = req[j].d;
+              end
+          end
       end
       return v;
     endmethod
