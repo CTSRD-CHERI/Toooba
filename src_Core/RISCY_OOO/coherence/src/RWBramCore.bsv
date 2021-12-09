@@ -133,7 +133,6 @@ module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
     Literal#(dataT),
     Add#(TDiv#(addrSz, n), a__, addrSz),
     Add#(b__, TLog#(n), addrSz),
-    //Literal#(RWBramCore::AddrData#(Bit#(TSub#(addrSz, TLog#(n))), dataT)),
     FShow#(dataT)
 );
 
@@ -141,8 +140,6 @@ module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
     // port b is used for reading
     Vector#(n, BRAM_DUAL_PORT#(Bit#(bramAddrSz), dataT)) brams <- replicateM(mkBRAMCore2(valueOf(TExp#(bramAddrSz)), False));
     Reg#(Bit#(TLog#(n))) lastOff <- mkRegU;
-    RWire#(Vector#(n, AddrData#(Bit#(bramAddrSz), dataT))) lastWrReq <- mkRWire;
-    Reg#(Vector#(n, AddrData#(Bit#(bramAddrSz), dataT))) lastRqReq <- mkRegU;
 
 
     function Vector#(n, AddrData#(Bit#(bramAddrSz), dataT)) computeAddrs (addrT x, Vector#(n, Maybe#(dataT)) ds);
@@ -159,7 +156,6 @@ module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
 
     method Action wrReq(addrT a, Vector#(n, Maybe#(dataT)) ds);
       let aD = computeAddrs (a, ds);
-      lastWrReq.wset(aD);
       for(Integer i = 0; i < valueOf(n); i = i + 1) begin
           brams[i].a.put(True, aD[i].a, aD[i].d);
       end
@@ -167,7 +163,6 @@ module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
 
     method Action rdReq(addrT a);
       let aD = computeAddrs (a, ?);
-      lastRqReq <= aD;
       $display("RWBRAMCoreVector read addresses:");
       $display(fshow(aD));
 
@@ -180,15 +175,8 @@ module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
 
     method Vector#(n, dataT) rdResp;
       Vector#(n, dataT) v = replicate(0);
-      let aD = lastRqReq;
-      let lR = lastWrReq.wget();
       for(Integer i = 0; i < valueOf(n); i = i + 1) begin
           v[i] = brams[fromInteger(i) + lastOff].a.read;
-          if(lR matches tagged Valid .req) begin
-              for(Integer j = 0; j < valueOf(n); j = j + 1) begin
-                  if(aD[i].a == req[j].a) v[i] = req[j].d;
-              end
-          end
       end
       return v;
     endmethod
