@@ -1,6 +1,6 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
-// 
+//
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without
@@ -8,10 +8,10 @@
 // modify, merge, publish, distribute, sublicense, and/or sell copies
 // of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be
 // included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -95,7 +95,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     // ordering: commit < rename < correctSpec
     // commit < wrongSpec
     // wrongSpec C rename
-    
+
     // NOTES:
     // rename do not need to see the effect of commit
     // rename is conflict with wrongSpec, so don't need to see its effect
@@ -153,7 +153,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Reg#(Bool) commit_SB_wrongSpec <- mkRevertingVirtualReg(True);
 
     // wrong spec conflict with rename
-    Vector#(SupSize, RWire#(void)) wrongSpec_rename_conflict <- replicateM(mkRWire);
+    //Vector#(SupSize, RWire#(void)) wrongSpec_rename_conflict <- replicateM(mkRWire);
 
     function indexT getNextIndex(indexT idx);
         return idx == fromInteger(valueof(size) - 1) ? 0 : idx + 1;
@@ -451,11 +451,11 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     specBits: sb
                 });
                 // conflict with wrong spec
-                wrongSpec_rename_conflict[i].wset(?);
+                //wrongSpec_rename_conflict[i].wset(?);
                 // ordering with commit
                 commit_SB_rename[i] <= False;
             endmethod
-            
+
             method canRename = guard;
         endinterface);
     end
@@ -484,9 +484,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 specTag: specTag
             });
             // conflict with rename
-            for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-                wrongSpec_rename_conflict[i].wset(?);
-            end
+            //for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+            //    wrongSpec_rename_conflict[i].wset(?);
+            //end
             // order after commit
             commit_SB_wrongSpec <= False;
         endmethod

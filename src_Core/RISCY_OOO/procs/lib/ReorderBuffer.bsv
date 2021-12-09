@@ -43,6 +43,7 @@ import HasSpecBits::*;
 import Vector::*;
 import Assert::*;
 import Ehr::*;
+import ConfigReg::*;
 import RevertingVirtualReg::*;
 `ifdef RVFI_DII
 import RVFI_DII_Types::*;
@@ -252,32 +253,32 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Integer traceBundle_deqLSQ_port = valueof(fpuMulDivExeNum) + valueof(aluExeNum);
     Integer traceBundle_enq_port = 1 + traceBundle_deqLSQ_port;
 
-    Reg#(CapMem)                                                    pc                   <- mkRegU;
-    Reg #(Bit #(32))                                                orig_inst            <- mkRegU;
-    Reg#(IType)                                                     iType                <- mkRegU;
-    Reg #(Maybe #(ArchRIndx))                                       rg_dst_reg           <- mkRegU;
+    Reg#(CapMem)                                                    pc                   <- mkConfigRegU;
+    Reg #(Bit #(32))                                                orig_inst            <- mkConfigRegU;
+    Reg#(IType)                                                     iType                <- mkConfigRegU;
+    Reg #(Maybe #(ArchRIndx))                                       rg_dst_reg           <- mkConfigRegU;
 `ifdef INCLUDE_TANDEM_VERIF
-    Reg #(Data)                                                     rg_dst_data          <- mkRegU;
-    Reg #(Data)                                                     rg_store_data        <- mkRegU;
-    Reg #(ByteEn)                                                   rg_store_data_BE     <- mkRegU;
+    Reg #(Data)                                                     rg_dst_data          <- mkConfigRegU;
+    Reg #(Data)                                                     rg_store_data        <- mkConfigRegU;
+    Reg #(ByteEn)                                                   rg_store_data_BE     <- mkConfigRegU;
 `endif
-    Reg#(Maybe#(CSR))                                               csr                  <- mkRegU;
-    Reg#(Maybe#(SCR))                                               scr                  <- mkRegU;
-    Reg#(Bool)                                                      claimed_phy_reg      <- mkRegU;
+    Reg#(Maybe#(CSR))                                               csr                  <- mkConfigRegU;
+    Reg#(Maybe#(SCR))                                               scr                  <- mkConfigRegU;
+    Reg#(Bool)                                                      claimed_phy_reg      <- mkConfigRegU;
     Ehr#(TAdd#(2, aluExeNum), Maybe#(Trap))                         trap                 <- mkEhr(?);
     Ehr#(TAdd#(2, aluExeNum), PPCVAddrCSRData)                      ppc_vaddr_csrData    <- mkEhr(?);
     Ehr#(TAdd#(1, fpuMulDivExeNum), Bit#(5))                        fflags               <- mkEhr(?);
-    Reg#(Bool)                                                      will_dirty_fpu_state <- mkRegU;
+    Reg#(Bool)                                                      will_dirty_fpu_state <- mkConfigRegU;
     Ehr#(TAdd#(3, TAdd#(fpuMulDivExeNum, aluExeNum)), RobInstState) rob_inst_state       <- mkEhr(?);
-    Reg#(LdStQTag)                                                  lsqTag               <- mkRegU;
+    Reg#(LdStQTag)                                                  lsqTag               <- mkConfigRegU;
     Ehr#(2, Maybe#(LdKilledBy))                                     ldKilled             <- mkEhr(?);
     Ehr#(3, Bool)                                                   memAccessAtCommit    <- mkEhr(?);
     Ehr#(2, Bool)                                                   lsqAtCommitNotified  <- mkEhr(?);
     Ehr#(2, Bool)                                                   nonMMIOStDone        <- mkEhr(?);
-    Reg#(Bool)                                                      epochIncremented     <- mkRegU;
+    Reg#(Bool)                                                      epochIncremented     <- mkConfigRegU;
     Ehr#(3, SpecBits)                                               spec_bits            <- mkEhr(?);
 `ifdef RVFI_DII
-    Reg#(Dii_Parcel_Id)                                             dii_pid              <- mkRegU;
+    Reg#(Dii_Parcel_Id)                                             dii_pid              <- mkConfigRegU;
 `endif
 `ifdef RVFI
     Ehr#(TAdd#(2, TAdd#(fpuMulDivExeNum, aluExeNum)), ExtraTraceBundle) traceBundle      <- mkEhr(?);
@@ -684,9 +685,6 @@ module mkSupReorderBuffer#(
     // doFinishXXX, doDeqLSQ_XXX: setExecute_XXX, correctSpeculation
     // these are handled in mkReorderBufferRowEhr
 
-    // wrong speculation: make wrong speculation conflict with enq
-    Vector#(SupSize, PulseWire) wrongSpec_enq_conflict <- replicateM(mkPulseWire);
-
     // SupSize number of FIFOs
     Vector#(SupSize, Vector#(SingleScalarSize, ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum))) row <- replicateM(replicateM(mkRobRow));
     Vector#(SupSize, Vector#(SingleScalarSize, Ehr#(2, Bool))) valid <- replicateM(replicateM(mkEhr(False)));
@@ -723,7 +721,6 @@ module mkSupReorderBuffer#(
     // ordering regs: deq sequence < setExecuted_XXX is maintained by each row
     // BUT setExecuted_XXX, setLSQAtCommitNotified < enq, deq < enq, and deq <
     // wrongSpec NEEDs explicit ordering
-    Reg#(Bool) deq_SB_wrongSpec <- mkRevertingVirtualReg(True);
     Vector#(SupSize, Reg#(Bool)) deq_SB_enq <- replicateM(mkRevertingVirtualReg(True));
     Vector#(SupSize, Reg#(Bool)) setExeAlu_SB_enq <- replicateM(mkRevertingVirtualReg(True));
     Vector#(SupSize, Reg#(Bool)) setExeMem_SB_enq <- replicateM(mkRevertingVirtualReg(True));
@@ -892,7 +889,7 @@ module mkSupReorderBuffer#(
 
             // wrong spec is conflicting with enq, so enqEn must be all false
             for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-                doAssert(!isValid(enqEn[i].wget), "when wrongSpec, enq cannot fire");
+                //doAssert(!isValid(enqEn[i].wget), "when wrongSpec, enq cannot fire");
             end
 
 `ifdef BSIM
@@ -1051,8 +1048,7 @@ module mkSupReorderBuffer#(
         Bool can_enq = can_enq_fifo[way];
         enqIfc[i] = (interface ROB_EnqPort;
             method Bool canEnq = can_enq;
-            method Action enq(ToReorderBuffer x) if(can_enq
-                                                    && !wrongSpec_enq_conflict[i]); // make it conflict with wrong speculation
+            method Action enq(ToReorderBuffer x) if(can_enq);
                 doAssert(getEnqPort(way) == fromInteger(i), "enq FIFO way matches enq port");
                 // record enq action, real action is applied later
                 enqEn[i].wset(x);
@@ -1085,7 +1081,6 @@ module mkSupReorderBuffer#(
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         SupWaySel way = getDeqFifoWay(fromInteger(i)); // FIFO[way] is used by deq port i
         Bool can_deq = can_deq_fifo[way] &&
-                       deq_SB_wrongSpec && // ordering: < wrongSpec
                        all(id, readVReg(deq_SB_enq)); // ordering: < enq
         deqIfc[i] = (interface ROB_DeqPort;
             method Bool canDeq = can_deq;
@@ -1120,9 +1115,9 @@ module mkSupReorderBuffer#(
 `ifdef RVFI
                 , ExtraTraceBundle tb
 `endif
-            ) if(
+) /*if(
                 all(id, readVReg(setExeAlu_SB_enq)) // ordering: < enq
-            );
+            )*/;
                 row[x.way][x.ptr].setExecuted_doFinishAlu[i].set(
 `ifdef INCLUDE_TANDEM_VERIF
                     dst_data,
@@ -1316,12 +1311,6 @@ module mkSupReorderBuffer#(
                 specTag: specTag,
                 killInstTag: killInstTag
             });
-            // order after deq
-            deq_SB_wrongSpec <= False;
-            // make it conflict with enq
-            for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-                wrongSpec_enq_conflict[i].send;
-            end
         endmethod
     endinterface
 endmodule

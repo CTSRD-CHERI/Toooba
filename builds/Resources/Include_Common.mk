@@ -89,7 +89,7 @@ BSC_COMPILATION_FLAGS += \
 	-D RISCV \
 	-D PERFORMANCE_MONITORING \
 	-D TSO_MM \
-	-keep-fires -aggressive-conditions -no-warn-action-shadowing -check-assert \
+	-keep-fires -aggressive-conditions -no-warn-action-shadowing -check-assert -show-schedule \
 	-suppress-warnings G0020 -steps-max-intervals 10000000   \
 	-steps-warn-interval 1000000 \
 	+RTS -K128M -RTS  -show-range-conflict

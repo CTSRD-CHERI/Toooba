@@ -1,6 +1,6 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
-// 
+//
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without
@@ -8,10 +8,10 @@
 // modify, merge, publish, distribute, sublicense, and/or sell copies
 // of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be
 // included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -25,6 +25,7 @@ import Vector::*;
 import ProcTypes::*;
 import HasSpecBits::*;
 import Ehr::*;
+import ConfigReg::*;
 
 interface SpecTagManager;
     method SpecBits currentSpecBits;
@@ -38,18 +39,16 @@ endinterface
 
 (* synthesize *)
 module mkSpecTagManager(SpecTagManager);
-    Ehr#(2,SpecBits) current_spec_bits_ehr <- mkEhr(0);
-    // normal processing & wrong spec use port 0
-    Reg#(SpecBits) current_spec_bits = current_spec_bits_ehr[0];
-    // correct spec use port 1
+    Reg#(SpecBits) current_spec_bits <- mkReg(0);
+
+    RWire#(SpecBits) correctSpeculation_wr <- mkRWire;
+    PulseWire claimSpecTag_wr <- mkPulseWire;
+    RWire#(SpecBits) incorrectSpeculation_wr <- mkRWire;
 
     // dependent_chekcpoints[i] is the SpecBits that depend on SpecTag i.
     // i.e., if SpecTag i is incorrect, then dependent_checkpoints[i] are all
     // wrong.
-    Vector#(NumSpecTags, Reg#(SpecBits)) dependent_checkpoints <- replicateM(mkReg(0));
-
-    // wrong spec conflict with claim spec tag
-    RWire#(void) wrongSpec_claim_conflict <- mkRWire;
+    Vector#(NumSpecTags, Reg#(SpecBits)) dependent_checkpoints <- replicateM(mkConfigReg(0));
 
     Maybe#(SpecTag) next_spec_tag = tagged Invalid;
     for (Integer i = valueOf(NumSpecTags) - 1 ; i >= 0 ; i = i-1) begin
@@ -58,10 +57,16 @@ module mkSpecTagManager(SpecTagManager);
         end
     end
 
-    rule debugSt;
-        if ((next_spec_tag == tagged Invalid )) begin 
+    rule cannon;
+        if ((next_spec_tag == tagged Invalid )) begin
             $fdisplay(stdout, "SpecTag manager locked");
         end
+
+        SpecBits next_spec_bits = current_spec_bits;
+        if (claimSpecTag_wr) next_spec_bits[fromMaybe(?,next_spec_tag)] = 1;
+        next_spec_bits = next_spec_bits & fromMaybe(~0, correctSpeculation_wr.wget);
+        next_spec_bits = fromMaybe(next_spec_bits,incorrectSpeculation_wr.wget);
+        current_spec_bits <= next_spec_bits;
     endrule
 
     method SpecBits currentSpecBits;
@@ -70,8 +75,8 @@ module mkSpecTagManager(SpecTagManager);
     method SpecTag nextSpecTag if (next_spec_tag matches tagged Valid .valid_spec_tag);
         return valid_spec_tag;
     endmethod
-    method Action claimSpecTag if (next_spec_tag matches tagged Valid .valid_spec_tag);
-        current_spec_bits[valid_spec_tag] <= 1;
+    method Action claimSpecTag if (next_spec_tag matches tagged Valid .valid_spec_tag); // conflict with wrong spec
+        claimSpecTag_wr.send();
 
         for (Integer i = 0 ; i < valueOf(NumSpecTags) ; i = i+1) begin
             if (fromInteger(i) == valid_spec_tag) begin
@@ -80,23 +85,19 @@ module mkSpecTagManager(SpecTagManager);
                 dependent_checkpoints[i] <= dependent_checkpoints[i] | (1 << valid_spec_tag);
             end
         end
-        // conflict with wrong spec
-        wrongSpec_claim_conflict.wset(?);
     endmethod
     method Bool canClaim = isValid(next_spec_tag);
     interface SpeculationUpdate specUpdate;
         method Action incorrectSpeculation(Bool killAll, SpecTag tag);
             if(killAll) begin
-                current_spec_bits <= 0;
+                incorrectSpeculation_wr.wset(0);
             end
             else begin
-                current_spec_bits <= current_spec_bits & (~(dependent_checkpoints[tag]));
+                incorrectSpeculation_wr.wset(current_spec_bits & (~(dependent_checkpoints[tag])));
             end
-            // conflict with claim spec tag
-            wrongSpec_claim_conflict.wset(?);
         endmethod
         method Action correctSpeculation(SpecBits mask);
-            current_spec_bits_ehr[1] <= current_spec_bits_ehr[1] & mask;
+            correctSpeculation_wr.wset(mask);
         endmethod
     endinterface
 

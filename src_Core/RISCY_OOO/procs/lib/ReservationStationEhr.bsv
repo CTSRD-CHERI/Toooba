@@ -1,6 +1,6 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
-// 
+//
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without
@@ -8,10 +8,10 @@
 // modify, merge, publish, distribute, sublicense, and/or sell copies
 // of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be
 // included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -101,8 +101,8 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     Vector#(size, Ehr#(regsReadyPortNum, RegsReady)) regs_ready <- replicateM(mkEhr(?));
 
     // wrong spec conflict with enq and dispatch
-    RWire#(void) wrongSpec_enq_conflict <- mkRWire;
-    RWire#(void) wrongSpec_dispatch_conflict <- mkRWire;
+    //RWire#(void) wrongSpec_enq_conflict <- mkRWire;
+    //RWire#(void) wrongSpec_dispatch_conflict <- mkRWire;
 
     // approximate count of valid entries
     Reg#(countT) validEntryCount <- mkConfigReg(0);
@@ -144,7 +144,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     // search for row to dispatch, we do it lazily
     // i.e. look at the EHR port 0 of ready bits, so there is no bypassing
     staticAssert(lazySched, "Only support lazy schedule now");
-    
+
     Vector#(size, Wire#(Bool)) ready_wire <- replicateM(mkBypassWire);
     (* fire_when_enabled, no_implicit_conditions *)
     rule setReadyWire;
@@ -161,7 +161,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         return r;
     endfunction
     Vector#(size, Bool) can_schedule = zipWith( \&& , readVEhr(valid_dispatch_port, valid), map(get_ready, ready_wire) );
-    
+
     // oldest index to dispatch
     let can_schedule_index = findOldest(can_schedule);
 
@@ -226,7 +226,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         spec_bits[idx][sb_enq_port] <= x.spec_bits;
         regs_ready[idx][ready_enq_port] <= x.regs_ready;
         // conflict with wrong spec
-        wrongSpec_enq_conflict.wset(?);
+        //wrongSpec_enq_conflict.wset(?);
     endmethod
     method Bool canEnq = isValid(enqP);
 
@@ -253,7 +253,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     method Action doDispatch if (can_schedule_index matches tagged Valid .i);
         valid[i][valid_dispatch_port] <= False;
         // conflict with wrong spec
-        wrongSpec_dispatch_conflict.wset(?);
+        //wrongSpec_dispatch_conflict.wset(?);
     endmethod
 
     method countT approximateCount;
@@ -278,8 +278,8 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
             Vector#(size, Integer) idxVec = genVector;
             joinActions(map(wrongSpec, idxVec));
             // conflict with enq, dispatch
-            wrongSpec_enq_conflict.wset(?);
-            wrongSpec_dispatch_conflict.wset(?);
+            //wrongSpec_enq_conflict.wset(?);
+            //wrongSpec_dispatch_conflict.wset(?);
         endmethod
 
         method Action correctSpeculation(SpecBits mask);
