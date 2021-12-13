@@ -45,7 +45,6 @@
 import BRAMCore::*;
 import Fifos::*;
 import Vector::*;
-import RWire::*;
 
 interface RWBramCore#(type addrT, type dataT);
     method Action wrReq(addrT a, dataT d);
@@ -59,7 +58,6 @@ interface RWBramCoreVector#(type addrT, type dataT, numeric type n);
     method Action wrReq(addrT a, Vector#(n, Maybe#(dataT)) d);
     method Action rdReq(addrT a);
     method Vector#(n, dataT) rdResp;
-    //method Bool rdRespValid;
 endinterface
 
 typedef struct {
