@@ -55,11 +55,6 @@ interface RAS;
 endinterface
 
 interface ReturnAddrStack;
-    // naming
-    // 1: push 0x0
-    // 2:
-    // 3:
-    // 4: push 0xc
     interface Vector#(SupSize, RAS) ras;
     method Action flush;
     method Bool flush_done;
@@ -138,6 +133,10 @@ module mkRas(ReturnAddrStack); // provisos(NumAlias#(TExp#(TLog#(RasEntries)), R
     end
 
     interface ras = rasIfc;
+
+    method Action flush = noAction;
+
+    method Bool flush_done = True;
 
 
 
