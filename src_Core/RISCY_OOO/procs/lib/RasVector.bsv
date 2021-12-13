@@ -42,25 +42,14 @@ import Vector::*;
 import Ehr::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
-
-interface RAS;
-    method CapMem first;
-    // first pop, then push
-    method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
-endinterface
-
-interface ReturnAddrStack;
-    interface Vector#(SupSize, RAS) ras;
-    method Action flush;
-    method Bool flush_done;
-endinterface
+import Ras_IFC::*;
 
 // Local RAS Typedefs SHOULD BE A POWER OF TWO.
-typedef 8 RasEntries;
+typedef 64 RasEntries;
 typedef Bit#(TLog#(RasEntries)) RasIndex;
 
 (* synthesize *)
-module mkRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
+module mkRasVector(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
     Vector#(RasEntries, Ehr#(TAdd#(SupSize, 1), CapMem)) stack <- replicateM(mkEhr(nullCap));
     // head points past valid data
     // to gracefully overflow, head is allowed to overflow to 0 and overwrite the oldest data

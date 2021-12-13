@@ -4,6 +4,7 @@
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2021 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -42,15 +43,16 @@ import Vector::*;
 import Ehr::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
-import Ras_IFC::*;
-import RasBram::*;
-import RasVector::*;
 
-// Local RAS Typedefs SHOULD BE A POWER OF TWO.
+interface RAS;
+    method CapMem first;
+    // first pop, then push
+    method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
+endinterface
 
-(* synthesize *)
-module mkRas(ReturnAddrStack);
-    //let m <- mkRasVector;
-    let m <- mkRasBram;
-    return m;
-endmodule
+interface ReturnAddrStack;
+    interface Vector#(SupSize, RAS) ras;
+    method Action flush;
+    method Bool flush_done;
+endinterface
+
