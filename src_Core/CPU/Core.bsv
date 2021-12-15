@@ -347,7 +347,8 @@ module mkCore#(CoreId coreId)(Core);
         end
         GlobalSpecUpdate#(CorrectSpecPortNum, ConflictWrongSpecPortNum) globalSpecUpdate <- mkGlobalSpecUpdate(
             joinSpeculationUpdate(
-                append(append(vec(regRenamingTable.specUpdate,
+                append(append(vec(fetchStage.specUpdate,
+                                  regRenamingTable.specUpdate,
                                   specTagManager.specUpdate,
                                   fix.memExeIfc.specUpdate), aluSpecUpdate), fpuMulDivSpecUpdate)
             ),
