@@ -42,6 +42,7 @@ import Map::*;
 import Vector::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
+import SpecFifo::*;
 
 export NextAddrPred(..);
 export mkBtb;
@@ -49,7 +50,7 @@ export mkBtb;
 interface NextAddrPred#(numeric type hashSz);
     method Action put_pc(CapMem pc);
     interface Vector#(SupSizeX2, Maybe#(CapMem)) pred;
-    method Action update(CapMem pc, CapMem brTarget, Bool taken);
+    method Action update(CapMem pc, CapMem brTarget, Bool taken, SpecBits specBits);
     // security
     method Action flush;
     method Bool flush_done;
@@ -94,10 +95,10 @@ module mkBtbCore(NextAddrPred#(hashSz))
         Add#(1, a__, TDiv#(tagSz, hashSz)),
     Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
     // Read and Write ordering doesn't matter since this is a predictor
-    Reg#(BtbBank) firstBank_reg <- mkRegU;
+    Reg#(BtbAddr) addr_reg <- mkRegU;
+    BtbBank firstBank = addr_reg.bank;
     Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CapMem), BtbAssociativity))
         records <- replicateM(mkMapLossyBRAM);
-    RWire#(BtbUpdate) updateEn <- mkRWire;
 
     function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
     function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
@@ -106,9 +107,23 @@ module mkBtbCore(NextAddrPred#(hashSz))
     function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(CapMem pc) =
         MapKeyIndex{key: hash(getTag(pc)), index: getIndex(pc)};
 
+    Bool lazyEnq = True;
+    Bool unguarded_insert = True;
+    function Maybe#(CapMem) match_record(BtbAddr pc, BtbUpdate update);
+        if (update.taken && (getBtbAddr(update.pc) == pc)) return Valid(update.nextPc);
+        else return Invalid;
+    endfunction
+    SearchableSpecFifo#(4, BtbUpdate, CapMem, BtbAddr) updateQ <- mkSearchableSpecFifoCF(
+                                                                      lazyEnq,
+                                                                      unguarded_insert,
+                                                                      match_record
+                                                                  );
+
     // no flush, accept update
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule canonUpdate(updateEn.wget matches tagged Valid .upd);
+    (* fire_when_enabled *)
+    rule canonUpdate;
+        BtbUpdate upd = updateQ.first.data;
+        updateQ.deq;
         let pc = upd.pc;
         let nextPc = upd.nextPc;
         let taken = upd.taken;
@@ -119,26 +134,29 @@ module mkBtbCore(NextAddrPred#(hashSz))
 
     method Action put_pc(CapMem pc);
         BtbAddr addr = getBtbAddr(pc);
-        firstBank_reg <= addr.bank;
         // Start SupSizeX2 BTB lookups, but ensure to lookup in the appropriate
         // bank for the alignment of each potential branch.
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             BtbAddr a = unpack(pack(addr) + fromInteger(i));
             records[a.bank].lookupStart(MapKeyIndex{key: hash(a.tag), index: a.index});
         end
+        addr_reg <= addr;
     endmethod
 
     method Vector#(SupSizeX2, Maybe#(CapMem)) pred;
         Vector#(SupSizeX2, Maybe#(CapMem)) ppcs = replicate(Invalid);
-        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1)
+        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             if (records[i].lookupRead matches tagged Valid .record)
                 ppcs[i] = record.v ? Valid(record.d):Invalid;
-        ppcs = rotateBy(ppcs,unpack(-firstBank_reg)); // Rotate firstBank down to zeroeth element.
+            if (updateQ.search(addr_reg) matches tagged Valid .next_pc)
+                ppcs[i] = Valid(next_pc);
+        end
+        ppcs = rotateBy(ppcs,unpack(-firstBank)); // Rotate firstBank down to zeroeth element.
         return ppcs;
     endmethod
 
-    method Action update(CapMem pc, CapMem nextPc, Bool taken);
-        updateEn.wset(BtbUpdate {pc: pc, nextPc: nextPc, taken: taken});
+    method Action update(CapMem pc, CapMem nextPc, Bool taken, SpecBits specBits);
+        updateQ.enq(ToSpecFifo {spec_bits: specBits, data: BtbUpdate {pc: pc, nextPc: nextPc, taken: taken}});
     endmethod
 
 `ifdef SECURITY
