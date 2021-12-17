@@ -62,8 +62,8 @@ endinterface
 
 typedef struct {
     addrT a;
-    dataT d;
-} AddrData#(type addrT, type dataT) deriving (Bits, Eq, FShow);
+    Bit#(TLog#(n)) idx;
+} AddrData#(type addrT, numeric type n) deriving (Bits, Eq, FShow);
 
 module mkRWBramCore(RWBramCore#(addrT, dataT)) provisos(
     Bits#(addrT, addrSz), Bits#(dataT, dataSz)
@@ -122,9 +122,46 @@ module mkRWBramCoreUG(RWBramCore#(addrT, dataT)) provisos(
     endmethod
 endmodule
 
+module mkRWBramCoreForwarding(RWBramCore#(addrT, dataT)) provisos(
+    Bits#(addrT, addrSz), Bits#(dataT, dataSz),
+    Eq#(addrT),
+    Literal#(addrT),
+    Literal#(dataT)
+);
+    BRAM_DUAL_PORT#(addrT, dataT) bram <- mkBRAMCore2(valueOf(TExp#(addrSz)), False);
+    BRAM_PORT#(addrT, dataT) wrPort = bram.a;
+    BRAM_PORT#(addrT, dataT) rdPort = bram.b;
+
+    Reg#(addrT) lastWrAddr <- mkReg(0);
+    Reg#(addrT) lastRdAddr <- mkReg(0);
+    Reg#(dataT) lastWrData <- mkReg(0);
+
+    method Action wrReq(addrT a, dataT d);
+        lastWrAddr <= a;
+        lastWrData <= d;
+        wrPort.put(True, a, d);
+    endmethod
+
+    method Action rdReq(addrT a);
+        lastRdAddr <= a;
+        rdPort.put(False, a, ?);
+    endmethod
+
+    method dataT rdResp;
+        if(lastWrAddr == lastRdAddr) return lastWrData;
+        else return rdPort.read;
+    endmethod
+
+    method rdRespValid = True;
+
+    method Action deqRdResp;
+        noAction;
+    endmethod
+endmodule
+
 
 module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
-    NumAlias#(TExp#(TLog#(n)), num),
+    //NumAlias#(TExp#(TLog#(n)), num),
     NumAlias #(TSub#(addrSz,TLog#(n)), bramAddrSz),
     Bits#(addrT, addrSz), Bits#(dataT, dataSz),
     Arith#(addrT),
@@ -136,45 +173,64 @@ module mkRWBramCoreVector(RWBramCoreVector#(addrT, dataT, n)) provisos(
 
     // port a is used for writing
     // port b is used for reading
-    Vector#(n, BRAM_DUAL_PORT#(Bit#(bramAddrSz), dataT)) brams <- replicateM(mkBRAMCore2(valueOf(TExp#(bramAddrSz)), False));
-    Reg#(Bit#(TLog#(n))) lastOff <- mkRegU;
+    Vector#(n, RWBramCore#(Bit#(bramAddrSz), dataT)) brams <- replicateM(mkRWBramCoreForwarding);
+    Reg#(AddrData#(Bit#(bramAddrSz), n)) lastAddr <- mkRegU;
 
 
-    function Vector#(n, AddrData#(Bit#(bramAddrSz), dataT)) computeAddrs (addrT x, Vector#(n, Maybe#(dataT)) ds);
-        Bit#(bramAddrSz) startAddr = truncateLSB(pack(x));
+    function Vector#(n, Bit#(bramAddrSz)) computeAddrs (addrT x);
+        /*Bit#(bramAddrSz) startAddr = truncateLSB(pack(x));
         Bit#(TLog#(n)) off = truncate(pack(x));
-        Vector#(n, AddrData#(Bit#(bramAddrSz), dataT)) v = replicate(AddrData{a: 0, d: 0});
+        Bit#(TLog#(n)) index = 0;
+        Vector#(n, AddrData#(Bit#(bramAddrSz), n)) v = replicate(AddrData{a: 0, idx: 0});
         for (Integer i = 0; i < valueOf(n); i = i + 1) begin
-            if(ds[i] matches tagged Valid .data) v[fromInteger(i) + off] = AddrData{a: startAddr, d:data};
-            else v[fromInteger(i) + off] = AddrData{a: 0, d: 0};
+            v[fromInteger(i) + off] = AddrData{a: startAddr, idx: index};
             if((fromInteger(i) + off) == fromInteger(valueOf(TSub#(n,1)))) startAddr = startAddr + 1;
+            index = index + 1;
+        end
+        return v;*/
+        Vector#(n, Bit#(bramAddrSz)) v = ?;
+        for (Integer i = 0; i < valueOf(n); i = i + 1) begin
+            AddrData#(Bit#(bramAddrSz), n) tmp = unpack(pack(x) + fromInteger(i));
+            v[tmp.idx] = tmp.a;
         end
         return v;
     endfunction
 
     method Action wrReq(addrT a, Vector#(n, Maybe#(dataT)) ds);
-      let aD = computeAddrs (a, ds);
+      let aD = computeAddrs (a);
+//      Bit#(TLog#(n)) off = truncate(pack(x));
+      //$display("RWBRAMCoreVector write addresses:");
+      //$display(fshow(aD));
+      
       for(Integer i = 0; i < valueOf(n); i = i + 1) begin
-          brams[i].a.put(True, aD[i].a, aD[i].d);
+          Bit#(TLog#(n)) off = truncate(pack(a)) + fromInteger(i);
+          if(ds[i] matches tagged Valid .data) begin
+              brams[off].wrReq(aD[off], data);
+              //$display("write: bram[", fshow(off), "], addr = ", fshow(aD[off]), ", data = ", fshow(data));
+          end
       end
     endmethod
 
     method Action rdReq(addrT a);
-      let aD = computeAddrs (a, ?);
-      $display("RWBRAMCoreVector read addresses:");
-      $display(fshow(aD));
+      let aD = computeAddrs (a);
+      //$display("RWBRAMCoreVector read addresses:");
+      //$display(fshow(aD));
 
-      Bit#(TLog#(n)) off = truncate(pack(a));
-      lastOff <= off;
+      //Bit#(TLog#(n)) off = truncate(pack(a));
+      lastAddr <= unpack(pack(a));
       for(Integer i = 0; i < valueOf(n); i = i + 1) begin
-          brams[i].b.put(False, aD[i].a, ?);
+          brams[i].rdReq(aD[i]);
       end
     endmethod
 
     method Vector#(n, dataT) rdResp;
       Vector#(n, dataT) v = replicate(0);
+      //let aD = lastAddr;
       for(Integer i = 0; i < valueOf(n); i = i + 1) begin
-          v[i] = brams[fromInteger(i) + lastOff].a.read;
+          Bit#(TLog#(n)) off = lastAddr.idx + fromInteger(i);
+          let data = brams[off].rdResp;
+          v[i] = data;
+          //$display("rdResp: data = ", fshow(data), "from bram[", fshow(off), "]");
       end
       return v;
     endmethod

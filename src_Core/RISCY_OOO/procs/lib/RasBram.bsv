@@ -12,6 +12,16 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//
+// Bram implementation:
+//     Copyright (c) 2021 Franz Fuchs
+//     All rights reserved.
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
+
 //-
 //
 // Permission is hereby granted, free of charge, to any person
@@ -71,6 +81,8 @@ module mkRasBram(ReturnAddrStack); // provisos(NumAlias#(TExp#(TLog#(RasEntries)
 
     rule readData;
         let rd = bram.rdResp;
+        $display("RasBramreadData: ", fshow(rd));
+        $display("RasBramreadData -time: ", $time());
         for(Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
             topElems[i][0] <= rd[i];
         end
@@ -80,30 +92,31 @@ module mkRasBram(ReturnAddrStack); // provisos(NumAlias#(TExp#(TLog#(RasEntries)
     rule displayEhr;
         for(Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
             for(Integer j = 0; j < valueOf(SupSize) + 2; j = j + 1) begin
-                $display("RasBramEhrState: ", fshow(topElems[i][j]));
+                $display("RasBramEhrState - topElems[", fshow(fromInteger(i)), "][", fshow(fromInteger(j)), "] = ", fshow(topElems[i][j]));
             end
         end
     endrule
 
     rule writeData;
         Vector#(SupSize, Maybe#(CapMem)) v = replicate(tagged Invalid);
-        Bit#(TLog#(SupSize)) idx = 0;
-        //for(Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
-          //  $display("RasBramEhrState: ", fshow(topElems[i][valueOf(SupSize) + 1]));
-        //end
+        //Bit#(TLog#(SupSize)) idx = 0;
         $display("RasBramwriteData bottom: ", fshow(bottom[valueOf(SupSize) + 1]));
+        $display("RasBramwriteData head: ", fshow(head[valueOf(SupSize) + 1]));
         for(Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
             if(bottom[valueOf(SupSize) + 1] <= fromInteger(i)) begin
-                v[idx] = tagged Valid topElems[i][valueOf(SupSize) + 1];
-                idx = idx + 1;
+                v[i] = tagged Valid topElems[i][valueOf(SupSize) + 1];
+                //idx = idx + 1;
             end
+            //else v[i] = tagged Invalid;
         end
         bram.wrReq(head[valueOf(SupSize) + 1], v);
         $display("RasBramwriteData: ", fshow(v));
+        $display("RasBramwriteData - time: ", $time());
     endrule
 
     rule startRead;
-        bram.rdReq(head[valueOf(SupSize) + 1] - fromInteger(valueOf(SupSize)));
+        $display("RasBramstartRead: addr = ", fshow(head[valueOf(SupSize) + 1]));
+        bram.rdReq(head[valueOf(SupSize) + 1]);// - zeroExtend(bottom[valueOf(SupSize) + 1])); //- fromInteger(valueOf(SupSize)));
     endrule
 
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
@@ -111,28 +124,28 @@ module mkRasBram(ReturnAddrStack); // provisos(NumAlias#(TExp#(TLog#(RasEntries)
         rasIfc[i] = (interface RAS;
             method CapMem first;
                 // returns the top of the stack
-                return topElems[head[valueOf(SupSize) - 1]][idx];
+                return topElems[valueOf(SupSize) - 1][idx];
             endmethod
             method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
                 // first pop, then push
                 Bit#(StackSize) x = head[idx];
                 if(pop &&& pushAddr matches tagged Valid .addr) begin
                     topElems[valueOf(SupSize) - 1][idx] <= addr;
-                    $display("RasBrampopPush - popPushEvent: ", fshow(addr));
+                    $display("RasBrampopPush - ", fshow(fromInteger(i)), " - popPushEvent: ", fshow(addr));
                 end
                 else if(pop) begin
                     x = x - 1;
                     bottom[idx] <= bottom[idx] + 1;
                     for(Integer j = 1; j < valueOf(SupSize); j = j + 1) topElems[j][idx] <= topElems[j-1][idx];
-                    // no need to write topElems[0]i
-                    $display("RasBrampopPush - popEvent");
+                    // no need to write topElems[0]
+                    $display("RasBrampopPush - ", fshow(fromInteger(i)), " - popEvent");
                 end
                 else if(pushAddr matches tagged Valid .addr) begin
                     x = x + 1;
                     if(bottom[idx] > 0) bottom[idx] <= bottom[idx] - 1;
                     for(Integer j = 1; j < valueOf(SupSize); j = j + 1) topElems[j-1][idx] <= topElems[j][idx];
                     topElems[valueOf(SupSize) - 1][idx] <= addr;
-                    $display("RasBrampopPush - pushEvent: ", fshow(addr));
+                    $display("RasBrampopPush - ", fshow(fromInteger(i)), " - pushEvent: ", fshow(addr));
                 end
                 head[idx] <= x;
             endmethod

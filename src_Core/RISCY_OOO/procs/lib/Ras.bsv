@@ -50,7 +50,7 @@ import RasVector::*;
 
 (* synthesize *)
 module mkRas(ReturnAddrStack);
-    //let m <- mkRasVector;
-    let m <- mkRasBram;
+    let m <- mkRasVector;
+    //let m <- mkRasBram;
     return m;
 endmodule
