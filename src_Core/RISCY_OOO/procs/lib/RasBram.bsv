@@ -47,7 +47,6 @@
 `include "ProcConfig.bsv"
 import Types::*;
 import ProcTypes::*;
-import RegFile::*;
 import Vector::*;
 import Ehr::*;
 import CHERICC_Fat::*;
@@ -55,67 +54,47 @@ import CHERICap::*;
 import RWBramCore::*;
 import Ras_IFC::*;
 
-/*
-STATE INVARIANT...
-*/
 
 // Local RAS Typedefs SHOULD BE A POWER OF TWO.
 typedef 64 StackEntries;
 typedef TLog#(StackEntries) StackSize;
 
 (* synthesize *)
-module mkRasBram(ReturnAddrStack); // provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
+module mkRasBram(ReturnAddrStack);
     RWBramCoreVector#(Bit#(StackSize), CapMem, SupSize) bram <- mkRWBramCoreVector;
 
     // current addr to the BRAM
     Ehr#(TAdd#(SupSize, 2), Bit#(StackSize)) head <- mkEhr(0);
 
-// we get a vector of addresses from the BRAM of size SupSize
-// we read write and write multiple times in once cycle to that
-// we need to write back to
-
 
     Vector#(SupSize, RAS) rasIfc;
+
+    // allocation of ehr interfaces:
+    // 0: for reading in the values from the Bram
+    // [1, SupSize + 1[: Actions of the ras interface take place
+    // SupSize: write back to Bram
     Vector#(SupSize, Ehr#(TAdd#(SupSize, 2), CapMem)) topElems <- replicateM(mkEhr(0));
     Ehr#(TAdd#(SupSize, 2), Bit#(TLog#(SupSize))) bottom <- mkEhr(0);
 
     rule readData;
         let rd = bram.rdResp;
-        $display("RasBramreadData: ", fshow(rd));
-        $display("RasBramreadData -time: ", $time());
         for(Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
             topElems[i][0] <= rd[i];
         end
         bottom[0] <= 0;
     endrule
 
-    rule displayEhr;
-        for(Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
-            for(Integer j = 0; j < valueOf(SupSize) + 2; j = j + 1) begin
-                $display("RasBramEhrState - topElems[", fshow(fromInteger(i)), "][", fshow(fromInteger(j)), "] = ", fshow(topElems[i][j]));
-            end
-        end
-    endrule
-
     rule writeData;
         Vector#(SupSize, Maybe#(CapMem)) v = replicate(tagged Invalid);
-        //Bit#(TLog#(SupSize)) idx = 0;
-        $display("RasBramwriteData bottom: ", fshow(bottom[valueOf(SupSize) + 1]));
-        $display("RasBramwriteData head: ", fshow(head[valueOf(SupSize) + 1]));
         for(Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
             if(bottom[valueOf(SupSize) + 1] <= fromInteger(i)) begin
                 v[i] = tagged Valid topElems[i][valueOf(SupSize) + 1];
-                //idx = idx + 1;
             end
-            //else v[i] = tagged Invalid;
         end
         bram.wrReq(head[valueOf(SupSize) + 1], v);
-        $display("RasBramwriteData: ", fshow(v));
-        $display("RasBramwriteData - time: ", $time());
     endrule
 
     rule startRead;
-        $display("RasBramstartRead: addr = ", fshow(head[valueOf(SupSize) + 1]));
         bram.rdReq(head[valueOf(SupSize) + 1]);// - zeroExtend(bottom[valueOf(SupSize) + 1])); //- fromInteger(valueOf(SupSize)));
     endrule
 
@@ -131,21 +110,18 @@ module mkRasBram(ReturnAddrStack); // provisos(NumAlias#(TExp#(TLog#(RasEntries)
                 Bit#(StackSize) x = head[idx];
                 if(pop &&& pushAddr matches tagged Valid .addr) begin
                     topElems[valueOf(SupSize) - 1][idx] <= addr;
-                    $display("RasBrampopPush - ", fshow(fromInteger(i)), " - popPushEvent: ", fshow(addr));
                 end
                 else if(pop) begin
                     x = x - 1;
                     bottom[idx] <= bottom[idx] + 1;
                     for(Integer j = 1; j < valueOf(SupSize); j = j + 1) topElems[j][idx] <= topElems[j-1][idx];
                     // no need to write topElems[0]
-                    $display("RasBrampopPush - ", fshow(fromInteger(i)), " - popEvent");
                 end
                 else if(pushAddr matches tagged Valid .addr) begin
                     x = x + 1;
                     if(bottom[idx] > 0) bottom[idx] <= bottom[idx] - 1;
                     for(Integer j = 1; j < valueOf(SupSize); j = j + 1) topElems[j-1][idx] <= topElems[j][idx];
                     topElems[valueOf(SupSize) - 1][idx] <= addr;
-                    $display("RasBrampopPush - ", fshow(fromInteger(i)), " - pushEvent: ", fshow(addr));
                 end
                 head[idx] <= x;
             endmethod

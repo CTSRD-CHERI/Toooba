@@ -50,6 +50,9 @@ interface RAS;
     method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
 endinterface
 
+// methods from the RAS interface take effect in the order of the vector
+// a pop by ras[2] is seen by ras[3] in the same cycle
+
 interface ReturnAddrStack;
     interface Vector#(SupSize, RAS) ras;
     method Action flush;
