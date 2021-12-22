@@ -88,6 +88,7 @@ BSC_COMPILATION_FLAGS += \
 	-D MEM64 \
 	-D RISCV \
 	-D PERFORMANCE_MONITORING \
+	-D CID \
 	-D TSO_MM \
 	-keep-fires -aggressive-conditions -no-warn-action-shadowing -check-assert \
 	-suppress-warnings G0020 -steps-max-intervals 10000000   \
@@ -97,7 +98,7 @@ BSC_COMPILATION_FLAGS += \
 # ================================================================
 # Runs simulation executable on ELF given by EXAMPLE
 
-EXAMPLE ?= PLEASE_DEFINE_EXAMPLE_PATH_TO_ELF
+EXAMPLE ?= /local/scratch/faf28/comp_benchmark/build/simple.out
 
 .PHONY: run_example
 run_example:

@@ -196,7 +196,7 @@ CSR_Addr   csr_addr_dscratch0 = 12'h7B2;    // Debug scratch0
 CSR_Addr   csr_addr_dscratch1 = 12'h7B3;    // Debug scratch1
 
 `ifdef CID
-//CSR_Addr   csr_addr_cid       = 12'h7cb;    // CID
+CSR_Addr   csr_addr_cid       = 12'h810;    // CID
 `endif
 // ================================================================
 // MISA
