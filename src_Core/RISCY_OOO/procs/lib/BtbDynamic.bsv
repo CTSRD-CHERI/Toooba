@@ -64,10 +64,13 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
         Add#(1, a__, TDiv#(tagSz, hashSz)),
     Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
 
-    Vector#(BtbAssociativity, Reg#(CompWay)) compWays <- replicateM(mkRegU);
+    Vector#(BtbAssociativity, Reg#(CompWay)) compWays;
+    // initialise 0-th CompWay structure
+    compWays[0] <- mkReg(CompWay{cid: 0, age: 1, v: True});
+    for(Integer i = 1; i < valueOf(BtbAssociativity); i = i  + 1) compWays[i] <- mkRegU;
     NextAddrPred#(hashSz) btbCore <- mkBtbCore;
     Reg#(TimeoutCyclesIndex) timeout <- mkReg(0);
-    Reg#(CompIndex) rg_cid <- mkRegU;
+    Reg#(CompIndex) rg_cid <- mkReg(0);
 
     Reg#(BtbBank) firstBank_reg <- mkRegU;
     Vector#(SupSizeX2, MapSplitCore#(HashedTag#(hashSz), BtbIndex, VnD#(CapMem), BtbAssociativity, BtbInitAvailability))
@@ -109,7 +112,7 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
         timeout <= timeout + 1;
     endrule
 
-    rule doPrinting(timeout == 512);
+    rule doPrinting(timeout == 256);
         $display("BTB-doPrinting");
         for(Integer i = 0; i < valueOf(BtbAssociativity); i = i + 1) begin
             $display(fshow(compWays[i]));
@@ -117,6 +120,7 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
     endrule
 
     rule doAging(timeout == fromInteger(valueOf(MaxTimeout)) &&& cidUpdate.wget matches tagged Invalid);
+        $display("doAging");
         Bool allocated = False;
         Vector#(BtbAssociativity, Bool) v;
         for(Integer i = 0; i < valueOf(BtbAssociativity); i = i + 1) begin
@@ -141,6 +145,7 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
     endrule
 
     rule doCIDUpdate(cidUpdate.wget matches tagged Valid .upd);
+        $display("BtbDynamic: doCIDUpdate");
         rg_cid <= upd;
         Vector#(BtbAssociativity, Bool) v;
         for(Integer i = 0; i < valueOf(BtbAssociativity); i = i + 1) begin
@@ -182,7 +187,8 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
     endmethod
 
     method Action setCID(CompIndex cid);
-        cidUpdate.wset(cid);
+        // only if this is a real update
+        if(rg_cid != cid)  cidUpdate.wset(cid);
     endmethod
 
 `ifdef SECURITY
