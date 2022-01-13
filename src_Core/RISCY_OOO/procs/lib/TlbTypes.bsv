@@ -44,17 +44,24 @@ typedef Bit#(TLog#(DTlbReqNum)) DTlbReqIdx;
 typedef `L2TLB_REQ_NUM L2TlbReqNum;
 typedef Bit#(TLog#(L2TlbReqNum)) L2TlbReqIdx;
 
-// Only for Sv39
+`ifdef SV48
+// Only for Sv48
+typedef 36 VpnSz;
+typedef 4 NumPageWalkLevels;
+`else
+// For Sv39
 typedef 27 VpnSz;
+typedef 3 NumPageWalkLevels;
+`endif
+
 typedef Bit#(VpnSz) Vpn;
 typedef 44 PpnSz;
 typedef Bit#(PpnSz) Ppn;
 typedef 12 PageOffsetSz; // 4KB basic page
 typedef Bit#(PageOffsetSz) PageOffset;
-typedef 9 VpnIdxSz; // Vpn is broken down to 3 indexes to 3 levels of page table
+typedef 9 VpnIdxSz; // Vpn is broken down to 4 indexes to 4 levels of page table
 typedef Bit#(VpnIdxSz) VpnIdx;
-typedef Bit#(2) PageWalkLevel; // 2: 1GB page, 1: 2MB page, 0: 4KB page
-typedef 3 NumPageWalkLevels;
+typedef Bit#(2) PageWalkLevel; // 3: 0.5TB page 2: 1GB page, 1: 2MB page, 0: 4KB page
 PageWalkLevel maxPageWalkLevel = fromInteger(valueof(NumPageWalkLevels) - 1);
 
 typedef struct {
@@ -94,13 +101,24 @@ typedef struct {
     Asid          asid;
 } TlbEntry deriving (Bits, Eq, FShow);
 
+typedef struct {
+    Bit#(TSub#(64,TAdd#(VpnSz,PageOffsetSz))) upperBits;
+    Vpn vpn;
+    PageOffset offset;
+} Vaddr deriving (Bits, Eq, FShow);
+
+function Vaddr getVaddr(Addr addr) = unpack(addr);
+
 // SV39 translate
-function Vpn getVpn(Addr addr) = addr[38:12];
+function Vpn getVpn(Addr addr) = getVaddr(addr).vpn;
 
-function PageOffset getPageOffset(Addr addr) = truncate(addr);
+function PageOffset getPageOffset(Addr addr) = getVaddr(addr).offset;
 
-// All the upper bits should be equal for a valid SV39 virtual address.
-function Bool validVirtualAddress(Addr addr) =  (addr[63:39] == {addr[39],addr[63:40]});
+// All the upper bits should be equal for a valid virtual address.
+// Check that the rotation equals itself.
+function Bool validVirtualAddress(Addr addr) =
+    getVaddr(addr).upperBits ==
+    {getVaddr(addr).upperBits[0],truncateLSB(getVaddr(addr).upperBits)};
 
 function Addr getPTBaseAddr(Ppn basePpn);
     PageOffset offset = 0;
@@ -147,7 +165,7 @@ function Addr translate(Addr addr, Ppn ppn, PageWalkLevel level);
         0: {ppn, getPageOffset(addr)}; // 4KB page
         1: {ppn[43:9], addr[20:0]};   // 2MB page
         2: {ppn[43:18], addr[29:0]};  // 1GB page
-        default: 0; // should not happen
+        3: {ppn[43:27], addr[38:0]};  // 0.5TB page
     endcase);
 endfunction
 
@@ -156,7 +174,7 @@ function Vpn getMaskedVpn(Vpn vpn, PageWalkLevel level);
         0: (vpn);
         1: ((vpn >> 9) << 9);   // 2MB mask
         2: ((vpn >> 18) << 18); // 1GB mask
-        default: 0; // should not happen
+        3: ((vpn >> 27) << 27); // 0.5TB mask
     endcase);
 endfunction
 
@@ -165,7 +183,7 @@ function Ppn getMaskedPpn(Ppn ppn, PageWalkLevel level);
         0: (ppn);
         1: ((ppn >> 9) << 9);   // 2MB mask
         2: ((ppn >> 18) << 18); // 1GB mask
-        default: 0; // should not happen
+        3: ((ppn >> 27) << 27); // 0.5TB mask
     endcase);
 endfunction
 
@@ -174,7 +192,7 @@ function Bool isPpnAligned(Ppn ppn, PageWalkLevel level);
         0: True;
         1: (ppn[8:0] == 0);
         2: (ppn[17:0] == 0);
-        default: False;
+        3: (ppn[26:0] == 0);
     endcase);
 endfunction
 
