@@ -72,6 +72,8 @@
 `define RS_LAZY_ENQ True
 `define ROB_LAZY_ENQ True
 
+`define SV48
+
 `define L1_TLB_SIZE 32 // L1 fully assoc TLB size
 
 `define L2_TLB_HUGE_SIZE 8 // L2 2MB/1GB TLB size
