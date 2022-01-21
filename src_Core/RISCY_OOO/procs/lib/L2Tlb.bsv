@@ -13,7 +13,7 @@
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
 //-
-// 
+//
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without
@@ -21,10 +21,10 @@
 // modify, merge, publish, distribute, sublicense, and/or sell copies
 // of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be
 // included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -144,7 +144,7 @@ typedef union tagged {
 (* synthesize *)
 module mkL2Tlb(L2Tlb::L2Tlb);
     Bool verbose = False;
-   
+
     // set associative TLB for 4KB pages
     L2SetAssocTlb tlb4KB <- mkL2SetAssocTlb;
     // fully associative TLB for mega and giga pages
@@ -356,14 +356,14 @@ module mkL2Tlb(L2Tlb::L2Tlb);
 
         // get correct VM info
         VMInfo vm_info = cRq.child == I ? vm_info_I : vm_info_D;
-        doAssert(vm_info.sv39, "must be in sv39 mode");
+        doAssert(vm_info.vmMode == vmSv39, "must be in sv39 mode");
 
         // get resp from 4KB TLB and mega-giga TLB
         let resp4KB = tlb4KB.resp;
         let respMG = tlbMG.translate(cRq.vpn, vm_info.asid);
 
         if(verbose) begin
-            $display("L2TLB resp: ", fshow(vm_info), " ; ", fshow(cRq), " ; ", 
+            $display("L2TLB resp: ", fshow(vm_info), " ; ", fshow(cRq), " ; ",
                      fshow(resp4KB), " ; ", fshow(respMG));
         end
 
@@ -390,7 +390,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         endaction
         endfunction
 
-        if(!vm_info.sv39) begin
+        if(vm_info.vmMode != vmSv39) begin
             // not in sv39 -> page fault
             // resp with invalid entry
             rsToCQ.enq(L2TlbRsToC {
@@ -624,7 +624,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
                      fshow(walkLevel), " ; ", fshow(pte));
         end
 
-        if(!vm_info.sv39) begin
+        if(vm_info.vmMode != vmSv39) begin
             // no longer in sv39 mode -> page fault
             pageFault("Not in sv39");
         end
@@ -653,7 +653,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
                 end
                 else begin
                     // continue page walk, check if other req is doing the same
-                    // walk 
+                    // walk
                     if(otherReqSamePTE(idx, newPTEAddr, readVReg(pendWait_pageWalk)) matches tagged Valid .i) begin
                         pendWait_pageWalk[idx] <= WaitPeer (i);
 `ifdef PERF_COUNT
@@ -772,7 +772,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         interface FifoDeq memReq = toFifoDeq(memReqQ);
         interface FifoEnq respLd = toFifoEnq(respLdQ);
     endinterface
-  
+
     interface Perf perf;
         method Action setStatus(Bool stats);
 `ifdef PERF_COUNT

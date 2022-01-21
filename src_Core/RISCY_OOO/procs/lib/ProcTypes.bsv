@@ -481,8 +481,13 @@ Bit#(2) prvS = 1;
 Bit#(2) prvM = 3;
 
 // VM modes
-Bit#(4) vmBare = 0;
-Bit#(4) vmSv39  = 9;
+Bit#(4) vmBare_full = 0;
+Bit#(4) vmSv39_full = 8;
+Bit#(4) vmSv48_full = 9;
+
+Bit#(2) vmBare = 0;
+Bit#(2) vmSv39 = 2;
+Bit#(2) vmSv48 = 3;
 
 typedef struct {
     // for decoding floating-point instructions
@@ -507,7 +512,7 @@ typedef struct {
 typedef struct {
     Bit#(2) prv; // has taken mstatus.mprv into account
     Asid asid; // currently always 0
-    Bool sv39; // VM mode: has taken prv into account, False means Bare
+    Bit#(2) vmMode; // VM mode: has taken prv into account
     Bool exeReadable; // mstatus.mxr: can load page with X=1 and R=0
     Bool userAccessibleByS; // mstatus.sum: in S mode (after considering
                             // mstatus.mprv), accessing page with U=1 will NOT
@@ -537,7 +542,7 @@ instance DefaultValue#(VMInfo);
     function VMInfo defaultValue = VMInfo {
         prv:  prvM,
         asid: 0,
-        sv39: False,
+        vmMode: vmBare,
         exeReadable: False,
         userAccessibleByS: False,
         basePPN: 0,

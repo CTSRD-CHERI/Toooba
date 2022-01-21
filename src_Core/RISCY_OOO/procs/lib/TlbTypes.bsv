@@ -218,8 +218,8 @@ function TlbPermissionCheck hasVMPermission(
     // try to find any page fault
     Bool fault = False;
 
-    // check if we are still in sv39
-    if(!vm_info.sv39) begin
+    // check if we are still in a translation mode
+    if(vm_info.vmMode == vmBare) begin
         fault = True;
     end
 

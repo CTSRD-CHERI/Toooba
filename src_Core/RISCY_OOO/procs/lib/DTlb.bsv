@@ -470,7 +470,7 @@ module mkDTlb#(
             noAction;
         end
 `endif
-        else if (vm_info.sv39) begin
+        else if (vm_info.vmMode == vmSv39) begin
             let vpn = getVpn(r.addr);
             let trans_result = tlb.translate(vpn, vm_info.asid);
             if (!validVirtualAddress(r.addr)) begin

@@ -40,6 +40,7 @@
 `include "ProcConfig.bsv"
 import Types::*;
 import ProcTypes::*;
+import TlbTypes::*;
 import DefaultValue::*;
 import ConcatReg::*;
 import ConfigReg::*;
@@ -663,11 +664,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
     // this mask allows only those bits through.
     Data sip_sie_warl_mask = zeroExtend (12'h_222);
 
-    // satp (sptbr in spike): FIXME we only support Bare and Sv39, so we hack
-    // the encoding of mode[3:0] field. Only mode[3] is relevant, other bits
-    // are always 0
-    Reg#(Bit#(1)) vm_mode_sv39_reg <- mkCsrReg(0);
-    Reg#(Bit#(4)) vm_mode_reg = concatReg2(vm_mode_sv39_reg, readOnlyReg(3'b0));
+    // satp (sptbr in spike)
+    Reg#(Bit#(4)) vm_mode_reg <- mkCsrReg(0);
     Reg#(Asid) asid_reg <- mkCsrReg(0);
     Reg#(Bit#(16)) full_asid_reg = zeroExtendReg(asid_reg);
     Reg#(Bit#(44)) ppn_reg <- mkCsrReg(0);
@@ -1008,7 +1006,12 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrSIE:        (x & sip_sie_warl_mask);
             csrAddrSCOUNTEREN: { 61'b0, x[2:0]};
             csrAddrSCAUSE:     { x[63], 59'b0, x[3:0] };
-            csrAddrSATP:       { x[63], 3'b0, asid,  x [43:0] };
+            csrAddrSATP:       { (case (x[63:60])
+                                     vmBare_full, vmSv39_full, vmSv48_full: return x[63:60];
+                                     default: return vm_mode_reg;
+                                 endcase),
+                                 asid,
+                                 x [43:0] };
 
             // User level CSRs
             csrAddrFFLAGS:     { 59'b0, x [4:0] };
@@ -1302,7 +1305,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
         return VMInfo {
             prv: prv,
             asid: asid_reg,
-            sv39: prv < prvM && vm_mode_sv39_reg == 1,
+            vmMode: (prv < prvM) ? {vm_mode_reg[3],vm_mode_reg[0]}:vmBare,
             exeReadable: mxr_reg == 1,
             userAccessibleByS: sum_reg == 1,
             basePPN: ppn_reg,
@@ -1331,7 +1334,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
         return VMInfo {
             prv: prv,
             asid: asid_reg,
-            sv39: prv < prvM && vm_mode_sv39_reg == 1,
+            vmMode: (prv < prvM) ? {vm_mode_reg[3],vm_mode_reg[0]}:vmBare,
             exeReadable: mxr_reg == 1,
             userAccessibleByS: sum_reg == 1,
             basePPN: ppn_reg,
