@@ -287,7 +287,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
     endrule
 `endif
 `ifdef PERFORMANCE_MONITORING
-    Array #(Reg #(EventsLL)) perf_events <- mkDRegOR (3, unpack (0));
+    Array #(Reg #(EventsLL)) perf_events <- mkDRegOR (2, unpack (0));
 `endif
 
     // when flushing is true, since both I and D TLBs have finished flush and
@@ -304,7 +304,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
 `ifdef PERFORMANCE_MONITORING
         EventsLL ev = unpack(0);
         ev.evt_TLB_FLUSH = 1;
-        perf_events[2] <= ev;
+        perf_events[1] <= ev;
 `endif
     endrule
 
@@ -356,7 +356,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
 
         // get correct VM info
         VMInfo vm_info = cRq.child == I ? vm_info_I : vm_info_D;
-        doAssert(vm_info.vmMode == vmSv39, "must be in sv39 mode");
+        doAssert(vm_info.vmMode != vmBare, "must be in sv39 mode");
 
         // get resp from 4KB TLB and mega-giga TLB
         let resp4KB = tlb4KB.resp;
@@ -390,7 +390,11 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         endaction
         endfunction
 
-        if(vm_info.vmMode != vmSv39) begin
+`ifdef PERFORMANCE_MONITORING
+        EventsLL ev = unpack(0);
+`endif
+
+        if(vm_info.vmMode == vmBare) begin
             // not in sv39 -> page fault
             // resp with invalid entry
             rsToCQ.enq(L2TlbRsToC {
@@ -421,9 +425,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
             end
 `endif
 `ifdef PERFORMANCE_MONITORING
-            EventsLL ev = unpack(0);
             ev.evt_TLB = 1;
-            perf_events[1] <= ev;
 `endif
         end
         else if(resp4KB.hit) begin
@@ -434,9 +436,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
             // update 4KB array replacement, no need to touch MG array
             tlb4KB.deqResp(Valid (resp4KB.way));
 `ifdef PERFORMANCE_MONITORING
-            EventsLL ev = unpack(0);
             ev.evt_TLB = 1;
-            perf_events[1] <= ev;
 `endif
         end
         else begin
@@ -458,11 +458,12 @@ module mkL2Tlb(L2Tlb::L2Tlb);
             end
 `endif
 `ifdef PERFORMANCE_MONITORING
-            EventsLL ev = unpack(0);
             ev.evt_TLB_MISS = 1;
-            perf_events[0] <= ev;
 `endif
         end
+`ifdef PERFORMANCE_MONITORING
+        perf_events[0] <= ev;
+`endif
     endrule
 
     // Find other req doing the same page walk. Although it should be ok to
@@ -698,7 +699,6 @@ module mkL2Tlb(L2Tlb::L2Tlb);
                 // page table walks are counted as accesses
                 EventsLL ev = unpack(0);
                 ev.evt_TLB = 1;
-                perf_events[1] <= ev;
 `endif
                 // update TLB array
                 if(entry.level > 0) begin
@@ -715,9 +715,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
                     end
 `endif
 `ifdef PERFORMANCE_MONITORING
-                    EventsLL ev = unpack(0);
                     ev.evt_TLB_MISS = 1;
-                    perf_events[0] <= ev;
 `endif
                 end
                 else begin
@@ -730,6 +728,9 @@ module mkL2Tlb(L2Tlb::L2Tlb);
 `ifdef PERF_COUNT
                 // incr miss latency
                 incrMissLat(cRq.child, idx);
+`endif
+`ifdef PERFORMANCE_MONITORING
+                perf_events[0] <= ev;
 `endif
             end
         end

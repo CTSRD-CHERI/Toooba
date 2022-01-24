@@ -301,7 +301,7 @@ module mkITlb(ITlb::ITlb);
                     noAction;
                 end
 `endif
-                else if (vm_info.vmMode == vmSv39) begin
+                else if (vm_info.vmMode != vmBare) begin
                     let vpn = getVpn(vaddr);
                     let trans_result = tlb.translate(vpn, vm_info.asid);
                     if (!validVirtualAddress(vaddr)) hitQ.enq(tuple3(?, Valid (excInstPageFault), False));

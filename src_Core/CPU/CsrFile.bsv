@@ -387,6 +387,14 @@ module mkConfigEhr#(t init)(Ehr#(n, t)) provisos(Bits#(t, w));
     return ifc;
 endmodule
 
+// warl CSR: take function to legalise writes.
+module mkWarlCsrReg#(t initVal, function t warl(t newVal, t oldVal))(Reg#(t))
+    provisos(Bits#(t, w));
+    Reg#(t) r <- mkConfigReg(initVal);
+    method t _read = r._read;
+    method Action _write(t in) = r._write(warl(in, r));
+endmodule
+
 module mkCsrFile #(Data hartid)(CsrFile);
     RiscVISASubset isa = defaultValue;
 
@@ -665,7 +673,12 @@ module mkCsrFile #(Data hartid)(CsrFile);
     Data sip_sie_warl_mask = zeroExtend (12'h_222);
 
     // satp (sptbr in spike)
-    Reg#(Bit#(4)) vm_mode_reg <- mkCsrReg(0);
+    function Bit#(4) satpModeWarl(Bit#(4) newVal, Bit#(4) oldVal) =
+                         (case (newVal)
+                             vmBare_full, vmSv39_full, vmSv48_full: return newVal;
+                             default: return oldVal;
+                         endcase);
+    Reg#(Bit#(4)) vm_mode_reg <- mkWarlCsrReg(0, satpModeWarl);
     Reg#(Asid) asid_reg <- mkCsrReg(0);
     Reg#(Bit#(16)) full_asid_reg = zeroExtendReg(asid_reg);
     Reg#(Bit#(44)) ppn_reg <- mkCsrReg(0);
@@ -1006,10 +1019,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrSIE:        (x & sip_sie_warl_mask);
             csrAddrSCOUNTEREN: { 61'b0, x[2:0]};
             csrAddrSCAUSE:     { x[63], 59'b0, x[3:0] };
-            csrAddrSATP:       { (case (x[63:60])
-                                     vmBare_full, vmSv39_full, vmSv48_full: return x[63:60];
-                                     default: return vm_mode_reg;
-                                 endcase),
+            csrAddrSATP:       { satpModeWarl(x[63:60], vm_mode_reg),
                                  asid,
                                  x [43:0] };
 
