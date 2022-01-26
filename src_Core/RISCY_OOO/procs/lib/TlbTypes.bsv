@@ -62,7 +62,12 @@ typedef Bit#(PageOffsetSz) PageOffset;
 typedef 9 VpnIdxSz; // Vpn is broken down to 4 indexes to 4 levels of page table
 typedef Bit#(VpnIdxSz) VpnIdx;
 typedef Bit#(2) PageWalkLevel; // 3: 0.5TB page 2: 1GB page, 1: 2MB page, 0: 4KB page
-PageWalkLevel maxPageWalkLevel = fromInteger(valueof(NumPageWalkLevels) - 1);
+function PageWalkLevel getMaxPageWalkLevel(Bit#(2) mode) = case (mode)
+                                                              vmSv39: return 2;
+                                                              vmSv48: return 3;
+                                                              default: ?;
+                                                           endcase;
+PageWalkLevel maxPossiblePageWalkLevel = fromInteger(valueOf(TSub#(NumPageWalkLevels, 1)));
 
 typedef struct {
     Bool dirty;

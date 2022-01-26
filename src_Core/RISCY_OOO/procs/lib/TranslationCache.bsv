@@ -13,7 +13,7 @@
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
 //-
-// 
+//
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without
@@ -21,10 +21,10 @@
 // modify, merge, publish, distribute, sublicense, and/or sell copies
 // of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be
 // included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -55,6 +55,7 @@ interface TranslationCache;
     method TranslationCacheResp resp;
     method Action deqResp;
     method Action addEntry(Vpn vpn, PageWalkLevel level, Ppn ppn, Asid asid);
+    method Action putMode(Bit#(3) mode);
     method Action flush;
     method Bool flush_done;
 endinterface
@@ -98,6 +99,8 @@ module mkSingleSplitTransCache#(PageWalkLevel level)(SingleSplitTransCache);
     Reg#(Maybe#(SplitTransCacheIdx)) updRepIdx_enq = updRepIdx[1];
     // randomly choose an LRU idx at replacement time
     Reg#(SplitTransCacheIdx) randIdx <- mkReg(0);
+    // current svMode
+    Reb#(Bit#(3)) mode <- mkRegU;
 
     // don't do anything at flush time
     PulseWire flushEn <- mkPulseWire;
@@ -133,7 +136,7 @@ module mkSingleSplitTransCache#(PageWalkLevel level)(SingleSplitTransCache);
             return Invalid;
         end
     endmethod
-        
+
     method Action addEntry(Vpn vpn, Ppn ppn, Asid asid) if(updRepIdx_enq == Invalid && !flushEn);
         // only update LRU if the new entry already exists (TODO Maybe this is
         // not needed after we detect duplicate pagewalk mem req)
@@ -178,6 +181,8 @@ module mkSingleSplitTransCache#(PageWalkLevel level)(SingleSplitTransCache);
         end
     endmethod
 
+    method putMode = mode._write;
+
     method Action flush;
         writeVReg(validVec, replicate(False));
         // also reset LRU bits
@@ -195,6 +200,7 @@ module mkSplitTransCache(TranslationCache);
         caches[i] <- mkSingleSplitTransCache(i + 1);
     end
 
+    Reg#(Bit#(2)) mode <- mkRegU;
     Fifo#(1, TranslationCacheResp) respQ <- mkPipelineFifo;
 
     method Action req(Vpn vpn, Asid asid);
@@ -234,7 +240,9 @@ module mkSplitTransCache(TranslationCache);
         doAssert(level <= maxPageWalkLevel, "level too large");
         caches[level - 1].addEntry(vpn, ppn, asid);
     endmethod
-        
+
+    method putMode = mode._write;
+
     method Action flush;
         for(PageWalkLevel i = 0; i < maxPageWalkLevel; i = i+1) begin
             caches[i].flush;

@@ -143,7 +143,7 @@ typedef union tagged {
 
 (* synthesize *)
 module mkL2Tlb(L2Tlb::L2Tlb);
-    Bool verbose = False;
+    Bool verbose = True;
 
     // set associative TLB for 4KB pages
     L2SetAssocTlb tlb4KB <- mkL2SetAssocTlb;
@@ -409,7 +409,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         else if(respMG.hit) begin
             // hit on a mega or giga page
             let entry = respMG.entry;
-            doAssert(entry.level > 0 && entry.level <= maxPageWalkLevel,
+            doAssert(entry.level > 0 && entry.level <= getMaxPageWalkLevel(vm_info.vmMode),
                      "mega or giga page");
             pageHit(entry);
             tlb4KB.deqResp(Invalid); // just deq 4KB array
@@ -503,7 +503,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
             rootPPN = vm_info.sanctum_ebasePPN; // enclave has its own root of page table
         end
 `endif
-        Addr baseAddr = getPTBaseAddr(level < maxPageWalkLevel ? resp.ppn : rootPPN);
+        Addr baseAddr = getPTBaseAddr(level < getMaxPageWalkLevel(vm_info.vmMode) ? resp.ppn : rootPPN);
         Addr pteAddr = getPTEAddr(baseAddr, cRq.vpn, level);
         // record page walk info
         pendWalkLevel[idx] <= level;
@@ -750,6 +750,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
     method Action updateVMInfo(VMInfo vmI, VMInfo vmD); //if(!isValid(pendReq));
         vm_info_I <= vmI;
         vm_info_D <= vmD;
+        transCache.putMode(vmD.vmMode);
     endmethod
 
     interface L2TlbToChildren toChildren;
