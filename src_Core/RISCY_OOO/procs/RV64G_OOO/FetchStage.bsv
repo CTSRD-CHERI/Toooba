@@ -235,6 +235,14 @@ typedef struct {
   Bool mispred_first_half;
 } InstrFromFetch3 deriving(Bits, Eq, FShow);
 
+typedef struct {
+    CapMem pc;
+    CapMem ppc;
+    DecodeResult result;
+    DirPredResult#(DirPredTrainInfo) dir_pred;
+    Maybe#(CapMem) dir_ppc;
+} PreDecode deriving(Bits, Eq, FShow);
+
 function InstrFromFetch3 fetch3_2_instC(Fetch3ToDecode in, Instruction inst, Bit#(32) orig_inst) =
    InstrFromFetch3 {
       pc: in.pc,
@@ -358,6 +366,10 @@ module mkFetchStage(FetchStage);
     Integer pc_fetch3_port = 2;
     Integer pc_redirect_port = 3;
     Integer pc_final_port = 4;
+    // To track the next expected PC in Decode for early lookups for prediction.
+    Ehr#(TAdd#(SupSize, 2), Addr) decode_pc_reg <- mkEhr(?);
+    Integer decode_pc_redirect_port = valueOf(SupSize);
+    Integer decode_pc_final_port = valueOf(SupSize) + 1;
 
     // PC compression structure holding an indexed set of PC blocks so that only indexes need be tracked.
     IndexedMultiset#(PcIdx, PcMSB, SupSizeX2) pcBlocks <- mkIndexedMultisetQueue;
@@ -658,15 +670,39 @@ module mkFetchStage(FetchStage);
       // Note that only 1 redirection may happen in a cycle
       Maybe#(IType) redirectInst = Invalid;
 `endif
+      // A loop to prepare values for the main decode loop.
+      // These allow us to perform direction prediction with minimal dependencies
+      // between instructions to avoid a critical path.
+      function t valid (Maybe#(t) v) = v.Valid;
+      Vector#(SupSize, PreDecode) pd = ?;
+      Bool fetch_branch_misprediction = False;
+      for (Integer i = 0; i < valueof(SupSize); i=i+1) begin
+         pd[i].pc = decompressPc(valid(decodeIn[i]).pc);
+         pd[i].ppc = decompressPc(valid(decodeIn[i]).ppc);
+         pd[i].result = decode(valid(decodeIn[i]).inst, getFlags(pd[i].pc)==1);
+         // Estimate when we won't use later instructions in the bundle to avoid
+         // poluting the global history. Depending on the full "local_epoch" logic
+         // in the main loop is too slow timing-wise.
+         if(pd[i].result.dInst.iType == Br && !fetch_branch_misprediction) begin
+            pd[i].dir_pred <- dirPred.pred[i].pred;
+            fetch_branch_misprediction = (pd[i].dir_pred.taken != valid(decodeIn[i]).pred_jump);
+         end
+         pd[i].dir_ppc = decodeBrPred(pd[i].pc, pd[i].result.dInst, pd[i].dir_pred.taken, (valid(decodeIn[i]).inst_kind == Inst_32b));
+      end
 
       for (Integer i = 0; i < valueof(SupSize); i=i+1) begin
          if (decodeIn[i] matches tagged Valid .in)  begin
             let cause = in.cause;
-            CapMem pc = decompressPc(in.pc);
-            CapMem ppc = decompressPc(in.ppc);
+            PreDecode p = pd[i];
+            CapMem pc = p.pc;
+            CapMem ppc = p.ppc;
             pcBlocks.rPort[i].remove(in.pc.idx);
             if (verbose)
                $display("Decode: %0d in = ", i, fshow (in));
+
+            let decode_result = p.result; // Decode 32b inst, or 32b expansion of 16b inst
+            let dInst = decode_result.dInst;
+            let regs = decode_result.regs;
 
             // do decode and branch prediction
             // Drop here if does not match the decode_epoch.
@@ -684,28 +720,15 @@ module mkFetchStage(FetchStage);
             end else if (in.decode_epoch == decode_epoch_local) begin
                doAssert(in.main_epoch == f_main_epoch, "main epoch must match");
 
-               let decode_result = decode(in.inst, getFlags(pc)==1);    // Decode 32b inst, or 32b expansion of 16b inst
-
                // update cause if decode exception and no earlier (TLB) exception
                if (!isValid(cause)) begin
                   cause = decode_result.illegalInst ? tagged Valid excIllegalInst : tagged Invalid;
                end
 
-               let dInst = decode_result.dInst;
-               let regs = decode_result.regs;
-               DirPredTrainInfo dp_train = ?; // dir pred training bookkeeping
-
                // update predicted next pc
                if (!isValid(cause)) begin
                   // direction predict
-                  Bool pred_taken = False;
-                  if(dInst.iType == Br) begin
-                     let pred_res <- dirPred.pred[i].pred(getAddr(pc));
-                     pred_taken = pred_res.taken;
-                     dp_train = pred_res.train;
-                  end
-                  Maybe#(CapMem) nextPc = decodeBrPred(pc, dInst, pred_taken, (in.inst_kind == Inst_32b));
-
+                  Maybe#(CapMem) nextPc = p.dir_ppc;
                   // return address stack link reg is x1 or x5
                   function Bool linkedR(Maybe#(ArchRIndx) register);
                      Bool res = False;
@@ -750,7 +773,7 @@ module mkFetchStage(FetchStage);
                   end
                   if(verbose) begin
                      $display("Branch prediction: ", fshow(dInst.iType), " ; ", fshow(pc), " ; ",
-                              fshow(ppc), " ; ", fshow(pred_taken), " ; ", fshow(nextPc));
+                              fshow(ppc), " ; ", fshow(nextPc));
                   end
 
                   // If we don't have a good guess about where we are going, don't proceed.
@@ -777,13 +800,14 @@ module mkFetchStage(FetchStage);
 `endif
                   end
                end // if (!isValid(cause))
+               decode_pc_reg[i] <= getAddr(ppc);
                let out = FromFetchStage{pc: pc,
 `ifdef RVFI_DII
                                         dii_pid: in.dii_pid,
 `endif
                                         ppc: ppc,
                                         main_epoch: in.main_epoch,
-                                        dpTrain: dp_train,
+                                        dpTrain: p.dir_pred.train,
                                         inst: in.inst,
                                         dInst: dInst,
                                         orig_inst: in.orig_inst,
@@ -808,8 +832,8 @@ module mkFetchStage(FetchStage);
       end // for (Integer i = 0; i < valueof(SupSize); i=i+1)
 
       // update PC and epoch
-      if(redirectPc matches tagged Valid .nextPc) begin
-         pc_reg[pc_decode_port] <= nextPc;
+      if(redirectPc matches tagged Valid .rp) begin
+         pc_reg[pc_decode_port] <= rp;
       end
 `ifdef RVFI_DII
       doAssert(isValid(redirectPc) == isValid(redirectDiiPid), "PC and DII redirections always happen together");
@@ -833,6 +857,10 @@ module mkFetchStage(FetchStage);
          endcase
       end
 `endif
+   endrule
+
+   rule reportDecodePc;
+       dirPred.nextPc(decode_pc_reg[decode_pc_final_port]);
    endrule
 
     // train next addr pred: we use a wire to catch outputs of napTrainByDecQ.
@@ -902,6 +930,7 @@ module mkFetchStage(FetchStage);
         dii_pid_reg[pc_redirect_port] <= dii_pid;
         if (verbose) $display("%t Redirect: dii_pid_reg %d", $time(), dii_pid);
 `endif
+        decode_pc_reg[decode_pc_redirect_port] <= getAddr(new_pc);
         f_main_epoch <= (f_main_epoch == fromInteger(valueOf(NumEpochs)-1)) ? 0 : f_main_epoch + 1;
         // redirect comes, stop stalling for redirect
         waitForRedirect[1] <= False;
@@ -943,7 +972,7 @@ module mkFetchStage(FetchStage);
         //end
         if (iType == Br) begin
             // Train the direction predictor for all branches
-            dirPred.update(getAddr(pc), taken, dpTrain, mispred);
+            dirPred.update(taken, dpTrain, mispred);
         end
         // train next addr pred when mispred
         if(mispred) begin
