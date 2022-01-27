@@ -55,7 +55,7 @@ interface TranslationCache;
     method TranslationCacheResp resp;
     method Action deqResp;
     method Action addEntry(Vpn vpn, PageWalkLevel level, Ppn ppn, Asid asid);
-    method Action putMode(Bit#(3) mode);
+    method Action putMode(Bit#(2) mode);
     method Action flush;
     method Bool flush_done;
 endinterface
@@ -71,6 +71,7 @@ endinterface
 interface SingleSplitTransCache;
     method ActionValue#(Maybe#(Ppn)) req(Vpn vpn, Asid asid);
     method Action addEntry(Vpn vpn, Ppn ppn, Asid asid);
+    method Action putMode(Bit#(2) mode);
     method Action flush;
 endinterface
 
@@ -78,8 +79,7 @@ typedef 24 SplitTransCacheSize; // size from ISCA 2010 paper
 typedef Bit#(TLog#(SplitTransCacheSize)) SplitTransCacheIdx;
 
 module mkSingleSplitTransCache#(PageWalkLevel level)(SingleSplitTransCache);
-    staticAssert(level > 0 && level <= maxPageWalkLevel, "illegal level");
-
+    staticAssert(level > 0 && level <= maxPossiblePageWalkLevel, "illegal level");
     Vector#(SplitTransCacheSize, Reg#(Bool)) validVec <- replicateM(mkReg(False));
     Vector#(SplitTransCacheSize, Reg#(Vpn)) vpnVec <- replicateM(mkRegU);
     Vector#(SplitTransCacheSize, Reg#(Ppn)) ppnVec <- replicateM(mkRegU);
@@ -100,7 +100,8 @@ module mkSingleSplitTransCache#(PageWalkLevel level)(SingleSplitTransCache);
     // randomly choose an LRU idx at replacement time
     Reg#(SplitTransCacheIdx) randIdx <- mkReg(0);
     // current svMode
-    Reb#(Bit#(3)) mode <- mkRegU;
+    Reg#(Bit#(2)) mode <- mkRegU;
+    PageWalkLevel maxPageWalkLevel = getMaxPageWalkLevel(mode);
 
     // don't do anything at flush time
     PulseWire flushEn <- mkPulseWire;
@@ -196,17 +197,18 @@ endmodule
 (* synthesize *)
 module mkSplitTransCache(TranslationCache);
     Vector#(TSub#(NumPageWalkLevels, 1), SingleSplitTransCache) caches;
-    for(PageWalkLevel i = 0; i < maxPageWalkLevel; i = i+1) begin
+    for(PageWalkLevel i = 0; i < maxPossiblePageWalkLevel; i = i+1) begin
         caches[i] <- mkSingleSplitTransCache(i + 1);
     end
 
-    Reg#(Bit#(2)) mode <- mkRegU;
     Fifo#(1, TranslationCacheResp) respQ <- mkPipelineFifo;
+    Reg#(Bit#(2)) mode <- mkRegU;
+    PageWalkLevel maxPageWalkLevel = getMaxPageWalkLevel(mode);
 
     method Action req(Vpn vpn, Asid asid);
         TranslationCacheResp resp;
         Vector#(TSub#(NumPageWalkLevels, 1), Maybe#(Ppn)) hits;
-        for(PageWalkLevel i = 0; i < maxPageWalkLevel; i = i+1) begin
+        for(PageWalkLevel i = 0; i < maxPossiblePageWalkLevel; i = i+1) begin
             hits[i] <- caches[i].req(vpn, asid); // cached page walk level i+1
         end
         // XXX hit in lower level has priority
@@ -244,7 +246,7 @@ module mkSplitTransCache(TranslationCache);
     method putMode = mode._write;
 
     method Action flush;
-        for(PageWalkLevel i = 0; i < maxPageWalkLevel; i = i+1) begin
+        for(PageWalkLevel i = 0; i < maxPossiblePageWalkLevel; i = i+1) begin
             caches[i].flush;
         end
     endmethod
@@ -255,6 +257,8 @@ endmodule
 (* synthesize *)
 module mkNullTransCache(TranslationCache);
     Fifo#(1, void) reqQ <- mkPipelineFifo;
+    Reg#(Bit#(2)) mode <- mkRegU;
+    PageWalkLevel maxPageWalkLevel = getMaxPageWalkLevel(mode);
 
     method Action req(Vpn vpn, Asid asid);
         reqQ.enq(?);
@@ -271,6 +275,7 @@ module mkNullTransCache(TranslationCache);
     method Action addEntry(Vpn vpn, PageWalkLevel level, Ppn ppn, Asid asid);
         noAction;
     endmethod
+    method putMode = mode._write;
     method Action flush;
         noAction;
     endmethod

@@ -536,7 +536,7 @@ module mkCore#(CoreId coreId)(Core);
 
     // flags to flush
     Reg#(Bool)  flush_tlbs <- mkReg(False);
-    Reg#(Bool)  update_vm_info <- mkReg(False);
+    Reg#(Bool)  update_vm_info <- mkReg(True);
     Reg#(Bool)  flush_reservation <- mkReg(False);
 
 `ifdef SECURITY_OR_INCLUDE_GDB_CONTROL
