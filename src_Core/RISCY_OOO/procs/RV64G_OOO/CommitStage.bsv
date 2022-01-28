@@ -83,6 +83,8 @@ interface CommitInput;
     interface Vector#(SupSize, Put#(LdStQTag)) lsqSetAtCommit;
     // TLB has stopped processing now
     method Bool tlbNoPendingReq;
+    // Pause committing, probably for buffered wrongSpec
+    method Bool pauseCommit;
     // set flags
     method Action setFlushTlbs;
     method Action setUpdateVMInfo;
@@ -390,6 +392,9 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
     // we commit trap in two cycles: first cycle deq ROB and flush; second
     // cycle handles trap, redirect and handles system consistency
     Reg#(Maybe#(CommitTrap)) commitTrap <- mkReg(Invalid); // saves new pc here
+    Bool pauseCommit = isValid(commitTrap) || inIfc.pauseCommit;
+
+    FIFO#(Addr) redirectQ <- mkFIFO;
 
     // maintain system consistency when system state (CSR) changes or for security
     function Action makeSystemConsistent(Bool flushTlb,
@@ -522,7 +527,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 `ifdef INCLUDE_GDB_CONTROL
         (rg_run_state == RUN_STATE_RUNNING) &&&
 `endif
-        !isValid(commitTrap) &&&
+        !pauseCommit &&&
         rob.deqPort[0].deq_data.trap matches tagged Valid .trap
     );
         rob.deqPort[0].deq;
@@ -643,9 +648,9 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 	  end
        else begin
 `endif
-	  // trap handling & redirect
-       let trap_updates <- csrf.trap(trap.trap, trap.pc, trap.addr, trap.orig_inst);
-       inIfc.redirectPc(trap_updates.new_pc);
+            // trap handling & redirect
+            let trap_updates <- csrf.trap(trap.trap, trap.pc, trap.addr, trap.orig_inst);
+            redirectQ.enq(trap_updates.new_pc);
 
 `ifdef INCLUDE_TANDEM_VERIF
        fa_to_TV (way0, rg_serial_num,
@@ -670,7 +675,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 `ifdef INCLUDE_GDB_CONTROL
        (rg_run_state == RUN_STATE_RUNNING) &&&
 `endif
-        !isValid(commitTrap) &&&
+        !pauseCommit &&&
         !isValid(rob.deqPort[0].deq_data.trap) &&&
         rob.deqPort[0].deq_data.ldKilled matches tagged Valid .killBy
     );
@@ -680,7 +685,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 
         // kill everything, redirect, and increment epoch
         inIfc.killAll;
-        inIfc.redirectPc(x.pc);
+        redirectQ.enq(x.pc);
         inIfc.incrementEpoch;
 
         // the killed Ld should have claimed phy reg, we should not commit it;
@@ -707,7 +712,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 `ifdef INCLUDE_GDB_CONTROL
        (rg_run_state == RUN_STATE_RUNNING) &&
 `endif
-        !isValid(commitTrap) &&
+        !pauseCommit &&
         !isValid(rob.deqPort[0].deq_data.trap) &&
         !isValid(rob.deqPort[0].deq_data.ldKilled) &&
         rob.deqPort[0].deq_data.rob_inst_state == Executed &&
@@ -783,7 +788,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 	   m_ret_updates = tagged Valid ret_updates;
 `endif
         end
-        inIfc.redirectPc(next_pc);
+        redirectQ.enq(next_pc);
 
 `ifdef INCLUDE_TANDEM_VERIF
         fa_to_TV (way0, rg_serial_num,
@@ -856,7 +861,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
     // Lr/Sc/Amo/MMIO cannot proceed to executed until we notify LSQ that it
     // has reached the commit stage
     rule notifyLSQCommit(
-        !isValid(commitTrap) &&
+        !pauseCommit &&
         !isValid(rob.deqPort[0].deq_data.trap) &&
         !isValid(rob.deqPort[0].deq_data.ldKilled) &&
         rob.deqPort[0].deq_data.rob_inst_state != Executed &&
@@ -877,7 +882,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 `ifdef INCLUDE_GDB_CONTROL
        (rg_run_state == RUN_STATE_RUNNING) &&
 `endif
-        !isValid(commitTrap) &&
+        !pauseCommit &&
         !isValid(rob.deqPort[0].deq_data.trap) &&
         !isValid(rob.deqPort[0].deq_data.ldKilled) &&
         rob.deqPort[0].deq_data.rob_inst_state == Executed &&
@@ -935,11 +940,11 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                     stop = True;
                 end
                 else begin
-                    if (verbose) $display("[doCommitNormalInst - %d] ", i, fshow(inst_tag), " ; ", fshow(x));
+                    if (verbose) $display("[doCommitNormalInst - %d] ", i, fshow(inst_tag), " ; ", fshow(x), cur_cycle);
 
 		    if (verbosity >= 1) begin
 		       $display("instret:%0d  PC:0x%0h  instr:0x%08h", rg_serial_num + instret, x.pc, x.orig_inst,
-				"   iType:", fshow (x.iType), "    [doCommitNormalInst [%0d]]", i);
+				"   iType:", fshow (x.iType), "    [doCommitNormalInst [%0d]]", i, cur_cycle);
 		    end
 
 `ifdef INCLUDE_TANDEM_VERIF
@@ -1099,6 +1104,11 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         events.evt_FENCE = fenceCnt;
         events_reg <= events;
 `endif
+    endrule
+
+    rule pass_redirect;
+        inIfc.redirectPc(redirectQ.first);
+        redirectQ.deq;
     endrule
 
    // ================================================================
