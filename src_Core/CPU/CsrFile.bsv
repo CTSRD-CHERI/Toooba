@@ -678,7 +678,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
                              vmBare_full, vmSv39_full, vmSv48_full: return newVal;
                              default: return oldVal;
                          endcase);
-    Reg#(Bit#(4)) vm_mode_reg <- mkWarlCsrReg(0, satpModeWarl);
+    Reg#(Bit#(4)) vm_mode_reg <- mkWarlCsrReg(vmBare_full, satpModeWarl);
     Reg#(Asid) asid_reg <- mkCsrReg(0);
     Reg#(Bit#(16)) full_asid_reg = zeroExtendReg(asid_reg);
     Reg#(Bit#(44)) ppn_reg <- mkCsrReg(0);
