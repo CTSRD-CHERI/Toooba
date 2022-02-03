@@ -622,7 +622,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         if(verbose) begin
             $display("L2TLB page walk: ", fshow(vm_info), " ; ",
                      fshow(idx), " ; ", fshow(cRq), " ; ",
-                     fshow(walkLevel), " ; ", fshow(pte));
+                     fshow(walkLevel), " ; ", fshow(pte), " ; %x", respLdQ.first.data);
         end
 
         if(vm_info.vmMode != vmSv39) begin
