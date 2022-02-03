@@ -516,7 +516,9 @@ function Maybe#(Trap) checkForException(
         end
     end
     else if(dInst.iType == SFence) begin
-        if(prv == prvS && csrState.trapVM) begin
+        if(prv < prvS) begin
+            exception = Valid (Exception (excIllegalInst));
+        end else if(prv == prvS && csrState.trapVM) begin
             exception = Valid (Exception (excIllegalInst));
         end
     end
