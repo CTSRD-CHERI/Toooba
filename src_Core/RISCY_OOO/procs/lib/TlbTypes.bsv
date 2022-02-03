@@ -235,11 +235,12 @@ function TlbPermissionCheck hasVMPermission(
     if(!isPpnAligned(ppn, level)) begin
         fault = True; // unaligned super page
     end
-    if ((!pte_upper_type.cap_readable && pte_upper_type.cap_read_gen) ||
-        (pte_upper_type.cap_readable && !pte_upper_type.cap_read_mod &&
-        pte_upper_type.cap_read_gen)) begin
-        fault = True;
-    end
+    if (access!=InstFetch)
+        if ((!pte_upper_type.cap_readable && pte_upper_type.cap_read_gen) ||
+            (pte_upper_type.cap_readable && !pte_upper_type.cap_read_mod &&
+            pte_upper_type.cap_read_gen)) begin
+            fault = True;
+        end
 
     // check permission related to user page
     if(pte_type.user) begin
