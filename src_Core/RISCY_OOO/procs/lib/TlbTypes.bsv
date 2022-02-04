@@ -235,12 +235,12 @@ function TlbPermissionCheck hasVMPermission(
     if(!isPpnAligned(ppn, level)) begin
         fault = True; // unaligned super page
     end
-    if (access!=InstFetch)
-        if ((!pte_upper_type.cap_readable && pte_upper_type.cap_read_gen) ||
-            (pte_upper_type.cap_readable && !pte_upper_type.cap_read_mod &&
-            pte_upper_type.cap_read_gen)) begin
-            fault = True;
-        end
+
+    /*if ((!pte_upper_type.cap_readable && pte_upper_type.cap_read_gen) ||
+        (pte_upper_type.cap_readable && !pte_upper_type.cap_read_mod &&
+        pte_upper_type.cap_read_gen)) begin
+        fault = True;
+    end*/
 
     // check permission related to user page
     if(pte_type.user) begin
@@ -275,7 +275,7 @@ function TlbPermissionCheck hasVMPermission(
             if (!pte_type.readable &&
                 !(pte_type.executable && vm_info.exeReadable)) begin
                 fault = True;
-            end
+            end/*
             if (potentialCapLoad) begin
                 if (!fault) excCode = excLoadCapPageFault;
                 // load traps if page not cap readable and using cap_read_mod set
@@ -288,7 +288,7 @@ function TlbPermissionCheck hasVMPermission(
                        != pack(pte_upper_type.cap_read_gen))) begin
                     fault = True;
                 end
-            end
+            end*/
         end
         DataStore: begin
             excCode = excStorePageFault;
@@ -296,10 +296,10 @@ function TlbPermissionCheck hasVMPermission(
             if(!(pte_type.readable && pte_type.writable)) begin
                 fault = True;
             end
-            else if(capStore && !pte_upper_type.cap_writable) begin
-                if (!fault) excCode = excStoreCapPageFault;
-                fault = True;
-            end
+            //else if(capStore && !pte_upper_type.cap_writable) begin
+            //    if (!fault) excCode = excStoreCapPageFault;
+            //    fault = True;
+            //end
         end
     endcase
 
@@ -310,10 +310,10 @@ function TlbPermissionCheck hasVMPermission(
 
     if (!fault) begin
         // check if accessed or dirty bit needs to be set
-        if(capStore && access == DataStore && !pte_upper_type.cap_dirty) begin
+        /*if(capStore && access == DataStore && !pte_upper_type.cap_dirty) begin
             ret.allowed = False;
             ret.excCode = excStoreCapPageFault;
-        end
+        end*/
         if(access == DataStore && !pte_type.dirty) begin
             ret.allowed = False;
             ret.excCode = excStorePageFault;
