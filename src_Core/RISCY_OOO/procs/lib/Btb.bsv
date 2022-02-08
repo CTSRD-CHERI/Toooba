@@ -46,6 +46,7 @@ import CHERICap::*;
 import Btb_IFC::*;
 import BtbCore::*;
 import BtbDynamic::*;
+import BtbPartition::*;
 
 export mkBtb;
 
