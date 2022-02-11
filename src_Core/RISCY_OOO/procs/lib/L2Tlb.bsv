@@ -625,9 +625,9 @@ module mkL2Tlb(L2Tlb::L2Tlb);
                      fshow(walkLevel), " ; ", fshow(pte), " ; %x", respLdQ.first.data);
         end
 
-        if(vm_info.vmMode != vmSv39) begin
-            // no longer in sv39 mode -> page fault
-            pageFault("Not in sv39");
+        if(vm_info.vmMode == vmBare) begin
+            // no longer in translation mode -> page fault
+            pageFault("Not in sv39 or sv48");
         end
         else if(!pte.valid) begin
             // invalid pte -> fault
