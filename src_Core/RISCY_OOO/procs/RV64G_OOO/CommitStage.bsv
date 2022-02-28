@@ -147,6 +147,9 @@ interface CommitInput;
 `ifdef INCLUDE_TANDEM_VERIF
     interface Vector #(SupSize, Put #(Trace_Data2)) v_to_TV;
 `endif
+`ifdef CID
+    method File getFP;
+`endif
 endinterface
 
 typedef struct {
@@ -1127,6 +1130,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                 end
                 else begin
                     if (verbose) $display("%t : [doCommitNormalInst - %d] ", $time(), i, fshow(inst_tag), " ; ", fshow(x));
+                    $fwrite(inIfc.getFP, "doCommitNormalInst\n");
 `ifdef RVFI
                     CapPipe pipePc = cast(x.pc);
                     rvfis[i] = genRVFI(x, traceCnt + zeroExtend(whichTrace), getTSB(), getOffset(pipePc) + (is_16b_inst(x.orig_inst) ? 2:4));

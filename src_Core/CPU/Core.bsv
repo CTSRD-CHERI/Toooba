@@ -276,6 +276,9 @@ module mkCore#(CoreId coreId)(Core);
     ITlb iTlb = fetchStage.iTlbIfc;
     ICoCache iMem = fetchStage.iMemIfc;
 
+    // file for logging things
+    Reg#(File) fp <- mkReg(InvalidFile);
+
     // ================================================================
     // If using Direct Instruction Injection then make a
     // bridge that can insert instructions.
@@ -722,6 +725,11 @@ module mkCore#(CoreId coreId)(Core);
         endmethod
 `endif
 `endif
+`ifdef CID
+        method File getFP;
+            return fp;
+        endmethod
+`endif
 
 `ifdef INCLUDE_TANDEM_VERIF
        interface v_to_TV = map (toPut, v_f_to_TV);
@@ -787,6 +795,11 @@ module mkCore#(CoreId coreId)(Core);
         CompIndex cid = truncate(csrf.rd(csrAddrCID));
         fetchStage.setCID(cid);
         coreFix.memExeIfc.setCID(cid);
+    endrule
+
+    rule doSetFileName(fp == InvalidFile);
+        File tfp <- $fopen("toooba.log", "w+");
+        if (tfp == InvalidFile) $display("Invalid File");
     endrule
 `endif
 
