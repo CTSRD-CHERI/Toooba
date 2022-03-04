@@ -26,35 +26,22 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
-
- /*
- This module collects all information that need to be known for checking. It allows
- for loogging information, and is extensible for plugging in a checking module, e.g.,
- in Bluespec.
- */
-
 import ReorderBuffer :: *;
-//import CsrFile :: *;
-import ProcTypes :: *;
 
-interface CIDReport;
-    method Action reportInstr(ToReorderBuffer x);
+interface CIDLogging;
+    method Action setFP(File fpointer);
+    method Action log(CompIndex cid, ToReorderBuffer x);
 endinterface
 
-// events that cause a compartment change:
-// - write to the CID CSR
-function Bool isCompChange(ToReorderBuffer x);
-    let retval = False;
-    if(x.csr matches tagged Valid .csr_idx) begin
-        if(csr_idx == csrAddrCID) retval = True;
-    end
-    return retval;
-endfunction
+module mkCIDLogging(CIDLogging);
 
-module mkCIDReport(CIDReport);
+    Reg#(File) fp <- mkReg(InvalidFile);
 
-    method Action reportInstr(ToReorderBuffer x);
-        $display("reportInstr ", fshow(x));
+    method Action setFP(File fpointer);
+        fp <= fpointer;
+    endmethod
+
+    method Action log(CompIndex cid, ToReorderBuffer x);
+        $display("CIDLogging");
     endmethod
 endmodule
-
