@@ -73,6 +73,10 @@ import Cur_Cycle :: *;
 import Trace_Data2 :: *;
 `endif
 
+`ifdef CID
+import CIDReport :: *;
+`endif
+
 typedef struct {
     // info about the inst blocking at ROB head
     Addr pc;
@@ -262,17 +266,6 @@ function Maybe#(RVFI_DII_Execution#(DataSz,DataSz)) genRVFI(ToReorderBuffer rot,
 endfunction
 `endif
 
-`ifdef CID
-// events that cause a compartment change:
-// - write to the CID CSR
-function Bool isCompChange(ToReorderBuffer x);
-    let retval = False;
-    if(x.csr matches tagged Valid .csr_idx) begin
-        if(csr_idx == csrAddrCID) retval = True;
-    end
-    return retval;
-endfunction
-`endif
 
 `ifdef INCLUDE_GDB_CONTROL
 
@@ -390,6 +383,10 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
     ReorderBufferSynth rob = inIfc.robIfc;
     RegRenamingTable regRenamingTable = inIfc.rtIfc;
     CsrFile csrf = inIfc.csrfIfc;
+
+`ifdef CID
+   CIDReport cid_report <- mkCIDReport;
+`endif
 
     // FIXME FIXME FIXME wires to set atCommit in LSQ: avoid scheduling cycle.
     // Using wire should be fine, because LSQ does not need to see atCommit
@@ -882,9 +879,8 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
            $display("instret:%0d  PC:0x%0h  instr:0x%08h", rg_serial_num, x.pc, x.orig_inst,
                     "   iType:", fshow (x.iType), "    [doCommitSystemInst] %d", cur_cycle);
         end
-        if(isCompChange(x)) begin
-            $fwrite(inIfc.getFP, "Compartment change");
-        end
+
+        cid_report.reportInstr(x);
 
         // we claim a phy reg for every inst, so commit its renaming
         regRenamingTable.commit[0].commit;
@@ -1145,13 +1141,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                 end
                 else begin
                     if (verbose) $display("%t : [doCommitNormalInst - %d] ", $time(), i, fshow(inst_tag), " ; ", fshow(x));
-                    if (x.iType == Jr || x.iType == CJALR) begin
-                        
-                        $fwrite(inIfc.getFP, "%t : doCommitNormalInst", $time(), fshow(x));
-                    end
-                    else if(isCompChange(x)) begin
-                        $fwrite(inIfc.getFP, "Compartment change");
-                    end
+                    cid_report.reportInstr(x);
 `ifdef RVFI
                     CapPipe pipePc = cast(x.pc);
                     rvfis[i] = genRVFI(x, traceCnt + zeroExtend(whichTrace), getTSB(), getOffset(pipePc) + (is_16b_inst(x.orig_inst) ? 2:4));
