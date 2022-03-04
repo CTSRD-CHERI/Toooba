@@ -34,11 +34,12 @@
  */
 
 import ReorderBuffer :: *;
-//import CsrFile :: *;
+import CIDLogging :: *;
 import ProcTypes :: *;
 
 interface CIDReport;
     method Action reportInstr(ToReorderBuffer x);
+    method Action setFP(File fpointer);
 endinterface
 
 // events that cause a compartment change:
@@ -52,6 +53,12 @@ function Bool isCompChange(ToReorderBuffer x);
 endfunction
 
 module mkCIDReport(CIDReport);
+
+    CIDLogging log <- mkCIDLogging;
+
+    method Action setFP(File fpointer);
+        log.setFP(fpointer);
+    endmethod
 
     method Action reportInstr(ToReorderBuffer x);
         $display("reportInstr ", fshow(x));

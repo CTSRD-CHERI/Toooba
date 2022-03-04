@@ -26,12 +26,27 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
+/*
+This module logs reported instructions in the transient trace format
+*/
+
 import ReorderBuffer :: *;
+import ProcTypes :: *;
+//import CHERICap :: *;
+import CHERICC_Fat :: *;
 
 interface CIDLogging;
     method Action setFP(File fpointer);
     method Action log(CompIndex cid, ToReorderBuffer x);
 endinterface
+
+typedef struct {
+    CompIndex cid;
+    IType iType;
+    CapMem predNextPc;
+    CapMem actualNextPc;
+} TransientTrace deriving (Bits, Eq, FShow);
+
 
 module mkCIDLogging(CIDLogging);
 
@@ -43,5 +58,9 @@ module mkCIDLogging(CIDLogging);
 
     method Action log(CompIndex cid, ToReorderBuffer x);
         $display("CIDLogging");
+        TransientTrace tt = unpack(0);
+        tt.cid = cid;
+        tt.iType = x.iType;
+        $fwrite(fp, fshow(tt));
     endmethod
 endmodule
