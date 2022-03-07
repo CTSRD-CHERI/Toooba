@@ -154,9 +154,6 @@ interface CommitInput;
 `ifdef INCLUDE_TANDEM_VERIF
     interface Vector #(SupSize, Put #(Trace_Data2)) v_to_TV;
 `endif
-`ifdef CID
-    method File getFP;
-`endif
 endinterface
 
 typedef struct {
