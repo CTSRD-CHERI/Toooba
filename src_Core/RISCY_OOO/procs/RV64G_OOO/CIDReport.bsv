@@ -38,16 +38,18 @@ import CIDLogging :: *;
 import ProcTypes :: *;
 
 interface CIDReport;
-    method Action reportInstr(ToReorderBuffer x);
     method Action setFP(File fpointer);
+    method Action setCID(CompIndex cid);
+    method Action reportInstr(ToReorderBuffer x);
 endinterface
 
 // events that cause a compartment change:
-// - write to the CID CSR
-function Bool isCompChange(ToReorderBuffer x);
+// - write to the CID CSR and if the value is about to change
+function Bool isCompChange(ToReorderBuffer x, CompIndex cid);
     let retval = False;
     if(x.csr matches tagged Valid .csr_idx) begin
-        if(csr_idx == csrAddrCID) retval = True;
+        let write_val = x.ppc_vaddr_csrData.CSRData;
+        if(csr_idx == csrAddrCID && write_val != zeroExtend(cid)) retval = True;
     end
     return retval;
 endfunction
@@ -55,9 +57,14 @@ endfunction
 module mkCIDReport(CIDReport);
 
     CIDLogging log <- mkCIDLogging;
+    Reg#(CompIndex) rg_cid <- mkRegU;
 
     method Action setFP(File fpointer);
         log.setFP(fpointer);
+    endmethod
+
+    method Action setCID(CompIndex cid);
+        rg_cid <= cid;
     endmethod
 
     method Action reportInstr(ToReorderBuffer x);
