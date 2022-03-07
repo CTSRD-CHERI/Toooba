@@ -40,6 +40,7 @@ import ProcTypes :: *;
 interface CIDReport;
     method Action setFP(File fpointer);
     method Action setCID(CompIndex cid);
+    method Action reportPred(DecodedInst x);
     method Action reportInstr(ToReorderBuffer x);
 endinterface
 
@@ -67,11 +68,15 @@ module mkCIDReport(CIDReport);
         rg_cid <= cid;
     endmethod
 
+    method Action reportPred(DecodedInst x);
+        $display("reportPred");
+    endmethod
+
     method Action reportInstr(ToReorderBuffer x);
         $display("reportInstr ", fshow(x));
         if (x.iType == CJALR) begin
             $display("CJALR instruction");
-            log.log(rg_cid, x);
+            log.logCommittedInstr(rg_cid, x);
         end
     endmethod
 endmodule

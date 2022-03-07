@@ -411,6 +411,9 @@ module mkCore#(CoreId coreId)(Core);
                 endinterface);
             end
             let aluExeInput = (interface AluExeInput;
+`ifdef CID
+                interface cidReportIfc = cidReport;
+`endif
                 method sbCons_lazyLookup = sbCons.lazyLookup[aluRdPort(i)].get;
                 method rf_rd1 = cast(rf.read[aluRdPort(i)].rd1);
                 method rf_rd2 = cast(rf.read[aluRdPort(i)].rd2);
@@ -802,6 +805,7 @@ module mkCore#(CoreId coreId)(Core);
         CompIndex cid = truncate(csrf.rd(csrAddrCID));
         fetchStage.setCID(cid);
         coreFix.memExeIfc.setCID(cid);
+        cidReport.setCID(cid);
     endrule
 
     rule doSetFileName(fp == InvalidFile);

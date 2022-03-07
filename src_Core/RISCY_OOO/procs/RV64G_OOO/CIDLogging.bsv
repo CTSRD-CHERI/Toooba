@@ -37,14 +37,18 @@ import CHERICC_Fat :: *;
 
 interface CIDLogging;
     method Action setFP(File fpointer);
-    method Action log(CompIndex cid, ToReorderBuffer x);
+    method Action logCommittedInstr(CompIndex cid, ToReorderBuffer x);
 endinterface
 
 typedef struct {
     CompIndex cid;
     IType iType;
-    CapMem predNextPc;
+    //CapMem predNextPc;
     CapMem actualNextPc;
+} ArchTrace deriving (Bits, Eq, FShow);
+
+typedef struct {
+    CapMem target;
 } TransientTrace deriving (Bits, Eq, FShow);
 
 
@@ -56,11 +60,16 @@ module mkCIDLogging(CIDLogging);
         fp <= fpointer;
     endmethod
 
-    method Action log(CompIndex cid, ToReorderBuffer x);
+    /*method Action logPrediction(cid, ToReorderBuffer x);
+        $display("logPrediction");
+    endmethod*/
+
+    method Action logCommittedInstr(CompIndex cid, ToReorderBuffer x);
         $display("CIDLogging");
-        TransientTrace tt = unpack(0);
-        tt.cid = cid;
-        tt.iType = x.iType;
-        $fwrite(fp, fshow(tt));
+        ArchTrace at = unpack(0);
+        at.cid = cid;
+        at.iType = x.iType;
+        //at.actualNextPc = 0;
+        $fwrite(fp, fshow(at), "\n");
     endmethod
 endmodule

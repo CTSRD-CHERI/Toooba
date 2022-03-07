@@ -63,6 +63,9 @@ import ISA_Decls_CHERI::*;
 import BlueUtils::*;
 import StatCounters::*;
 `endif
+`ifdef CID
+import CIDReport :: *;
+`endif
 
 
 import Cur_Cycle :: *;
@@ -159,6 +162,10 @@ typedef struct {
 } FetchTrainBP deriving(Bits, Eq, FShow);
 
 interface AluExeInput;
+`ifdef CID
+    // interface to reporting module
+    interface CIDReport cidReportIfc;
+`endif
     // conservative scoreboard check in reg read stage
     method RegsReady sbCons_lazyLookup(PhyRegs r);
     // Phys reg file
@@ -228,6 +235,9 @@ endinterface
 module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
     Bool verbose = True;
     Integer verbosity = 0;
+
+    // cid reporting module
+    CIDReport cidReport = inIfc.cidReportIfc;
 
     // alu reservation station
     ReservationStationAlu rsAlu <- mkReservationStationAlu;
@@ -334,6 +344,10 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
             end
         end
 `endif
+`endif
+
+`ifdef CID
+        cidReport.reportPred(x.dInst);
 `endif
 
         // go to next stage
