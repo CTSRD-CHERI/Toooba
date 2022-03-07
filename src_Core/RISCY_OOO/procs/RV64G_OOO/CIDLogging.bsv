@@ -32,11 +32,11 @@ This module logs reported instructions in the transient trace format
 
 import ReorderBuffer :: *;
 import ProcTypes :: *;
-//import CHERICap :: *;
 import CHERICC_Fat :: *;
 
 interface CIDLogging;
     method Action setFP(File fpointer);
+    method Action logPrediction(CompIndex cid, DecodedInst x, CapMem ppc);
     method Action logCommittedInstr(CompIndex cid, ToReorderBuffer x);
 endinterface
 
@@ -48,6 +48,8 @@ typedef struct {
 } ArchTrace deriving (Bits, Eq, FShow);
 
 typedef struct {
+    CompIndex cid;
+    IType iType;
     CapMem target;
 } TransientTrace deriving (Bits, Eq, FShow);
 
@@ -60,9 +62,14 @@ module mkCIDLogging(CIDLogging);
         fp <= fpointer;
     endmethod
 
-    /*method Action logPrediction(cid, ToReorderBuffer x);
+    method Action logPrediction(CompIndex cid, DecodedInst x, CapMem ppc);
         $display("logPrediction");
-    endmethod*/
+        TransientTrace tt = unpack(0);
+        tt.cid = cid;
+        tt.iType = x.iType;
+        tt.target = ppc;
+        $fwrite(fp, fshow(tt), "\n");
+    endmethod
 
     method Action logCommittedInstr(CompIndex cid, ToReorderBuffer x);
         $display("CIDLogging");

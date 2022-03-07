@@ -36,11 +36,12 @@
 import ReorderBuffer :: *;
 import CIDLogging :: *;
 import ProcTypes :: *;
+import CHERICC_Fat :: *;
 
 interface CIDReport;
     method Action setFP(File fpointer);
     method Action setCID(CompIndex cid);
-    method Action reportPred(DecodedInst x);
+    method Action reportPred(DecodedInst x, CapMem ppc);
     method Action reportInstr(ToReorderBuffer x);
 endinterface
 
@@ -68,8 +69,12 @@ module mkCIDReport(CIDReport);
         rg_cid <= cid;
     endmethod
 
-    method Action reportPred(DecodedInst x);
+    method Action reportPred(DecodedInst x, CapMem ppc);
         $display("reportPred");
+        if (x.iType == CJALR) begin
+            $display("CJALR instruction");
+            log.logPrediction(rg_cid, x, ppc);
+        end
     endmethod
 
     method Action reportInstr(ToReorderBuffer x);

@@ -347,7 +347,8 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
 `endif
 
 `ifdef CID
-        cidReport.reportPred(x.dInst);
+        let predPC = inIfc.rob_getPredPC;
+        cidReport.reportPred(x.dInst, ppc);
 `endif
 
         // go to next stage
