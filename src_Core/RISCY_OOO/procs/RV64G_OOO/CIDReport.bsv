@@ -69,6 +69,7 @@ module mkCIDReport(CIDReport);
 
     method Action reportInstr(ToReorderBuffer x);
         $display("reportInstr ", fshow(x));
+        log.log(rg_cid, x);
     endmethod
 endmodule
 

@@ -128,6 +128,10 @@ import DM_CPU_Req_Rsp  :: *;
 import Trace_Data2 :: *;
 `endif
 
+`ifdef CID
+import CIDReport :: *;
+`endif
+
 // ================================================================
 
 `ifdef SECURITY
@@ -292,6 +296,11 @@ module mkCore#(CoreId coreId)(Core);
 
     // Bluespec: CsrFile including external interrupt request methods
     CsrFile csrf <- mkCsrFile(zeroExtend(coreId)); // hartid in CSRF should be core id
+
+    // reporting module, which can be used in the entire core
+`ifdef CID
+    CIDReport cidReport <- mkCIDReport;
+`endif
 
     RegRenamingTable regRenamingTable <- mkRegRenamingTable;
     EpochManager epochManager <- mkEpochManager;
@@ -647,6 +656,9 @@ module mkCore#(CoreId coreId)(Core);
         interface robIfc = rob;
         interface rtIfc = regRenamingTable;
         interface csrfIfc = csrf;
+`ifdef CID
+        interface cidReportIfc = cidReport;
+`endif
         method stbEmpty = stb.isEmpty;
         method stqEmpty = lsq.stqEmpty;
         method lsqSetAtCommit = lsq.setAtCommit;

@@ -105,6 +105,9 @@ interface CommitInput;
     interface ReorderBufferSynth robIfc;
     interface RegRenamingTable rtIfc;
     interface CsrFile csrfIfc;
+`ifdef CID
+    interface CIDReport cidReportIfc;
+`endif
     // no stores
     method Bool stbEmpty;
     method Bool stqEmpty;
@@ -385,7 +388,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
     CsrFile csrf = inIfc.csrfIfc;
 
 `ifdef CID
-   CIDReport cid_report <- mkCIDReport;
+   CIDReport cid_report = inIfc.cidReportIfc;
 `endif
 
     // FIXME FIXME FIXME wires to set atCommit in LSQ: avoid scheduling cycle.
