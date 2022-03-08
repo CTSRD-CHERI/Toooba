@@ -76,7 +76,8 @@ module mkCIDLogging(CIDLogging);
         ArchTrace at = unpack(0);
         at.cid = cid;
         at.iType = x.iType;
-        //at.actualNextPc = 0;
+        // read out ppc from the rob
+        at.actualNextPc = x.ppc_vaddr_csrData.PPC;
         $fwrite(fp, fshow(at), "\n");
     endmethod
 endmodule
