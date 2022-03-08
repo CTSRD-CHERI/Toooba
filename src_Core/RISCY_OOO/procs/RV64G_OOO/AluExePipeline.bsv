@@ -467,6 +467,10 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
         end
 
         // update the instruction in the reorder buffer.
+        PPCVAddrCSRData pvc = x.csrData;
+        if (x.iType == Jr || x.iType == CJALR || x.iType == CCall || x.iType == Br) begin
+            pvc = tagged PPC cast(x.controlFlow.nextPc);
+        end
         inIfc.rob_setExecuted(
             x.tag,
 `ifdef INCLUDE_TANDEM_VERIF
@@ -474,7 +478,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
 `endif
             // always update with the correct nextPc from the
             // control flow unit
-            tagged PPC cast(x.controlFlow.nextPc),
+            pvc,
             x.capException
 `ifdef RVFI
             , x.traceBundle
