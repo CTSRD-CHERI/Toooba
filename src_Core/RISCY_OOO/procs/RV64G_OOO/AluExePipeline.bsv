@@ -472,7 +472,9 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
 `ifdef INCLUDE_TANDEM_VERIF
             x.data,
 `endif
-            x.csrData,
+            // always update with the correct nextPc from the
+            // control flow unit
+            tagged PPC cast(x.controlFlow.nextPc),
             x.capException
 `ifdef RVFI
             , x.traceBundle
