@@ -166,7 +166,8 @@ function Maybe#(MemInst) decodeMemInst(Instruction inst, Bool cap_mode);
                                 byteOrTagEn: DataMemAccess(byteEn),
                                 aq: aq,
                                 rl: rl,
-                                reg_bounds: cap_mode } );
+                                reg_bounds: cap_mode,
+                                prv_override: Invalid } );
     end
 endfunction
 
@@ -249,7 +250,9 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
                                 byteOrTagEn: DataMemAccess(byteEn),
                                 aq: amo,
                                 rl: amo,
-                                reg_bounds: bounds_from_register} );
+                                reg_bounds: bounds_from_register,
+                                prv_override: Invalid /* Updated outside */
+                              } );
     end
 endfunction
 
@@ -843,7 +846,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             byteOrTagEn: DataMemAccess(replicate(False)),
                             aq: reconcile,
                             rl: commit,
-                            reg_bounds: False // unused
+                            reg_bounds: False, // unused
+                            prv_override: Invalid
                         });
                     end
                     else begin
@@ -1290,6 +1294,40 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.imm = Valid (0);
                             dInst.capChecks = memCapChecks(mi.reg_bounds);
                         end
+                        f7_cap_UserLoads: begin
+                            dInst.iType = Ld;
+                            MemInst mi = exp_bnds_mem_inst.Valid;
+                            mi.prv_override = Valid(prvU);
+                            if (isValid(exp_bnds_mem_inst)) begin
+                                dInst.execFunc = tagged Mem mi;
+                                if (mi.mem_func == Lr)
+                                    dInst.iType = Lr;
+                            end
+                            else illegalInst = True;
+                            if (!mi.reg_bounds) illegalInst = True;
+                            regs.dst  = Valid(tagged Gpr rd);
+                            regs.src1 = Valid(tagged Gpr rs1);
+                            dInst.imm = Valid (0);
+                            dInst.capChecks = memCapChecks(mi.reg_bounds);
+                        end
+                        f7_cap_UserStores: begin
+                            dInst.iType = St;
+                            MemInst mi = exp_bnds_mem_inst.Valid;
+                            mi.prv_override = Valid(prvU);
+                            if (isValid(exp_bnds_mem_inst)) begin
+                                dInst.execFunc = tagged Mem mi;
+                                if (mi.mem_func == Sc) begin
+                                    dInst.iType = Sc;
+                                    regs.dst = Valid(tagged Gpr rs2);
+                                end
+                            end
+                            else illegalInst = True;
+                            if (!mi.reg_bounds) illegalInst = True;
+                            regs.src1 = Valid(tagged Gpr rs1);
+                            regs.src2 = Valid(tagged Gpr rs2);
+                            dInst.imm = Valid (0);
+                            dInst.capChecks = memCapChecks(mi.reg_bounds);
+                        end
                         f7_cap_TwoOp: begin
                             case (funct5rs2)
                                 f5rs2_cap_CGetLen: begin
@@ -1420,7 +1458,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                         byteOrTagEn: TagMemAccess,
                                         aq: False,
                                         rl: False,
-                                        reg_bounds: True };
+                                        reg_bounds: True,
+                                        prv_override: Invalid };
                                     regs.dst  = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capChecks = memCapChecks(True);

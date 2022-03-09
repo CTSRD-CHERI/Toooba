@@ -168,13 +168,14 @@ typedef struct {
   Bool     rl;
 } AmoInst deriving(Bits, Eq, FShow);
 typedef struct {
-    MemFunc        mem_func; // Ld, St, Lr, Sc, Amo
-    AmoFunc        amo_func;
-    Bool           unsignedLd;
-    ByteOrTagEn    byteOrTagEn; // takes place of double word
-    Bool           aq;
-    Bool           rl;
-    Bool           reg_bounds;
+    MemFunc         mem_func; // Ld, St, Lr, Sc, Amo
+    AmoFunc         amo_func;
+    Bool            unsignedLd;
+    ByteOrTagEn     byteOrTagEn; // takes place of double word
+    Bool            aq;
+    Bool            rl;
+    Bool            reg_bounds;
+    Maybe#(Bit#(2)) prv_override;
 } MemInst deriving(Bits, Eq, FShow);
 
 `ifdef BSIM

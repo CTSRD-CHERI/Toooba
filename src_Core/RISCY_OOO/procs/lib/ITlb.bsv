@@ -191,6 +191,7 @@ module mkITlb(ITlb::ITlb);
 
             // check permission
             if(hasVMPermission(vm_info,
+                               Invalid,
                                en.pteType,
                                en.pteUpperType,
                                en.ppn,
@@ -310,6 +311,7 @@ module mkITlb(ITlb::ITlb);
                         let entry = trans_result.entry;
                         // check permission
                         if(hasVMPermission(vm_info,
+                                           Invalid,
                                            entry.pteType,
                                            entry.pteUpperType,
                                            entry.ppn,

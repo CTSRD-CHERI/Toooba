@@ -293,6 +293,7 @@ module mkDTlb#(
                          "      r      : ", fshow(r)
                          );
             let permCheck = hasVMPermission(vm_info,
+                                            r.prv_override,
                                             en.pteType,
                                             en.pteUpperType,
                                             en.ppn,
@@ -489,6 +490,7 @@ module mkDTlb#(
                      "         r      : ", fshow(r)
                      );
                 let permCheck = hasVMPermission(vm_info,
+                                                r.prv_override,
                                                 entry.pteType,
                                                 entry.pteUpperType,
                                                 entry.ppn,
