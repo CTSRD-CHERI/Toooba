@@ -79,7 +79,7 @@ module mkCIDReport(CIDReport);
 
     method Action reportInstr(ToReorderBuffer x);
         $display("reportInstr ", fshow(x));
-        if (x.iType == CJALR) begin
+        if (x.iType == CJALR || x.iType == Jr) begin
             $display("CJALR instruction");
             log.logCommittedInstr(rg_cid, x);
         end

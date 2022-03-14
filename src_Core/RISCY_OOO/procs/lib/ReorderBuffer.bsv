@@ -78,6 +78,11 @@ typedef struct {
     Bit #(32)          orig_inst;    // original 16b or 32b instruction ([1:0] will distinguish 16b or 32b)
     IType              iType;
     Maybe#(ArchRIndx)  dst;          // Invalid, GPR or FPR destination ("Rd")
+`ifdef CID
+    Maybe#(ArchRIndx)  rs1;
+    Maybe#(ArchRIndx)  rs2;
+    Data               dstData;
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
     // Store-data, for those mem instrs that store data
     Data               dst_data;     // Output of instruction into destination register
@@ -126,6 +131,9 @@ typedef enum {
 
 interface Row_setExecuted_doFinishAlu;
     method Action set(
+`ifdef CID
+        Data dstData,
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
         CapPipe dst_data,
 `endif
@@ -256,6 +264,10 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Reg #(Bit #(32))                                                orig_inst            <- mkRegU;
     Reg#(IType)                                                     iType                <- mkRegU;
     Reg #(Maybe #(ArchRIndx))                                       rg_dst_reg           <- mkRegU;
+`ifdef CID
+    Reg #(Maybe #(ArchRIndx))                                       rg_rs1                  <- mkRegU;
+    Reg #(Maybe #(ArchRIndx))                                       rg_rs2                  <- mkRegU;
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
     Reg #(Data)                                                     rg_dst_data          <- mkRegU;
     Reg #(Data)                                                     rg_store_data        <- mkRegU;
@@ -294,6 +306,9 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     for(Integer i = 0; i < valueof(aluExeNum); i = i+1) begin
         aluSetExe[i] = (interface Row_setExecuted_doFinishAlu;
             method Action set(
+`ifdef CID
+                Data dstData,
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
                 CapPipe dst_data,
 `endif
@@ -412,6 +427,10 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
         orig_inst <= x.orig_inst;
         iType <= x.iType;
         rg_dst_reg <= x.dst;
+`ifdef CID
+        rg_rs1 <= x.rs1;
+        rg_rs2 <= x.rs2;
+`endif
         // rg_dst_data will be written after inst execution
         // rg_store_data will be written in Mem pipeline
         // rg_store_data_BE will be written in Mem pipeline
@@ -456,6 +475,10 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
             orig_inst: orig_inst,
             iType: iType,
             dst: rg_dst_reg,
+`ifdef CID
+            rs1: rg_rs1,
+            rs2: rg_rs2,
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
             dst_data: rg_dst_data,
             store_data: rg_store_data,
@@ -569,6 +592,9 @@ endinterface
 
 interface ROB_setExecuted_doFinishAlu;
     method Action set(InstTag x,
+`ifdef CID
+                      Data dstData,
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
                       Data dst_data,
 `endif
@@ -1121,6 +1147,9 @@ module mkSupReorderBuffer#(
         aluSetExeIfc[i] = (interface ROB_setExecuted_doFinishAlu;
             method Action set(
                 InstTag x,
+`ifdef CID
+                Data dstData,
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
                 Data dst_data,
 `endif
@@ -1133,6 +1162,9 @@ module mkSupReorderBuffer#(
                 all(id, readVReg(setExeAlu_SB_enq)) // ordering: < enq
             );
                 row[x.way][x.ptr].setExecuted_doFinishAlu[i].set(
+`ifdef CID
+                    dstData,
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
                     dst_data,
 `endif

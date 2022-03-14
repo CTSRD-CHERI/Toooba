@@ -40,9 +40,16 @@ interface CIDLogging;
     method Action logCommittedInstr(CompIndex cid, ToReorderBuffer x);
 endinterface
 
+typedef enum {
+    Jump,
+    Ret,
+    Other
+} InstType deriving (Bits, Eq, FShow);
+
 typedef struct {
     CompIndex cid;
-    IType iType;
+    InstType iType;
+    CapMem pc;
     //CapMem predNextPc;
     CapMem actualNextPc;
 } ArchTrace deriving (Bits, Eq, FShow);
@@ -52,6 +59,15 @@ typedef struct {
     IType iType;
     CapMem target;
 } TransientTrace deriving (Bits, Eq, FShow);
+
+// return address stack link reg is x1 or x5
+function Bool linkedR(Maybe#(ArchRIndx) register);
+    Bool res = False;
+    if (register matches tagged Valid .r &&& (r == tagged Gpr 1 || r == tagged Gpr 5)) begin
+        res = True;
+    end
+    return res;
+endfunction
 
 
 module mkCIDLogging(CIDLogging);
@@ -72,10 +88,17 @@ module mkCIDLogging(CIDLogging);
     endmethod
 
     method Action logCommittedInstr(CompIndex cid, ToReorderBuffer x);
-        $display("CIDLogging");
+        $display("CIDLogging ",fshow(x));
         ArchTrace at = unpack(0);
         at.cid = cid;
-        at.iType = x.iType;
+        if(x.iType == CJALR || x.iType == Jr) begin
+            if(linkedR(x.rs1)) at.iType = Ret;
+            else at.iType = Jump;
+        end
+        else begin
+            at.iType = Other;
+        end
+        at.pc = x.pc;
         // read out ppc from the rob
         at.actualNextPc = x.ppc_vaddr_csrData.PPC;
         $fwrite(fp, fshow(at), "\n");

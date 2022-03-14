@@ -181,6 +181,9 @@ interface AluExeInput;
     method Bit #(32) rob_getOrig_Inst (InstTag t);
     method Action rob_setExecuted(
         InstTag t,
+`ifdef CID
+        Data dstData,
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
         CapPipe dst_data,
 `endif
@@ -471,8 +474,13 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
         if (x.iType == Jr || x.iType == CJALR || x.iType == CCall || x.iType == Br) begin
             pvc = tagged PPC cast(x.controlFlow.nextPc);
         end
+        Data dat = zeroExtend(getAddr(x.data));
         inIfc.rob_setExecuted(
             x.tag,
+`ifdef CID
+            //x.data,
+            dat,
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
             x.data,
 `endif

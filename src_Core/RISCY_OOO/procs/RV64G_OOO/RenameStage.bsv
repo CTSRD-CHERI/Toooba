@@ -1123,6 +1123,11 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                                 orig_inst: orig_inst,
                                                 iType: dInst.iType,
                                                 dst: arch_regs.dst,
+`ifdef CID
+                                                rs1: arch_regs.src1,
+                                                rs2: arch_regs.src2,
+                                                dstData: ?,
+`endif
 `ifdef INCLUDE_TANDEM_VERIF
                                                 dst_data: ?,    // Available only after execution
                                                 store_data: ?,
