@@ -4,6 +4,7 @@
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2021 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -42,14 +43,20 @@ import Vector::*;
 import Ehr::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
-import Ras_IFC::*;
-import RasBram::*;
-import RasVector::*;
 
+interface RAS;
+    method CapMem first;
+    // first pop, then push
+    method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
+endinterface
 
-(* synthesize *)
-module mkRas(ReturnAddrStack);
-    //let m <- mkRasVector;
-    let m <- mkRasBram;
-    return m;
-endmodule
+// INVARIANT:
+// methods from the RAS interface take effect in the order of the vector
+// a pop by ras[2] is seen by ras[3] in the same cycle
+
+interface ReturnAddrStack;
+    interface Vector#(SupSize, RAS) ras;
+    method Action flush;
+    method Bool flush_done;
+endinterface
+

@@ -76,6 +76,7 @@ import Types::*;
 import IndexedMultiset::*;
 import Cur_Cycle :: *;
 import DReg :: *;
+import Ras_IFC::*;
 
 // ================================================================
 // For fv_decode_C function and related types and definitions
