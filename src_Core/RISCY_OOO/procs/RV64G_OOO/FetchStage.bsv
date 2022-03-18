@@ -78,6 +78,9 @@ import Types::*;
 import IndexedMultiset::*;
 import Cur_Cycle :: *;
 import DReg :: *;
+`ifdef CID
+import CIDReport :: *;
+`endif
 
 // ================================================================
 // For fv_decode_C function and related types and definitions
@@ -110,6 +113,13 @@ module mkRvfiDiiServer(RvfiDiiServer);
     interface fromDii = toGPServer(reqs, resps);
 endmodule
 `endif
+
+interface FetchInput;
+    `ifdef CID
+        // interface to reporting module
+        interface CIDReport cidReportIfc;
+    `endif
+endinterface
 
 interface FetchStage;
     // pipeline
@@ -792,6 +802,9 @@ module mkFetchStage(FetchStage);
                                         tval: getAddr(pc) + ((in.cause_second_half) ? 2:0)
                                         };
                out_fifo.enqS[i].enq(out);
+//`ifdef CID
+//               cidReport.reportPred(out);
+//`endif
                if (verbosity >= 1) begin
                   $write ("%0d: %m.rule doDecode: out_fifo.enqS[%0d].enq", cur_cycle, i);
                   $display (" pc %0h  inst %08h", out.pc, out.orig_inst);

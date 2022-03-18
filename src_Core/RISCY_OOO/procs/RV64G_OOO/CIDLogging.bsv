@@ -36,7 +36,7 @@ import CHERICC_Fat :: *;
 
 interface CIDLogging;
     method Action setFP(File fpointer);
-    method Action logPrediction(CompIndex cid, DecodedInst x, CapMem ppc);
+    method Action logPrediction(CompIndex cid, ToReorderBuffer x);
     method Action logCommittedInstr(CompIndex cid, ToReorderBuffer x);
 endinterface
 
@@ -56,7 +56,7 @@ typedef struct {
 
 typedef struct {
     CompIndex cid;
-    IType iType;
+    InstType iType;
     CapMem target;
 } TransientTrace deriving (Bits, Eq, FShow);
 
@@ -69,6 +69,15 @@ function Bool linkedR(Maybe#(ArchRIndx) register);
     return res;
 endfunction
 
+function InstType getInstType(IType iType, Maybe#(ArchRIndx) rs1);
+    InstType retval = Other;
+    if(iType == CJALR || iType == Jr) begin
+        if(linkedR(rs1)) retval = Ret;
+        else retval = Jump;
+    end
+    return retval;
+endfunction
+
 
 module mkCIDLogging(CIDLogging);
 
@@ -78,12 +87,12 @@ module mkCIDLogging(CIDLogging);
         fp <= fpointer;
     endmethod
 
-    method Action logPrediction(CompIndex cid, DecodedInst x, CapMem ppc);
+    method Action logPrediction(CompIndex cid, ToReorderBuffer x);
         $display("logPrediction");
         TransientTrace tt = unpack(0);
         tt.cid = cid;
-        tt.iType = x.iType;
-        tt.target = ppc;
+        tt.iType = getInstType(x.iType, x.rs1);
+        tt.target = x.ppc_vaddr_csrData.PPC;
         $fwrite(fp, fshow(tt), "\n");
     endmethod
 
@@ -91,13 +100,7 @@ module mkCIDLogging(CIDLogging);
         $display("CIDLogging ",fshow(x));
         ArchTrace at = unpack(0);
         at.cid = cid;
-        if(x.iType == CJALR || x.iType == Jr) begin
-            if(linkedR(x.rs1)) at.iType = Ret;
-            else at.iType = Jump;
-        end
-        else begin
-            at.iType = Other;
-        end
+        at.iType = getInstType(x.iType, x.rs1);
         at.pc = x.pc;
         // read out ppc from the rob
         at.actualNextPc = x.ppc_vaddr_csrData.PPC;

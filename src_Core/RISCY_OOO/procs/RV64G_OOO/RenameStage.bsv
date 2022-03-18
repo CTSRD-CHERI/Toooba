@@ -70,6 +70,9 @@ import ISA_Decls_CHERI::*;
 `ifdef PERFORMANCE_MONITORING
 import StatCounters::*;
 `endif
+`ifdef CID
+import CIDReport :: *;
+`endif
 
 import Cur_Cycle :: *;
 
@@ -92,6 +95,10 @@ interface RenameInput;
     interface Vector#(FpuMulDivExeNum, ReservationStationFpuMulDiv) rsFpuMulDivIfc;
     interface ReservationStationMem rsMemIfc;
     interface SplitLSQ lsqIfc;
+`ifdef CID
+    // interface to reporting module
+    interface CIDReport cidReportIfc;
+`endif
     // pending MMIO req from platform
     method Bool pendingMMIOPRq;
     // record that a CSR inst or interrupt is sent to ROB
@@ -136,6 +143,9 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     CsrFile csrf = inIfc.csrfIfc;
     EpochManager epochManager = inIfc.emIfc;
     SpecTagManager specTagManager = inIfc.smIfc;
+`ifdef CID
+    CIDReport cidReport = inIfc.cidReportIfc;
+`endif
     Vector#(AluExeNum, ReservationStationAlu) reservationStationAlu = inIfc.rsAluIfc;
     Vector#(FpuMulDivExeNum, ReservationStationFpuMulDiv) reservationStationFpuMulDiv = inIfc.rsFpuMulDivIfc;
     ReservationStationMem reservationStationMem = inIfc.rsMemIfc;
@@ -1155,6 +1165,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 `endif
                                                };
                         rob.enqPort[i].enq(y);
+                        cidReport.reportPred(y);
 
                         // record activity
                         doCorrectPath = True;

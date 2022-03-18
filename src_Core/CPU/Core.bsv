@@ -297,11 +297,10 @@ module mkCore#(CoreId coreId)(Core);
     // Bluespec: CsrFile including external interrupt request methods
     CsrFile csrf <- mkCsrFile(zeroExtend(coreId)); // hartid in CSRF should be core id
 
-    // reporting module, which can be used in the entire core
+    // reporting module for transient execution
 `ifdef CID
     CIDReport cidReport <- mkCIDReport;
 `endif
-
     RegRenamingTable regRenamingTable <- mkRegRenamingTable;
     EpochManager epochManager <- mkEpochManager;
     SpecTagManager specTagManager <- mkSpecTagManager;
@@ -638,6 +637,9 @@ module mkCore#(CoreId coreId)(Core);
         interface rsFpuMulDivIfc = reservationStationFpuMulDiv;
         interface rsMemIfc = reservationStationMem;
         interface lsqIfc = lsq;
+`ifdef CID
+        interface cidReportIfc = cidReport;
+`endif
         method pendingMMIOPRq = mmio.hasPendingPRq;
         method issueCsrInstOrInterrupt = csrInstOrInterruptInflight_rename._write(True);
         method Bool checkDeadlock;
