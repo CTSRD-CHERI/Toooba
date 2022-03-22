@@ -37,6 +37,7 @@ import ReorderBuffer :: *;
 import CIDLogging :: *;
 import ProcTypes :: *;
 import CHERICC_Fat :: *;
+import CHERICap :: *;
 
 interface CIDReport;
     method Action setFP(File fpointer);
@@ -71,7 +72,9 @@ module mkCIDReport(CIDReport);
 
     method Action reportPred(ToReorderBuffer x);
         $display("reportPred");
-        if (x.iType == CJALR) begin
+        let ppc = x.ppc_vaddr_csrData.PPC;
+        let addr = getAddr(ppc);
+        if (x.iType == CJALR && addr != 0) begin
             $display("CJALR instruction");
             log.logPrediction(rg_cid, x);
         end

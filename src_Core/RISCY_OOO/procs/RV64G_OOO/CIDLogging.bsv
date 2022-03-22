@@ -41,6 +41,7 @@ interface CIDLogging;
 endinterface
 
 typedef enum {
+    Call,
     Jump,
     Ret,
     Other
@@ -50,8 +51,8 @@ typedef struct {
     CompIndex cid;
     InstType iType;
     CapMem pc;
-    //CapMem predNextPc;
     CapMem actualNextPc;
+    CapMem retPc;
 } ArchTrace deriving (Bits, Eq, FShow);
 
 typedef struct {
@@ -69,13 +70,27 @@ function Bool linkedR(Maybe#(ArchRIndx) register);
     return res;
 endfunction
 
-function InstType getInstType(IType iType, Maybe#(ArchRIndx) rs1);
+// return whether register is x0
+function Bool isZeroReg(Maybe#(ArchRIndx) register);
+    Bool res = True;
+    if (register matches tagged Valid .r &&& (r != tagged Gpr 0)) begin
+        res = False;
+    end
+    return res;
+endfunction
+
+function InstType getInstType(IType iType, Maybe#(ArchRIndx) rs1, Maybe#(ArchRIndx) rd);
     InstType retval = Other;
     if(iType == CJALR || iType == Jr) begin
-        if(linkedR(rs1)) retval = Ret;
+        if(linkedR(rs1) && isZeroReg(rd)) retval = Ret;
+        else if(linkedR(rd)) retval = Call;
         else retval = Jump;
     end
     return retval;
+endfunction
+
+function Bool is_16b_inst (Bit #(32) inst);
+    return (inst [1:0] != 2'b11);
 endfunction
 
 
@@ -91,7 +106,7 @@ module mkCIDLogging(CIDLogging);
         $display("logPrediction");
         TransientTrace tt = unpack(0);
         tt.cid = cid;
-        tt.iType = getInstType(x.iType, x.rs1);
+        tt.iType = getInstType(x.iType, x.rs1, x.dst);
         tt.target = x.ppc_vaddr_csrData.PPC;
         $fwrite(fp, fshow(tt), "\n");
     endmethod
@@ -100,8 +115,9 @@ module mkCIDLogging(CIDLogging);
         $display("CIDLogging ",fshow(x));
         ArchTrace at = unpack(0);
         at.cid = cid;
-        at.iType = getInstType(x.iType, x.rs1);
+        at.iType = getInstType(x.iType, x.rs1, x.dst);
         at.pc = x.pc;
+        if(at.iType == Call) at.retPc = is_16b_inst(x.orig_inst) ? x.pc + 2 : x.pc + 4;// is_16b_inst(x.orig_inst) x.pc
         // read out ppc from the rob
         at.actualNextPc = x.ppc_vaddr_csrData.PPC;
         $fwrite(fp, fshow(at), "\n");
