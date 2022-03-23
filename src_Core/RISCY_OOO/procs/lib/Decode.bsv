@@ -178,20 +178,22 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
     // defaults when the instruction is not a capability memory operation.
     Bool illegalInst = False;
     Bit#(7) funct7 = inst[31:25];
-    Bit#(5) mem_code = (funct7==f7_cap_Loads) ? inst[24:20]:inst[11:7];
+    Bit#(5) mem_code = (funct7==f7_cap_Loads || funct7==f7_cap_UserLoads) ? inst[24:20]:inst[11:7];
     Bool amo = unpack(mem_code[4]);
     Bool bounds_from_register = unpack(mem_code[3]);
+    if ((funct7 == f7_cap_UserLoads || funct7 == f7_cap_UserStores) && !bounds_from_register)
+        illegalInst = True;
     // unsignedLd
     // it doesn't matter if this is set to True for stores
     Bool unsignedLd = unpack(mem_code[2]);
     Bit#(2) width = mem_code[1:0];
 
     Bool capWidth = False;
-    if (funct7 == f7_cap_Stores && unsignedLd) begin
+    if ((funct7 == f7_cap_Stores || funct7 == f7_cap_UserStores) && unsignedLd) begin
         capWidth = True;
         if (width != 0) illegalInst = True;
     end
-    if (funct7 == f7_cap_Loads && amo && unsignedLd) begin
+    if ((funct7 == f7_cap_Loads || funct7 == f7_cap_UserLoads) && amo && unsignedLd) begin
         unsignedLd = False;
         capWidth = True;
         case (width)
@@ -204,9 +206,9 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
     // mem_func + amo_func
     MemFunc mem_func = Ld;
     AmoFunc amo_func = None;
-    if (funct7 == f7_cap_Loads) begin
+    if (funct7 == f7_cap_Loads || funct7 == f7_cap_UserLoads) begin
         mem_func = (amo) ? Lr:Ld;
-    end else if (funct7 == f7_cap_Stores) begin
+    end else if (funct7 == f7_cap_Stores || funct7 == f7_cap_UserStores) begin
         mem_func = (amo) ? Sc:St;
     end
 
