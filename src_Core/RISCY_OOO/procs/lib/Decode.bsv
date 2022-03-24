@@ -1297,20 +1297,37 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capChecks = memCapChecks(mi.reg_bounds);
                         end
                         f7_cap_UserLoads: begin
-                            dInst.iType = Ld;
-                            MemInst mi = exp_bnds_mem_inst.Valid;
-                            mi.prv_override = Valid(prvU);
-                            if (isValid(exp_bnds_mem_inst)) begin
-                                dInst.execFunc = tagged Mem mi;
-                                if (mi.mem_func == Lr)
-                                    dInst.iType = Lr;
+                            if (funct5rs2 == cap_mem_UserCLoadTags) begin
+                                dInst.iType = Ld;
+                                dInst.imm = Valid(0);
+                                dInst.execFunc = tagged Mem MemInst{
+                                    mem_func: Ld,
+                                    amo_func: None,
+                                    unsignedLd: False,
+                                    byteOrTagEn: TagMemAccess,
+                                    aq: False,
+                                    rl: False,
+                                    reg_bounds: True,
+                                    prv_override: Valid(prvU) };
+                                regs.dst  = Valid(tagged Gpr rd);
+                                regs.src1 = Valid(tagged Gpr rs1);
+                                dInst.capChecks = memCapChecks(True);
+                            end else begin
+                                dInst.iType = Ld;
+                                MemInst mi = exp_bnds_mem_inst.Valid;
+                                mi.prv_override = Valid(prvU);
+                                if (isValid(exp_bnds_mem_inst)) begin
+                                    dInst.execFunc = tagged Mem mi;
+                                    if (mi.mem_func == Lr)
+                                        dInst.iType = Lr;
+                                end
+                                else illegalInst = True;
+                                if (!mi.reg_bounds) illegalInst = True;
+                                regs.dst  = Valid(tagged Gpr rd);
+                                regs.src1 = Valid(tagged Gpr rs1);
+                                dInst.imm = Valid (0);
+                                dInst.capChecks = memCapChecks(mi.reg_bounds);
                             end
-                            else illegalInst = True;
-                            if (!mi.reg_bounds) illegalInst = True;
-                            regs.dst  = Valid(tagged Gpr rd);
-                            regs.src1 = Valid(tagged Gpr rs1);
-                            dInst.imm = Valid (0);
-                            dInst.capChecks = memCapChecks(mi.reg_bounds);
                         end
                         f7_cap_UserStores: begin
                             dInst.iType = St;

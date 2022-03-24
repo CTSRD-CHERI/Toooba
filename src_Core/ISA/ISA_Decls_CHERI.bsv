@@ -206,6 +206,8 @@ Bit #(1) cap_mem_cap = 1'h1;
 Bit #(1) cap_mem_unsigned = 1'h1;
 Bit #(1) cap_mem_signed = 1'h0;
 
+Bit #(5) cap_mem_UserCLoadTags = 5'b00000;
+
 // ================================================================
 // Other:
 
