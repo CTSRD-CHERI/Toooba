@@ -46,11 +46,14 @@ import CHERICap::*;
 
 export ReturnAddrStack(..);
 export RAS(..);
+export RasIndex(..);
+export RasEntries(..);
+export RasPredTrainInfo(..);
 
 interface RAS;
     method CapMem first;
     // first pop, then push
-    method Action popPush(Bool pop, Maybe#(CapMem) pushAddr);
+    method ActionValue#(RasIndex) pop(Bool doPop);
 endinterface
 
 interface ReturnAddrStack;
@@ -58,6 +61,10 @@ interface ReturnAddrStack;
 `ifdef CID
     method Action setCID(CompIndex cid);
 `endif
+    method Bool pendingPush;
+    method Action push(CapMem pushAddr);
+    method Action write(CapMem pushAddr, RasIndex h);
+    method Action setHead(RasIndex h);
     method Action flush;
     method Bool flush_done;
 endinterface
@@ -65,4 +72,4 @@ endinterface
 // Local RAS Typedefs SHOULD BE A POWER OF TWO.
 typedef 8 RasEntries;
 typedef Bit#(TLog#(RasEntries)) RasIndex;
-
+typedef RasIndex RasPredTrainInfo;

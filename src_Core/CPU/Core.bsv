@@ -82,6 +82,7 @@ import ReorderBufferSynth::*;
 import Scoreboard::*;
 import ScoreboardSynth::*;
 import SpecTagManager::*;
+import SpecFifo::*;
 import Fpu::*;
 import MulDiv::*;
 import ReservationStationEhr::*;
@@ -227,6 +228,7 @@ interface CoreFixPoint;
     interface MemExePipeline memExeIfc;
     method Action killAll; // kill everything: used by commit stage
     interface Reg#(Bool) doStatsIfc;
+    method Bool pendingIncorrectSpec;
 endinterface
 
 `ifdef CONTRACTS_VERIFY
@@ -356,11 +358,17 @@ module mkCore#(CoreId coreId)(Core);
         for(Integer i = 0; i < valueof(FpuMulDivExeNum); i = i+1) begin
             fpuMulDivSpecUpdate[i] = fix.fpuMulDivExeIfc[i].specUpdate;
         end
+        Vector#(AluExeNum, SpecFifo#(TDiv#(`NUM_SPEC_TAGS,2), FetchTrainBP, 1, 1)) trainBPQ <- replicateM(mkSpecFifoUG(True));
+        Vector#(AluExeNum, SpeculationUpdate) btqSpecUpdate;
+        for(Integer i = 0; i < valueof(AluExeNum); i = i+1) begin
+            btqSpecUpdate[i] = trainBPQ[i].specUpdate;
+        end
         GlobalSpecUpdate#(CorrectSpecPortNum, ConflictWrongSpecPortNum) globalSpecUpdate <- mkGlobalSpecUpdate(
             joinSpeculationUpdate(
-                append(append(vec(regRenamingTable.specUpdate,
-                                  specTagManager.specUpdate,
-                                  fix.memExeIfc.specUpdate), aluSpecUpdate), fpuMulDivSpecUpdate)
+                append(append(append(vec(fetchStage.specUpdate,
+                                         regRenamingTable.specUpdate,
+                                         specTagManager.specUpdate,
+                                         fix.memExeIfc.specUpdate), aluSpecUpdate), fpuMulDivSpecUpdate), btqSpecUpdate)
             ),
             rob.specUpdate
         );
@@ -390,7 +398,6 @@ module mkCore#(CoreId coreId)(Core);
         endaction
         endfunction
 
-        Vector#(AluExeNum, FIFO#(FetchTrainBP)) trainBPQ <- replicateM(mkFIFO);
         Vector#(AluExeNum, AluExePipeline) aluExe;
         for(Integer i = 0; i < valueof(AluExeNum); i = i+1) begin
             Vector#(2, SendBypass) sendBypassIfc; // exe and finish
@@ -422,23 +429,25 @@ module mkCore#(CoreId coreId)(Core);
                 method rob_getPredPC = rob.getOrigPredPC[i].get;
                 method rob_getOrig_Inst = rob.getOrig_Inst[i].get;
                 method rob_setExecuted = rob.setExecuted_doFinishAlu[i].set;
-                method fetch_train_predictors = toPut(trainBPQ[i]).put;
+                method fetch_train_predictors = trainBPQ[i].enq;
                 method setRegReadyAggr = writeAggr(aluWrAggrPort(i));
                 interface sendBypass = sendBypassIfc;
                 method writeRegFile = writeCons(aluWrConsPort(i));
-                method Action redirect(CapMem new_pc, SpecTag spec_tag, InstTag inst_tag);
+                method Action redirect(CapMem new_pc, SpecTag spec_tag, InstTag inst_tag, SpecBits spec_bits);
                     if (verbose) begin
                         $display("[ALU redirect - %d] ", i, fshow(new_pc),
                                  "; ", fshow(spec_tag), "; ", fshow(inst_tag));
                     end
                     epochManager.incrementEpoch;
-                    fetchStage.redirect(new_pc
+                    fetchStage.redirect(new_pc,
+                                        spec_bits
 `ifdef RVFI_DII
-                    , inst_tag.dii_next_pid
+                                        , inst_tag.dii_next_pid
 `endif
                     );
-                    globalSpecUpdate.incorrectSpec(False, spec_tag, inst_tag);
+                    globalSpecUpdate.incorrectSpec(False, spec_tag, inst_tag, spec_bits);
                 endmethod
+                method Bool pauseExecute = globalSpecUpdate.pendingIncorrectSpec;
                 method correctSpec = globalSpecUpdate.correctSpec[finishAluCorrectSpecPort(i)].put;
                 method doStats = doStatsReg._read;
 `ifdef PERFORMANCE_MONITORING
@@ -462,11 +471,16 @@ module mkCore#(CoreId coreId)(Core);
             endinterface);
             aluExe[i] <- mkAluExePipeline(aluExeInput);
             // truly call fetch method to train branch predictor
-            rule doFetchTrainBP;
-                let train <- toGet(trainBPQ[i]).get;
+            Bool train_ready = True;
+`ifdef NO_SPEC_TRAINING
+            train_ready = (trainBPQ[i].first.spec_bits == 0);
+`endif
+            rule doFetchTrainBP(trainBPQ[i].notEmpty && train_ready);
+                let train = trainBPQ[i].first.data;
+                trainBPQ[i].deq;
                 fetchStage.train_predictors(
-                    train.pc, train.nextPc, train.iType, train.taken,
-                    train.dpTrain, train.mispred, train.isCompressed
+                    train.pc, train.nextPc, train.iType, train.taken, train.link,
+                    train.trainInfo, train.mispred, train.isCompressed
                 );
             endrule
         end
@@ -524,9 +538,10 @@ module mkCore#(CoreId coreId)(Core);
         interface fpuMulDivExeIfc = fpuMulDivExe;
         interface memExeIfc = memExe;
         method Action killAll;
-            globalSpecUpdate.incorrectSpec(True, ?, ?);
+            globalSpecUpdate.incorrectSpec(True, ?, ?, 0);
         endmethod
         interface doStatsIfc = doStatsReg;
+        method pendingIncorrectSpec = globalSpecUpdate.pendingIncorrectSpec;
     endmodule
     CoreFixPoint coreFix <- moduleFix(mkCoreFixPoint);
 
@@ -667,6 +682,8 @@ module mkCore#(CoreId coreId)(Core);
         method stbEmpty = stb.isEmpty;
         method stqEmpty = lsq.stqEmpty;
         method lsqSetAtCommit = lsq.setAtCommit;
+        method lookupPAddr = lsq.lookupPAddr;
+        method pauseCommit = coreFix.pendingIncorrectSpec;
         method tlbNoPendingReq = iTlb.noPendingReq && dTlb.noPendingReq;
 
         method setFlushTlbs;
@@ -751,7 +768,17 @@ module mkCore#(CoreId coreId)(Core);
     CommitStage commitStage <- mkCommitStage(commitInput);
 
 `ifdef RVFI
-    mkConnection(commitStage.rvfi, rvfi_bridge.rvfi);
+    // XXX Currently RVFI can only be connected to the outside world
+    // via the RVFI_DII bridge i.e. when DII is also being used.
+    rule drop;
+        let packets <- commitStage.rvfi.get();
+        for (Integer i = 0; i < valueOf(SupSize); i = i+1) begin
+            if (isValid(packets[i])) $display("%d: RVFI ", cur_cycle, fshow(packets[i].Valid));
+        end
+`ifdef RVFI_DII
+        rvfi_bridge.rvfi.put(packets);
+`endif
+    endrule
 `endif
 
     // send rob enq time to reservation stations
@@ -1477,7 +1504,7 @@ module mkCore#(CoreId coreId)(Core);
       l2Tlb.updateVMInfo(vmI, vmD);
 
       let startpc = csrf.dpc_read;
-      fetchStage.redirect (cast(startpc));
+      fetchStage.redirect (cast(startpc), 0);
       renameStage.debug_resume;
       commitStage.debug_resume;
 

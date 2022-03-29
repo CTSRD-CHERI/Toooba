@@ -41,13 +41,14 @@ import Ehr::*;
 import Vector::*;
 import GlobalBrHistReg::*;
 import BrPred::*;
-import CHERICC_Fat::*;
-import CHERICap::*;
 
 export GSelectGHistSz;
 export GSelectGHist;
 export GSelectTrainInfo;
 export mkGSelectPred;
+export PCIndexSz;
+export BhtIndexSz;
+export BhtIndex;
 
 // 1KB gselect predictor
 
@@ -62,6 +63,7 @@ typedef Bit#(BhtIndexSz) BhtIndex;
 // bookkeeping info a branch should keep for future training
 typedef struct {
     GSelectGHist gHist;
+    BhtIndex index;
 } GSelectTrainInfo deriving(Bits, Eq, FShow);
 
 // global history
@@ -85,8 +87,11 @@ module mkGSelectPred(DirPredictor#(GSelectTrainInfo));
     Ehr#(TAdd#(1, SupSize), Bit#(TLog#(TAdd#(SupSize, 1)))) predCnt <- mkEhr(0);
     Ehr#(TAdd#(1, SupSize), Bit#(SupSize)) predRes <- mkEhr(0);
 
-    function BhtIndex getIndex(CapMem pc, GSelectGHist gHist);
-        Bit#(PCIndexSz) pcIdx = truncate(getAddr(pc) >> 2);
+    // Lookup PC
+    Reg#(Addr) pc_reg <- mkRegU;
+
+    function BhtIndex getIndex(Addr pc, GSelectGHist gHist);
+        Bit#(PCIndexSz) pcIdx = truncate(pc >> 2);
         return {gHist, pcIdx};
     endfunction
 
@@ -108,13 +113,14 @@ module mkGSelectPred(DirPredictor#(GSelectTrainInfo));
     Vector#(SupSize, DirPred#(GSelectTrainInfo)) predIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         predIfc[i] = (interface DirPred;
-            method ActionValue#(DirPredResult#(GSelectTrainInfo)) pred(CapMem pc);
+            method ActionValue#(DirPredResult#(GSelectTrainInfo)) pred;
                 // get the global history
                 // all previous branch in this cycle must be not taken
                 // otherwise this branch should be on wrong path
                 // because all inst in same cycle are fetched consecutively
                 GSelectGHist gHist = curGHist >> predCnt[i];
-                Bool taken = isTaken(tab.sub(getIndex(pc, gHist)));
+                BhtIndex index = getIndex(offsetPc(pc_reg, i), gHist);
+                Bool taken = isTaken(tab.sub(index));
 
                 // record pred result
                 predCnt[i] <= predCnt[i] + 1;
@@ -126,7 +132,8 @@ module mkGSelectPred(DirPredictor#(GSelectTrainInfo));
                 return DirPredResult {
                     taken: taken,
                     train: GSelectTrainInfo {
-                        gHist: gHist
+                        gHist: gHist,
+                        index: index
                     }
                 };
             endmethod
@@ -140,20 +147,22 @@ module mkGSelectPred(DirPredictor#(GSelectTrainInfo));
         predCnt[valueof(SupSize)] <= 0;
     endrule
 
+    method nextPc = pc_reg._write;
+
     interface pred = predIfc;
 
 `ifdef CID
     method Action setCID(CompIndex cid) = noAction;
 `endif
 
-    method Action update(CapMem pc, Bool taken, GSelectTrainInfo train, Bool mispred);
+    method Action update(Bool taken, GSelectTrainInfo train, Bool mispred);
         // update history if mispred
         if(mispred) begin
             GSelectGHist newHist = truncate({pack(taken), train.gHist} >> 1);
             globalHist.redirect(newHist);
         end
         // update sat cnt
-        let index = getIndex(pc, train.gHist);
+        let index = train.index;
         Bit#(2) cnt = tab.sub(index);
         tab.upd(index, updateCnt(cnt, taken));
     endmethod

@@ -60,6 +60,7 @@ endinterface
 // Local BTB Typedefs
 typedef 1 PcLsbsIgnore;
 typedef 1024 BtbEntries;
+typedef Bit#(16) CompressedTarget;
 typedef 2 BtbAssociativity;
 typedef Bit#(TLog#(SupSizeX2)) BtbBank;
 // Total entries/lanes of superscalar lookup/associativity

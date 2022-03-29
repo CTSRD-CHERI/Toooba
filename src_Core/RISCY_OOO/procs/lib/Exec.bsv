@@ -5,6 +5,7 @@
 //     Copyright (c) 2020 Alexandre Joannou
 //     Copyright (c) 2020 Peter Rugg
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2021 Marno van der Maas
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -354,18 +355,31 @@ endfunction
 (* noinline *)
 function CapPipe brAddrCalc(CapPipe pc, CapPipe val, IType iType, Data imm, Bool taken, Bit #(32) orig_inst, Bool cap);
     CapPipe pcPlusN = addPc(pc, ((orig_inst [1:0] == 2'b11) ? 4 : 2));
-    if (!cap) val = setOffset(pc, getAddr(val)).value;
-    CapPipe branchTarget = incOffset(pc, imm).value;
-    CapPipe jumpTarget = incOffset(val, imm).value;
-    jumpTarget = setAddrUnsafe(jumpTarget, {truncateLSB(getAddr(jumpTarget)), 1'b0});
-    jumpTarget = setKind(jumpTarget, UNSEALED); // It is checked elsewhere that we have an unsealed cap already, or sentry if permitted
-    CapPipe targetAddr = (case (iType)
-            J, CJAL : branchTarget;
-            Jr,CCall,CJALR      : jumpTarget;
-            Br      : (taken? branchTarget : pcPlusN);
+
+    //if (!cap) val = setOffset(pc, getAddr(val)).value;
+    //CapPipe branchTarget = incOffset(pc, imm).value;
+    //CapPipe jumpTarget = incOffset(val, imm).value;
+
+    CapPipe nextPc = pc;
+    Data offset = imm;
+    Bool doInc = True;
+    if (iType==Jr || iType==CCall || iType ==CJALR) begin
+        if (cap) nextPc = val;
+        else begin
+          offset = getAddr(val) + imm;
+          doInc = False;
+        end
+    end
+    CapPipe targetAddr = modifyOffset(nextPc, offset, doInc).value;
+    // jumpTarget.address[0] = 1'b0;
+    targetAddr = setAddrUnsafe(targetAddr, {truncateLSB(getAddr(targetAddr)), 1'b0});
+    targetAddr = setKind(targetAddr, UNSEALED); // It is checked elsewhere that we have an unsealed cap already, or sentry if permitted
+
+    return (case (iType)
+            J, CJAL, Jr, CCall, CJALR: targetAddr;
+            Br      : (taken ? targetAddr : pcPlusN);
             default : pcPlusN;
         endcase);
-    return targetAddr;
 endfunction
 /*
 (* noinline *)
@@ -421,6 +435,10 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
         capException = Invalid;
     end
     if (dInst.capChecks.ccseal_bypass && (!isValidCap(rVal2) || getAddr(rVal2) == -1 || getKind(rVal1) != UNSEALED || !isInBounds(rVal2, False)) && isValidCap(rVal1)) begin
+        capException = Invalid;
+        boundsCheck = Invalid;
+    end
+    if (dInst.capChecks.ccopytype_bypass && isValidCap(rVal2) && getKind(rVal2) == UNSEALED && (getKind(rVal1) matches tagged SEALED_WITH_TYPE .t ? !validAsType(rVal2, zeroExtend(t)) : True)) begin
         capException = Invalid;
         boundsCheck = Invalid;
     end

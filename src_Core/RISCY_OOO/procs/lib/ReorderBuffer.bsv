@@ -502,15 +502,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
             dii_pid: dii_pid,
 `endif
 `ifdef RVFI
-            traceBundle: case (ppc_vaddr_csrData[pvc_deq_port]) matches
-                            tagged VAddr .v: begin
-                                case (lsqTag) matches
-                                    tagged Ld .l: return traceBundle[traceBundle_deq_port];
-                                    default: return traceBundle[traceBundle_deq_port];
-                                endcase
-                            end
-                            default: return traceBundle[traceBundle_deq_port];
-                        endcase,
+            traceBundle: traceBundle[traceBundle_deq_port],
 `endif
             spec_bits: spec_bits[sb_deq_port]
         };
@@ -719,7 +711,7 @@ module mkSupReorderBuffer#(
     // these are handled in mkReorderBufferRowEhr
 
     // wrong speculation: make wrong speculation conflict with enq
-    Vector#(SupSize, RWire#(void)) wrongSpec_enq_conflict <- replicateM(mkRWire);
+    Vector#(SupSize, PulseWire) wrongSpec_enq_conflict <- replicateM(mkPulseWire);
 
     // SupSize number of FIFOs
     Vector#(SupSize, Vector#(SingleScalarSize, ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum))) row <- replicateM(replicateM(mkRobRow));
@@ -969,6 +961,9 @@ module mkSupReorderBuffer#(
                     end
                 endfunction
                 for(Integer i = 0; i < valueof(SingleScalarSize); i = i+1) begin
+                    if (in_kill_range(fromInteger(i)) != (row[w][i].dependsOn_wrongSpec(specTag) && valid[w][i][valid_wrongSpec_port]))
+                        $display("enqP: %d, enqPNext: %d, w: %d, i: %d, wrongSpec: %d, valid: %d, cur_cycle: %d",
+                            enqP[w], enqPNext[w], w, i, row[w][i].dependsOn_wrongSpec(specTag), valid[w][i][valid_wrongSpec_port], cur_cycle);
                     doAssert(
                         in_kill_range(fromInteger(i)) ==
                         (row[w][i].dependsOn_wrongSpec(specTag) && valid[w][i][valid_wrongSpec_port]),
@@ -1085,12 +1080,11 @@ module mkSupReorderBuffer#(
         Bool can_enq = can_enq_fifo[way];
         enqIfc[i] = (interface ROB_EnqPort;
             method Bool canEnq = can_enq;
-            method Action enq(ToReorderBuffer x) if(can_enq);
+            method Action enq(ToReorderBuffer x) if(can_enq
+                                                    && !wrongSpec_enq_conflict[i]); // make it conflict with wrong speculation
                 doAssert(getEnqPort(way) == fromInteger(i), "enq FIFO way matches enq port");
                 // record enq action, real action is applied later
                 enqEn[i].wset(x);
-                // make it conflict with wrong speculation
-                wrongSpec_enq_conflict[i].wset(?);
                 // ordering: sequence after many other methods
                 deq_SB_enq[i] <= False;
                 setExeAlu_SB_enq[i] <= False;
@@ -1361,7 +1355,7 @@ module mkSupReorderBuffer#(
             deq_SB_wrongSpec <= False;
             // make it conflict with enq
             for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-                wrongSpec_enq_conflict[i].wset(?);
+                wrongSpec_enq_conflict[i].send;
             end
         endmethod
     endinterface

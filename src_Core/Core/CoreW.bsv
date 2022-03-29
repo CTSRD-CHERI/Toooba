@@ -59,6 +59,7 @@ import Cur_Cycle  :: *;
 import GetPut_Aux :: *;
 import Routable   :: *;
 import AXI4       :: *;
+import AXI4_Utils :: *;
 import TagControllerAXI :: *;
 import CacheCore  :: *;
 

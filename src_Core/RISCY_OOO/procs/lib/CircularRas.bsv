@@ -60,6 +60,7 @@ typedef struct {
         Age age;
 } SegAge deriving (Bits, Eq, FShow);
 
+/*
 module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), Entries),
     NumAlias#(TAdd#(SupSize, 1), nStackIFC));
     Vector#(Entries, Ehr#(nStackIFC, CapMem)) stack <- replicateM(mkEhr(0));
@@ -199,3 +200,4 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
 
 endmodule
 `endif
+*/

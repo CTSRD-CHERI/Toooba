@@ -44,7 +44,6 @@ import BuildVector::*;
 import Cntrs::*;
 import Types::*;
 import ProcTypes::*;
-import DReg::*;
 import SynthParam::*;
 import Exec::*;
 import Performance::*;
@@ -62,6 +61,7 @@ import ISA_Decls_CHERI::*;
 `ifdef PERFORMANCE_MONITORING
 import BlueUtils::*;
 import StatCounters::*;
+import DReg::*;
 `endif
 `ifdef CID
 import CIDReport :: *;
@@ -80,7 +80,7 @@ typedef struct {
     DecodedInst dInst;
     PhyRegs regs;
     InstTag tag;
-    DirPredTrainInfo dpTrain;
+    PredTrainInfo trainInfo;
     // specualtion
     Maybe#(SpecTag) spec_tag;
 } AluDispatchToRegRead deriving(Bits, Eq, FShow);
@@ -90,7 +90,7 @@ typedef struct {
     DecodedInst dInst;
     Maybe#(PhyDst) dst;
     InstTag tag;
-    DirPredTrainInfo dpTrain;
+    PredTrainInfo trainInfo;
     // src reg vals & pc & ppc
     CapPipe rVal1;
     CapPipe rVal2;
@@ -106,7 +106,8 @@ typedef struct {
     IType iType;
     Maybe#(PhyDst) dst;
     InstTag tag;
-    DirPredTrainInfo dpTrain;
+    PredTrainInfo trainInfo;
+    Bool link;
     Bool isCompressed;
     // result
     CapPipe data; // alu compute result
@@ -154,9 +155,10 @@ endmodule
 typedef struct {
     CapMem pc;
     CapMem nextPc;
+    Bool link;
     IType iType;
     Bool taken;
-    DirPredTrainInfo dpTrain;
+    PredTrainInfo trainInfo;
     Bool mispred;
     Bool isCompressed;
 } FetchTrainBP deriving(Bits, Eq, FShow);
@@ -194,7 +196,7 @@ interface AluExeInput;
 `endif
     );
     // Fetch stage
-    method Action fetch_train_predictors(FetchTrainBP train);
+    method Action fetch_train_predictors(ToSpecFifo#(FetchTrainBP) train);
 
     // global broadcast methods
     // set aggressive sb & wake up inst in RS
@@ -204,7 +206,9 @@ interface AluExeInput;
     // write reg file & set conservative sb
     method Action writeRegFile(PhyRIndx dst, CapPipe data);
     // redirect
-    method Action redirect(CapMem new_pc, SpecTag spec_tag, InstTag inst_tag);
+    method Action redirect(CapMem new_pc, SpecTag spec_tag, InstTag inst_tag, SpecBits spec_bits);
+    // pending invalidation could pause execute/redirections.
+    method Bool pauseExecute;
     // spec update
     method Action correctSpec(SpecTag t);
 
@@ -236,7 +240,7 @@ interface AluExePipeline;
 endinterface
 
 module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
-    Bool verbose = True;
+    Bool verbose = False;
     Integer verbosity = 0;
 
     // cid reporting module
@@ -283,7 +287,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
                 dInst: x.data.dInst,
                 regs: x.regs,
                 tag: x.tag,
-                dpTrain: x.data.dpTrain,
+                trainInfo: x.data.trainInfo,
                 spec_tag: x.spec_tag
             },
             spec_bits: x.spec_bits
@@ -336,7 +340,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
             end
         end
 
-        
+
 
         else if(x.dInst.iType == CJALR || x.dInst.iType == Jr) begin
             let res_targets = inIfc.checkTarget(ppc);
@@ -360,7 +364,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
                 dInst: x.dInst,
                 dst: x.regs.dst,
                 tag: x.tag,
-                dpTrain: x.dpTrain,
+                trainInfo: x.trainInfo,
                 rVal1: rVal1,
                 rVal2: rVal2,
                 pc: pc,
@@ -372,7 +376,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
         });
     endrule
 
-    rule doExeAlu;
+    rule doExeAlu(!inIfc.pauseExecute);
         regToExeQ.deq;
         let regToExe = regToExeQ.first;
         let x = regToExe.data;
@@ -380,15 +384,12 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
         // execution
         ExecResult exec_result = basicExec(x.dInst, x.rVal1, x.rVal2, cast(x.pc), cast(x.ppc), x.orig_inst);
 
+        Bool link = (case (x.dInst.iType)
+                J, CJAL, CJALR, Jr: isValid(x.dst);
+                default: False;
+            endcase);
 `ifdef RAS_HIT_TRACING
-        function Bool linkedR(Bit#(5) r);
-           Bool res = False;
-           if ((r == 1 || r == 5)) begin
-              res = True;
-           end
-           return res;
-        endfunction
-        if (linkedR(x.orig_inst[19:15]) && (x.orig_inst[19:15] != x.orig_inst[11:7])) begin
+        if (linkedR(Valid(tagged Gpr x.orig_inst[19:15])) && (x.orig_inst[19:15] != x.orig_inst[11:7])) begin
             case (x.dInst.iType)
                 Jr, CJALR: $display("Jr/CJALR ra: PC: %x Mispredict: %x , %x vs %x src1: %d", getAddr(x.pc), exec_result.controlFlow.mispredict, getAddr(exec_result.controlFlow.nextPc), getAddr(x.ppc), x.orig_inst[19:15]);
             endcase
@@ -431,7 +432,8 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
                 iType: x.dInst.iType,
                 dst: x.dst,
                 tag: x.tag,
-                dpTrain: x.dpTrain,
+                trainInfo: x.trainInfo,
+                link: link,
                 isCompressed: x.orig_inst[1:0] != 2'b11,
                 data: exec_result.data,
                 csrData: is_scr_or_csr ? CSRData (exec_result.csrData) : PPC (cast(exec_result.controlFlow.nextPc)),
@@ -450,7 +452,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
         });
     endrule
 
-    rule doFinishAlu;
+    rule doFinishAlu(!inIfc.pauseExecute);
         exeToFinQ.deq;
         let exeToFin = exeToFinQ.first;
         let x = exeToFin.data;
@@ -507,24 +509,35 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
 `endif
 `endif
 
+        let train_spec_bits = 0;
+`ifdef NO_SPEC_TRAINING
+        train_spec_bits = exeToFin.spec_bits;
+`endif
+
         // handle spec tags for branch predictions
         // TODO what happens here if we trap?
         (* split *)
         if (x.controlFlow.mispredict) (* nosplit *) begin
             // wrong branch predictin, we must have spec tag
             doAssert(isValid(x.spec_tag), "mispredicted branch must have spec tag");
-            inIfc.redirect(cast(x.controlFlow.nextPc), validValue(x.spec_tag), x.tag);
+            inIfc.redirect(cast(x.controlFlow.nextPc), validValue(x.spec_tag), x.tag, exeToFin.spec_bits);
             // must be a branch, train branch predictor
             doAssert(x.iType == Jr || x.iType == CJALR || x.iType == CCall || x.iType == Br, "only jr, br, cjalr, and ccall can mispredict");
-            inIfc.fetch_train_predictors(FetchTrainBP {
-                pc: cast(x.controlFlow.pc),
-                nextPc: cast(x.controlFlow.nextPc),
-                iType: x.iType,
-                taken: x.controlFlow.taken,
-                dpTrain: x.dpTrain,
-                mispred: True,
-                isCompressed: x.isCompressed
+            inIfc.fetch_train_predictors(ToSpecFifo {
+                data: FetchTrainBP {
+                    pc: cast(x.controlFlow.pc),
+                    nextPc: cast(x.controlFlow.nextPc),
+                    link: x.link,
+                    iType: x.iType,
+                    taken: x.controlFlow.taken,
+                    trainInfo: x.trainInfo,
+                    mispred: True,
+                    isCompressed: x.isCompressed},
+                spec_bits: train_spec_bits
             });
+            if (verbose)
+                $display("alu mispredict pc: %x, nextPc: %x, %d",
+                         x.controlFlow.pc, x.controlFlow.nextPc, cur_cycle);
 `ifdef PERF_COUNT
             // performance counter
             if(inIfc.doStats) begin
@@ -545,14 +558,17 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
             // since we can only do 1 training in a cycle, split the rule
             // XXX not training JAL, reduce chance of conflicts
             if(x.iType == Jr || x.iType == CJALR || x.iType == CCall || x.iType == Br) begin
-                inIfc.fetch_train_predictors(FetchTrainBP {
-                    pc: cast(x.controlFlow.pc),
-                    nextPc: cast(x.controlFlow.nextPc),
-                    iType: x.iType,
-                    taken: x.controlFlow.taken,
-                    dpTrain: x.dpTrain,
-                    mispred: False,
-                    isCompressed: x.isCompressed
+                inIfc.fetch_train_predictors(ToSpecFifo {
+                    data: FetchTrainBP {
+                        pc: cast(x.controlFlow.pc),
+                        nextPc: cast(x.controlFlow.nextPc),
+                        link: x.link,
+                        iType: x.iType,
+                        taken: x.controlFlow.taken,
+                        trainInfo: x.trainInfo,
+                        mispred: False,
+                        isCompressed: x.isCompressed},
+                    spec_bits: train_spec_bits
                 });
             end
         end

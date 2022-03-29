@@ -45,7 +45,6 @@ import Fifos::*;
 import FIFO::*;
 import Types::*;
 import ProcTypes::*;
-import DReg::*;
 import CCTypes::*;
 import SynthParam::*;
 import Performance::*;
@@ -69,6 +68,7 @@ import CHERICC_Fat::*;
 import ISA_Decls_CHERI::*;
 `ifdef PERFORMANCE_MONITORING
 import StatCounters::*;
+import DReg::*;
 `endif
 `ifdef CID
 import CIDReport :: *;
@@ -152,8 +152,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     SplitLSQ lsq = inIfc.lsqIfc;
 
     // performance counter
-`ifdef PERF_COUNT
     Count#(Data) supRenameCnt <- mkCount(0);
+`ifdef PERF_COUNT
 `ifdef SECURITY
     Count#(Data) specNoneCycles <- mkCount(0);
     Count#(Data) specNonMemCycles <- mkCount(0);
@@ -351,7 +351,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         let orig_inst = x.orig_inst;
         let ppc = x.ppc;
         let main_epoch = x.main_epoch;
-        let dpTrain = x.dpTrain;
+        let trainInfo = x.trainInfo;
         let inst = x.inst;
         let dInst = x.dInst;
         let arch_regs = x.regs;
@@ -394,6 +394,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 spec_bits: specTagManager.currentSpecBits
 `ifdef RVFI_DII
                                 , dii_pid: x.dii_pid
+                                , traceBundle: unpack(0)
 `endif
                                };
         rob.enqPort[0].enq(y);
@@ -490,7 +491,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         let dst = x.regs.dst;
         let ppc = x.ppc;
         let main_epoch = x.main_epoch;
-        let dpTrain = x.dpTrain;
+        let trainInfo = x.trainInfo;
         let inst = x.inst;
         let dInst = x.dInst;
         let arch_regs = x.regs;
@@ -549,7 +550,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         // send to ALU reservation station
         if (to_exec) begin
             reservationStationAlu[0].enq(ToReservationStation {
-                data: AluRSData {dInst: dInst, dpTrain: dpTrain},
+                data: AluRSData {dInst: dInst, trainInfo: trainInfo},
                 regs: phy_regs,
                 tag: inst_tag,
                 spec_bits: spec_bits,
@@ -605,6 +606,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 spec_bits: spec_bits
 `ifdef RVFI_DII
                                 , dii_pid: x.dii_pid
+                                , traceBundle: unpack(0)
 `endif
                                };
         rob.enqPort[0].enq(y);
@@ -671,7 +673,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         let orig_inst = x.orig_inst;
         let ppc = x.ppc;
         let main_epoch = x.main_epoch;
-        let dpTrain = x.dpTrain;
+        let trainInfo = x.trainInfo;
         let inst = x.inst;
         let dInst = x.dInst;
         let arch_regs = x.regs;
@@ -740,7 +742,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 doAssert((dInst.iType != Fence) == isValid(dInst.imm),
                          "Mem (non-Fence) needs imm for virtual addr");
                 Bit#(16) dum = hash(getAddr(pc));
-                $display("pc : %x , hash(pc) : %x", pc, dum);
                 // put in ldstq
                 if(isLdQ) begin
                     lsq.enqLd(inst_tag, mem_inst, allow_cap, phy_regs.dst, spec_bits, hash(getAddr(pc)));
@@ -826,6 +827,10 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         return rdy[idx] ? Valid (idx) : Invalid;
     endfunction
 
+    rule displayRenameCount;
+        $display("%d : rc:%d", cur_cycle, supRenameCnt);
+    endrule
+
     // rename correct path inst
     rule doRenaming(
         !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
@@ -893,7 +898,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 let orig_inst = x.orig_inst;
                 let ppc = x.ppc;
                 let main_epoch = x.main_epoch;
-                let dpTrain = x.dpTrain;
+                let trainInfo = x.trainInfo;
                 let inst = x.inst;
                 let dInst = x.dInst;
                 let arch_regs = x.regs;
@@ -1009,7 +1014,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             // can process, send to ALU rs
                             aluExeUsed[k] = True; // mark resource used
                             reservationStationAlu[k].enq(ToReservationStation {
-                                data: AluRSData {dInst: dInst, dpTrain: dpTrain},
+                                data: AluRSData {dInst: dInst, trainInfo: trainInfo},
                                 regs: phy_regs,
                                 tag: inst_tag,
                                 spec_bits: spec_bits,
@@ -1077,7 +1082,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 doAssert(!isValid(spec_tag), "should not have spec tag");
                                 // put in ldstq
                                 Bit#(16) dum = hash(getAddr(pc));
-                                $display("pc : %x , hash(pc) : %x", pc, dum);
                                 if(isLdQ) begin
                                     lsq.enqLd(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)));
                                 end
@@ -1162,6 +1166,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                                 spec_bits: spec_bits
 `ifdef RVFI_DII
                                                 , dii_pid: x.dii_pid
+                                                , traceBundle: unpack(0)
 `endif
                                                };
                         rob.enqPort[i].enq(y);
@@ -1202,6 +1207,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 supRenameCnt.incr(1);
             end
         end
+`else
+        supRenameCnt.incr(zeroExtend(renameCnt));
 `endif
 `ifdef PERFORMANCE_MONITORING
         EventsTransExe events = unpack(0);

@@ -92,7 +92,7 @@ function Maybe#(MemInst) decodeMemInst(Instruction inst, Bool cap_mode);
         illegalInst = True;
     end
 
-    Bool capWidth = ((mem_func == St || mem_func == Amo) && funct3 == f3_SQ)
+    Bool capWidth = (mem_func != Ld && funct3 == f3_SQ)
                  || (opcode   == opcMiscMem && funct3 == f3_LQ);
 
     if (capWidth && amo_func != None && amo_func != Swap) begin
@@ -1174,6 +1174,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capChecks.check_low_src = Src1Type;
                             dInst.capChecks.check_high_src = Src1Type;
                             dInst.capChecks.check_inclusive = False;
+                            dInst.capChecks.ccopytype_bypass = True;
 
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
