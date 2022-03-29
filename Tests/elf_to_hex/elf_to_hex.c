@@ -12,7 +12,12 @@
 #include <inttypes.h>
 #include <string.h>
 #include <fcntl.h>
-#include <gelf.h>
+
+#ifdef __APPLE__
+#include <libelf/gelf.h>
+#include <vector>
+#endif
+
 
 // ================================================================
 // Memory buffer into which we load the ELF file before
@@ -22,7 +27,11 @@
 // #define MAX_MEM_SIZE (((uint64_t) 0x400) * ((uint64_t) 0x400) * ((uint64_t) 0x400))
 #define MAX_MEM_SIZE ((uint64_t) 0x90000000)
 
+#ifdef __APPLE__
+std::vector<uint8_t> mem_buf(MAX_MEM_SIZE,0);
+#else
 uint8_t mem_buf [MAX_MEM_SIZE];
+#endif
 
 // Features of the ELF binary
 int       bitwidth;
