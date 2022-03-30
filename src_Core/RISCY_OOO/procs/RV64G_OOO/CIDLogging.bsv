@@ -109,6 +109,7 @@ module mkCIDLogging(CIDLogging);
         tt.iType = getInstType(x.iType, x.rs1, x.dst);
         tt.target = x.ppc_vaddr_csrData.PPC;
         $fwrite(fp, fshow(tt), "\n");
+        //$fwrite(fp, fshow(tt), "%t", $time, "\n");
     endmethod
 
     method Action logCommittedInstr(CompIndex cid, ToReorderBuffer x);
@@ -117,9 +118,10 @@ module mkCIDLogging(CIDLogging);
         at.cid = cid;
         at.iType = getInstType(x.iType, x.rs1, x.dst);
         at.pc = x.pc;
-        if(at.iType == Call) at.retPc = is_16b_inst(x.orig_inst) ? x.pc + 2 : x.pc + 4;// is_16b_inst(x.orig_inst) x.pc
+        if(at.iType == Call) at.retPc = is_16b_inst(x.orig_inst) ? x.pc + 2 : x.pc + 4;
         // read out ppc from the rob
         at.actualNextPc = x.ppc_vaddr_csrData.PPC;
         $fwrite(fp, fshow(at), "\n");
+        //$fwrite(fp, fshow(at), "%t", $time, "\n");
     endmethod
 endmodule
