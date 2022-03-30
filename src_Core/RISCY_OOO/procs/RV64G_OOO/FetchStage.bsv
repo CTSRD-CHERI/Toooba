@@ -838,7 +838,7 @@ module mkFetchStage(FetchStage);
                   // If we don't have a good guess about where we are going, don't proceed.
                   if ((!isValid(nextPc)) && (!in.pred_jump)) begin
                      // Invalid virtual address to ensure redirection.
-                     ppc = setAddrUnsafe(nullCap, {2'b01,?});
+                     ppc = setAddrUnsafe(nullCap, getInvalidAddr());
                      decode_epoch_local = !decode_epoch_local;
                   // check previous mispred
                   end

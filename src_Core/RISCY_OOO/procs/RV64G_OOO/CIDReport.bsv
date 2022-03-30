@@ -75,7 +75,7 @@ module mkCIDReport(CIDReport);
         $display("reportPred");
         let ppc = x.ppc_vaddr_csrData.PPC;
         let addr = getAddr(ppc);
-        Addr a = {2'b01,?};
+        Addr a = getInvalidAddr();
         if (x.iType == CJALR && addr != 0 && addr != a) begin
             $display("CJALR instruction");
             log.logPrediction(rg_cid, x);

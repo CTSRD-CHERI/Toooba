@@ -1079,3 +1079,5 @@ function Bit#(outWidth) hash(Bit#(inWidth) in)
     Vector#(TDiv#(inWidth,outWidth), Bit#(outWidth)) vec = unpack(zeroExtend(in));
     return fold( \^ , vec);
 endfunction
+
+function Bit#(width) getInvalidAddr() provisos(Add#(2, a__, width)) = {2'b01, ?};
