@@ -478,6 +478,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
 `ifdef CID
             rs1: rg_rs1,
             rs2: rg_rs2,
+            dstData: ?,
 `endif
 `ifdef INCLUDE_TANDEM_VERIF
             dst_data: rg_dst_data,

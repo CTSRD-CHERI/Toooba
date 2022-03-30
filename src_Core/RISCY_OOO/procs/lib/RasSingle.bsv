@@ -112,6 +112,12 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
         $display("RAS fixup head<-%d", h);
     endmethod
 
+`ifdef CID
+    method Action setCID(CompIndex cid);
+        noAction;
+    endmethod
+`endif
+
     interface ras = rasIfc;
 
 `ifdef SECURITY

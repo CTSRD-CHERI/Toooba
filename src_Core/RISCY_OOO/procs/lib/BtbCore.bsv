@@ -114,6 +114,12 @@ module mkBtbCore(NextAddrPred#(hashSz))
         updateEn <= Valid(BtbUpdate {pc: pc, nextPc: nextPc, taken: taken});
     endmethod
 
+`ifdef CID
+    method Action setCID(CompIndex cid);
+        noAction;
+    endmethod
+`endif
+
 `ifdef SECURITY
     method Action flush method Action flush;
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
