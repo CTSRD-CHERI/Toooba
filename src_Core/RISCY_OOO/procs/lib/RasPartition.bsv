@@ -47,6 +47,10 @@ module mkRasPartition(ReturnAddrStack);
     method Action setCID(CompIndex cid);
         rg_cid <= cid;
     endmethod
+    method pendingPush = rases[rg_cid].pendingPush;
+    method push = rases[rg_cid].push;
+    method write = rases[rg_cid].write;
+    method setHead = rases[rg_cid].setHead;
     method flush = rases[rg_cid].flush;
     method flush_done = rases[rg_cid].flush_done;
 endmodule

@@ -29,6 +29,11 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
+
+
+ // TODO: ADAPT TO NEW CHANGES FROM JON
+ // THIS IS CURRENTLY NOT FUNCTIONAL
+
 `ifdef CID
 import Types::*;
 import ProcTypes::*;
