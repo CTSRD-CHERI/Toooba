@@ -52,134 +52,16 @@ import BtbTaggedCID::*;
 
 export mkBtb;
 
-/*interface NextAddrPred#(numeric type hashSz);
-    method Action put_pc(CapMem pc);
-    interface Vector#(SupSizeX2, Maybe#(CapMem)) pred;
-    method Action update(CapMem pc, CapMem brTarget, Bool taken);
-    // security
-    method Action flush;
-    method Bool flush_done;
-endinterface
-
-// Local BTB Typedefs
-typedef 1 PcLsbsIgnore;
-typedef 1024 BtbEntries;
-typedef Bit#(16) CompressedTarget;
-typedef 2 BtbAssociativity;
-typedef Bit#(TLog#(SupSizeX2)) BtbBank;
-// Total entries/lanes of superscalar lookup/associativity
-typedef TDiv#(TDiv#(BtbEntries,SupSizeX2),BtbAssociativity) BtbIndices;
-typedef Bit#(TLog#(BtbIndices)) BtbIndex;
-typedef Bit#(TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)) BtbTag;
-typedef Bit#(hashSz) HashedTag#(numeric type hashSz);
-
-typedef struct {
-    BtbTag tag;
-    BtbIndex index;
-    BtbBank bank;
-} BtbAddr deriving(Bits, Eq, FShow);
-
-typedef struct {
-    CapMem pc;
-    CapMem nextPc;
-    Bool taken;
-} BtbUpdate deriving(Bits, Eq, FShow);
-
-typedef struct {
-    Bool v;
-    data d;
-} VnD#(type data) deriving(Bits, Eq, FShow);*/
 
 (* synthesize *)
 module mkBtb(NextAddrPred#(16));
 `ifdef CID
     //NextAddrPred#(16) btb <- mkBtbDynamic;
-    //NextAddrPred#(16) btb <- mkBtbPartition;
+    NextAddrPred#(16) btb <- mkBtbPartition;
     //NextAddrPred#(16) btb <- mkBtbCoreCID(inIfc);
-    NextAddrPred#(16) btb <- mkBtbCore;
+    //NextAddrPred#(16) btb <- mkBtbTaggedCID;
 `else
     NextAddrPred#(16) btb <- mkBtbCore;
 `endif
     return btb;
 endmodule
-
-/*
-module mkBtbCore(NextAddrPred#(hashSz))
-    provisos (NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
-        Add#(1, a__, TDiv#(tagSz, hashSz)),
-    Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
-    // Read and Write ordering doesn't matter since this is a predictor
-    Reg#(CapMem) addr_reg <- mkRegU;
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CapMem), 1))
-        fullRecords <- replicateM(mkMapLossyBRAM);
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CompressedTarget), BtbAssociativity))
-        compressedRecords <- replicateM(mkMapLossyBRAM);
-    Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
-
-    function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
-    function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
-    function BtbIndex getIndex(CapMem pc) = getBtbAddr(pc).index;
-    function BtbTag getTag(CapMem pc) = getBtbAddr(pc).tag;
-    function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(CapMem pc) =
-        MapKeyIndex{key: hash(getTag(pc)), index: getIndex(pc)};
-
-    // no flush, accept update
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule canonUpdate(updateEn matches tagged Valid .upd);
-        let pc = upd.pc;
-        let nextPc = upd.nextPc;
-        let taken = upd.taken;
-        //$display("MapUpdate in BTB - pc %x, bank: %x, taken: %x, next: %x, time: %t",
-                  //pc, getBank(pc), taken, nextPc, $time);
-        CompressedTarget shortMask = -1;
-        CapMem mask = ~zeroExtend(shortMask);
-        if ((pc&mask) == (nextPc&mask))
-            compressedRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:truncate(nextPc)});
-        else
-            fullRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:nextPc});
-    endrule
-
-    method Action put_pc(CapMem pc);
-        addr_reg <= pc;
-        // Start SupSizeX2 BTB lookups, but ensure to lookup in the appropriate
-        // bank for the alignment of each potential branch.
-        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
-            // Only add lower bits for timing.
-            BtbAddr a = getBtbAddr(pc);
-            a = unpack({a.tag, {a.index,a.bank} + fromInteger(i)});
-            //BtbAddr a = unpack(pack(getBtbAddr(pc)) + fromInteger(i));
-            fullRecords[a.bank].lookupStart(MapKeyIndex{key: hash(a.tag), index: a.index});
-            compressedRecords[a.bank].lookupStart(MapKeyIndex{key: hash(a.tag), index: a.index});
-        end
-    endmethod
-
-    method Vector#(SupSizeX2, Maybe#(CapMem)) pred;
-        Vector#(SupSizeX2, Maybe#(CapMem)) ppcs = replicate(Invalid);
-        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
-            if (fullRecords[i].lookupRead matches tagged Valid .r)
-                ppcs[i] = r.v ? Valid(r.d):Invalid;
-            if (compressedRecords[i].lookupRead matches tagged Valid .r)
-                ppcs[i] = r.v ? Valid({truncateLSB(addr_reg),r.d}):Invalid;
-        end
-        ppcs = rotateBy(ppcs,unpack(-getBtbAddr(addr_reg).bank)); // Rotate firstBank down to zeroeth element.
-        return ppcs;
-    endmethod
-
-    method Action update(CapMem pc, CapMem nextPc, Bool taken);
-        updateEn <= Valid(BtbUpdate {pc: pc, nextPc: nextPc, taken: taken});
-    endmethod
-
-`ifdef SECURITY
-    method Action flush method Action flush;
-        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
-            fullRecords[i].clear;
-            compressedRecords[i].clear;
-        end
-    endmethod
-    method flush_done = fullRecords[0].clearDone;
-`else
-    method flush = noAction;
-    method flush_done = True;
-`endif
-endmodule
-*/

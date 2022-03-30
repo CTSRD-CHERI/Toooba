@@ -53,7 +53,7 @@ import DReg::*;
 
 
 
-module mkBtbCore(NextAddrPred#(hashSz))
+module mkBtbTaggedCID(NextAddrPred#(hashSz))
     provisos (NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
         Add#(1, a__, TDiv#(tagSz, hashSz)),
     Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
