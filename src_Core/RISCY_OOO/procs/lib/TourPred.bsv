@@ -97,6 +97,7 @@ module mkTourPredPartition(DirPredictor#(TourTrainInfo));
     Vector#(CompNumber, DirPredictor#(TourTrainInfo)) preds <- replicateM(mkTourPredCore);
     Reg#(CompIndex) rg_cid <- mkReg(0);
     interface pred = preds[rg_cid].pred;
+    method nextPc = preds[rg_cid].nextPc;
     method Action setCID(CompIndex cid);
         rg_cid <= cid;
     endmethod
