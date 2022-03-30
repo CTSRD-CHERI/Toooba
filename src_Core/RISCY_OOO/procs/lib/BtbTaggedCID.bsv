@@ -5,7 +5,7 @@
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jessica Clarke
 //     Copyright (c) 2020 Jonathan Woodruff
-//     Copyright (c) 2021 Franz Fuchs
+//     Copyright (c) 2022 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -14,6 +14,11 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
 //-
 //
 // Permission is hereby granted, free of charge, to any person
@@ -48,18 +53,18 @@ import DReg::*;
 
 
 
-
 module mkBtbCore(NextAddrPred#(hashSz))
     provisos (NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
         Add#(1, a__, TDiv#(tagSz, hashSz)),
     Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
     // Read and Write ordering doesn't matter since this is a predictor
     Reg#(CapMem) addr_reg <- mkRegU;
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CapMem), 1))
+    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnDnC#(CapMem, CompIndex), 1))
         fullRecords <- replicateM(mkMapLossyBRAM);
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CompressedTarget), BtbAssociativity))
+    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnDnC#(CompressedTarget, CompIndex), BtbAssociativity))
         compressedRecords <- replicateM(mkMapLossyBRAM);
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
+    Reg#(CompIndex) rg_cid <- mkReg(0);
 
     function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
     function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
@@ -79,10 +84,14 @@ module mkBtbCore(NextAddrPred#(hashSz))
         CompressedTarget shortMask = -1;
         CapMem mask = ~zeroExtend(shortMask);
         if ((pc&mask) == (nextPc&mask))
-            compressedRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:truncate(nextPc)});
+            compressedRecords[getBank(pc)].update(lookupKey(pc), VnDnC{v:taken, d:truncate(nextPc), c:rg_cid});
         else
-            fullRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:nextPc});
+            fullRecords[getBank(pc)].update(lookupKey(pc), VnDnC{v:taken, d:nextPc, c:rg_cid});
     endrule
+
+    method Action setCID(CompIndex cid);
+        rg_cid <= cid;
+    endmethod
 
     method Action put_pc(CapMem pc);
         addr_reg <= pc;
@@ -102,9 +111,9 @@ module mkBtbCore(NextAddrPred#(hashSz))
         Vector#(SupSizeX2, Maybe#(CapMem)) ppcs = replicate(Invalid);
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             if (fullRecords[i].lookupRead matches tagged Valid .r)
-                ppcs[i] = r.v ? Valid(r.d):Invalid;
+                ppcs[i] = (r.v && r.c == rg_cid) ? Valid(r.d):Invalid;
             if (compressedRecords[i].lookupRead matches tagged Valid .r)
-                ppcs[i] = r.v ? Valid({truncateLSB(addr_reg),r.d}):Invalid;
+                ppcs[i] = (r.v && r.c == rg_cid) ? Valid({truncateLSB(addr_reg),r.d}):Invalid;
         end
         ppcs = rotateBy(ppcs,unpack(-getBtbAddr(addr_reg).bank)); // Rotate firstBank down to zeroeth element.
         return ppcs;

@@ -48,6 +48,7 @@ import Btb_IFC::*;
 import BtbCore::*;
 import BtbDynamic::*;
 import BtbPartition::*;
+import BtbTaggedCID::*;
 
 export mkBtb;
 
@@ -93,8 +94,9 @@ typedef struct {
 module mkBtb(NextAddrPred#(16));
 `ifdef CID
     //NextAddrPred#(16) btb <- mkBtbDynamic;
-    NextAddrPred#(16) btb <- mkBtbPartition;
+    //NextAddrPred#(16) btb <- mkBtbPartition;
     //NextAddrPred#(16) btb <- mkBtbCoreCID(inIfc);
+    NextAddrPred#(16) btb <- mkBtbCore;
 `else
     NextAddrPred#(16) btb <- mkBtbCore;
 `endif
