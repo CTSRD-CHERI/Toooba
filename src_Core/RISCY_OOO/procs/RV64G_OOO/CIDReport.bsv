@@ -38,6 +38,7 @@ import CIDLogging :: *;
 import ProcTypes :: *;
 import CHERICC_Fat :: *;
 import CHERICap :: *;
+import Types :: *;
 
 interface CIDReport;
     method Action setFP(File fpointer);
@@ -74,7 +75,8 @@ module mkCIDReport(CIDReport);
         $display("reportPred");
         let ppc = x.ppc_vaddr_csrData.PPC;
         let addr = getAddr(ppc);
-        if (x.iType == CJALR && addr != 0) begin
+        Addr a = {2'b01,?};
+        if (x.iType == CJALR && addr != 0 && addr != a) begin
             $display("CJALR instruction");
             log.logPrediction(rg_cid, x);
         end
