@@ -355,14 +355,6 @@ function MISA misa;
    return x;
 endfunction
 
-function Bool is_16b_inst (Bit #(n) inst);
-   return (inst [1:0] != 2'b11);
-endfunction
-
-function Bool is_32b_inst (Bit #(n) inst);
-   return (inst [1:0] == 2'b11);
-endfunction
-
 // Parsing a sequence of 16-bit parcels returns a sequence of the
 // following kinds or items
 

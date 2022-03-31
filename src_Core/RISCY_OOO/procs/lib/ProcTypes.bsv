@@ -666,12 +666,21 @@ typedef struct {
     Maybe#(ImmData) imm;
 } DecodedInst deriving(Bits, Eq, FShow);
 
+// return address stack link reg is x1 or x5
 function Bool linkedR(Maybe#(ArchRIndx) register);
    Bool res = False;
    if (register matches tagged Valid .r &&& (r == tagged Gpr 1 || r == tagged Gpr 5)) begin
       res = True;
    end
    return res;
+endfunction
+
+function Bool is_16b_inst (Bit #(n) inst);
+    return (inst [1:0] != 2'b11);
+endfunction
+
+function Bool is_32b_inst (Bit #(n) inst);
+    return (inst [1:0] == 2'b11);
 endfunction
 
 function Maybe#(Data) getDInstImm(DecodedInst dInst);

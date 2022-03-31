@@ -61,15 +61,6 @@ typedef struct {
     CapMem target;
 } TransientTrace deriving (Bits, Eq, FShow);
 
-// return address stack link reg is x1 or x5
-function Bool linkedR(Maybe#(ArchRIndx) register);
-    Bool res = False;
-    if (register matches tagged Valid .r &&& (r == tagged Gpr 1 || r == tagged Gpr 5)) begin
-        res = True;
-    end
-    return res;
-endfunction
-
 // return whether register is x0
 function Bool isZeroReg(Maybe#(ArchRIndx) register);
     Bool res = True;
@@ -87,10 +78,6 @@ function InstType getInstType(IType iType, Maybe#(ArchRIndx) rs1, Maybe#(ArchRIn
         else retval = Jump;
     end
     return retval;
-endfunction
-
-function Bool is_16b_inst (Bit #(32) inst);
-    return (inst [1:0] != 2'b11);
 endfunction
 
 

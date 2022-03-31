@@ -213,10 +213,6 @@ typedef struct {
 } CommitTrap deriving(Bits, FShow);
 
 `ifdef RVFI
-function Bool is_16b_inst (Bit #(n) inst);
-   return (inst [1:0] != 2'b11);
-endfunction
-
 typedef struct {
     Data sepc;
     Data mepc;
@@ -1209,9 +1205,6 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                            res = True;
                         end
                         return res;
-                    endfunction
-                    function Bool is_16b_inst (Bit #(n) inst);
-                        return (inst [1:0] != 2'b11);
                     endfunction
 
                     // update return target
