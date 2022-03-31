@@ -1198,15 +1198,6 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 
 `ifdef PERFORMANCE_MONITORING
 `ifdef CONTRACTS_VERIFY
-                    // return address stack link reg is x1 or x5
-                    function Bool linkedR(Maybe#(ArchRIndx) register);
-                        Bool res = False;
-                        if (register matches tagged Valid .r &&& (r == tagged Gpr 1 || r == tagged Gpr 5)) begin
-                           res = True;
-                        end
-                        return res;
-                    endfunction
-
                     // update return target
                     if(x.iType == J || x.iType == CJAL || x.iType == CJALR || x.iType == Jr) begin
                         tar = tagged Valid x.ppc_vaddr_csrData.PPC;

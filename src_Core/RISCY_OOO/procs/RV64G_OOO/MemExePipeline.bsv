@@ -691,9 +691,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
 `ifdef PERFORMANCE_MONITORING
 `ifdef CONTRACTS_VERIFY
-        function Bool is_16b_inst (Bit #(n) inst);
-            return (inst [1:0] != 2'b11);
-        endfunction
         let pc = inIfc.rob_getPC(x.tag);
         let ppc = inIfc.rob_getPredPC(x.tag);
         let inst = inIfc.rob_getOrig_Inst(x.tag);
