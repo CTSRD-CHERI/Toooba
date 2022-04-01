@@ -60,11 +60,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
     Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CompressedTarget), BtbAssociativity))
         compressedRecords <- replicateM(mkMapLossyBRAM);
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
-
-    function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
-    function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
-    function BtbIndex getIndex(CapMem pc) = getBtbAddr(pc).index;
-    function BtbTag getTag(CapMem pc) = getBtbAddr(pc).tag;
+    
     function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(CapMem pc) =
         MapKeyIndex{key: hash(getTag(pc)), index: getIndex(pc)};
 

@@ -83,10 +83,6 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
     RWire#(BtbUpdate) updateEn <- mkRWire;
     RWire#(CompIndex) cidUpdate <- mkRWire;
 
-    function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
-    function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
-    function BtbIndex getIndex(CapMem pc) = getBtbAddr(pc).index;
-    function BtbTag getTag(CapMem pc) = getBtbAddr(pc).tag;
     function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(CapMem pc) =
         MapKeyIndex{key: hash(getTag(pc)), index: getIndex(pc)};
 

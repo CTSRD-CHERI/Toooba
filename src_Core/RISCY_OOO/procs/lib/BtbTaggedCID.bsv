@@ -66,10 +66,6 @@ module mkBtbTaggedCID(NextAddrPred#(hashSz))
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
     Reg#(CompIndex) rg_cid <- mkReg(0);
 
-    function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
-    function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
-    function BtbIndex getIndex(CapMem pc) = getBtbAddr(pc).index;
-    function BtbTag getTag(CapMem pc) = getBtbAddr(pc).tag;
     function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(CapMem pc) =
         MapKeyIndex{key: hash(getTag(pc)), index: getIndex(pc)};
 
