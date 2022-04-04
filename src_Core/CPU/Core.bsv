@@ -131,6 +131,7 @@ import Trace_Data2 :: *;
 
 `ifdef CID
 import CIDReport :: *;
+import CIDTable :: *;
 `endif
 
 // ================================================================
@@ -302,6 +303,7 @@ module mkCore#(CoreId coreId)(Core);
     // reporting module for transient execution
 `ifdef CID
     CIDReport cidReport <- mkCIDReport;
+    CIDTable cidTable <- mkCIDTable;
 `endif
     RegRenamingTable regRenamingTable <- mkRegRenamingTable;
     EpochManager epochManager <- mkEpochManager;
