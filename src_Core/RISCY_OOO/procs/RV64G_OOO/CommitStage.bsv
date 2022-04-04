@@ -108,6 +108,7 @@ interface CommitInput;
     interface CsrFile csrfIfc;
 `ifdef CID
     interface CIDReport cidReportIfc;
+    method Action setNewCID(CapMem cid);
 `endif
     // no stores
     method Bool stbEmpty;
@@ -920,6 +921,12 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
             Data csr_data = ?;
             if(x.ppc_vaddr_csrData matches tagged CSRData .d) begin
                 csr_data = getAddr(d);
+`ifdef CID
+                if(csr_idx == csrAddrCID) begin
+                    $display("csrAddrCID");
+                    inIfc.setNewCID(d);
+                end
+`endif
             end
             else begin
                 doAssert(False, "must have csr data");

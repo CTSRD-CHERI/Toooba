@@ -26,13 +26,23 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
+import CHERICC_Fat :: *;
+import ProcTypes :: *;
+
 interface CIDTable;
     method Action shootdown();
-    method Action setNewCID();
+    method Action setNewCID(CapMem cid);
+    method CompIndex getCID();
 endinterface
 
 module mkCIDTable(CIDTable);
     method Action shootdown();
         $display("shootdown");
+    endmethod
+    method Action setNewCID(CapMem cid);
+        $display("setNewCID");
+    endmethod
+    method CompIndex getCID();
+        return 0;
     endmethod
 endmodule

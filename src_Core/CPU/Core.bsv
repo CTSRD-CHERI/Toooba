@@ -680,6 +680,7 @@ module mkCore#(CoreId coreId)(Core);
         interface csrfIfc = csrf;
 `ifdef CID
         interface cidReportIfc = cidReport;
+        method setNewCID = cidTable.setNewCID;
 `endif
         method stbEmpty = stb.isEmpty;
         method stqEmpty = lsq.stqEmpty;
