@@ -88,6 +88,9 @@ module mkBtbTaggedCID(NextAddrPred#(hashSz))
     method Action setCID(CompIndex cid);
         rg_cid <= cid;
     endmethod
+    method Action shootdown();
+        $display("shootdown not implemented");
+    endmethod
 
     method Action put_pc(CapMem pc);
         addr_reg <= pc;

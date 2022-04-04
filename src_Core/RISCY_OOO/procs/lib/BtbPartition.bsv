@@ -50,6 +50,7 @@ module mkBtbPartition(NextAddrPred#(16));
     method Action setCID(CompIndex cid);
         rg_cid <= cid;
     endmethod
+    method shootdown = btbs[rg_cid].shootdown;
 `endif
     method Action put_pc(CapMem pc);
         btbs[rg_cid].put_pc(pc);
