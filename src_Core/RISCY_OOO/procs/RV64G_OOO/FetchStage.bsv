@@ -137,6 +137,7 @@ interface FetchStage;
 
 `ifdef CID
     method Action setCID(CompIndex cid);
+    method Action shootdown(CompIndex cid);
 `endif
 
     // starting and stopping
@@ -962,6 +963,10 @@ module mkFetchStage(FetchStage);
     method Action setCID(CompIndex cid);
         ras.setCID(cid);
         nextAddrPred.setCID(cid);
+    endmethod
+    method Action shootdown(CompIndex cid);
+        ras.shootdown(cid);
+        nextAddrPred.shootdown(cid);
     endmethod
 `endif
 

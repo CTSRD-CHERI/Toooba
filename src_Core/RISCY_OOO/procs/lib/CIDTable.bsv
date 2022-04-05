@@ -29,16 +29,17 @@
 import CHERICC_Fat :: *;
 import ProcTypes :: *;
 
+interface CIDTableInput;
+    method Action shootdown(CompIndex cid);
+endinterface
+
 interface CIDTable;
-    method Action shootdown();
+    //method Action shootdown();
     method Action setNewCID(CapMem cid);
     method CompIndex getCID();
 endinterface
 
-module mkCIDTable(CIDTable);
-    method Action shootdown();
-        $display("shootdown");
-    endmethod
+module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
     method Action setNewCID(CapMem cid);
         $display("setNewCID");
     endmethod

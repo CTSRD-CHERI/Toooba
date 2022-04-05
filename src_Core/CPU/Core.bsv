@@ -303,7 +303,6 @@ module mkCore#(CoreId coreId)(Core);
     // reporting module for transient execution
 `ifdef CID
     CIDReport cidReport <- mkCIDReport;
-    CIDTable cidTable <- mkCIDTable;
 `endif
     RegRenamingTable regRenamingTable <- mkRegRenamingTable;
     EpochManager epochManager <- mkEpochManager;
@@ -640,6 +639,17 @@ module mkCore#(CoreId coreId)(Core);
     endrule
 `endif
 
+`ifdef CID
+    RWire#(CapMem) cidWire <- mkRWire;
+    let cidTableInput = (interface CIDTableInput;
+        method Action shootdown(CompIndex cid);
+            $display("shootdown in core");
+        endmethod
+    endinterface);
+`endif
+
+    CIDTable cidTable <- mkCIDTable(cidTableInput);
+
     // Rename stage
     let renameInput = (interface RenameInput;
         interface fetchIfc = fetchStage;
@@ -850,6 +860,10 @@ module mkCore#(CoreId coreId)(Core);
         cidReport.setFP(tfp);
         fp <= tfp;
     endrule
+
+    /*rule doShootdown(cidWire.wget() matches Valid .cid);
+        fetchStage.shootdown(cid);
+    endrule*/
 `endif
 
 `ifdef SECURITY_OR_INCLUDE_GDB_CONTROL

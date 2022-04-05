@@ -60,7 +60,7 @@ interface ReturnAddrStack;
     interface Vector#(SupSize, RAS) ras;
 `ifdef CID
     method Action setCID(CompIndex cid);
-    method Action shootdown();
+    method Action shootdown(CompIndex cid);
 `endif
     method Bool pendingPush;
     method Action push(CapMem pushAddr);

@@ -114,7 +114,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
     method Action setCID(CompIndex cid);
         noAction;
     endmethod
-    method Action shootdown();
+    method Action shootdown(CompIndex cid);
         $display("shootdown not implemented");
     endmethod
 `endif

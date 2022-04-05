@@ -49,7 +49,7 @@ interface NextAddrPred#(numeric type hashSz);
     method Action put_pc(CapMem pc);
 `ifdef CID
     method Action setCID(CompIndex cid);
-    method Action shootdown();
+    method Action shootdown(CompIndex cid);
 `endif
     interface Vector#(SupSizeX2, Maybe#(CapMem)) pred;
     method Action update(CapMem pc, CapMem brTarget, Bool taken);
