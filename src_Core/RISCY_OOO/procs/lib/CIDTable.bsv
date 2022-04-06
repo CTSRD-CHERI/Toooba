@@ -39,11 +39,21 @@ interface CIDTable;
     method CompIndex getCID();
 endinterface
 
+function CompIndex reduce(CapMem acid);
+    // currently a hash implementation
+    return hash(acid);
+endfunction
+
 module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
-    method Action setNewCID(CapMem cid);
+
+    Reg#(CapMem) rg_cur_cid <- mkReg(0);
+
+    method Action setNewCID(CapMem acid);
         $display("setNewCID");
+        rg_cur_cid <= acid;
+        let mcid = reduce(acid);
     endmethod
     method CompIndex getCID();
-        return 0;
+        return reduce(rg_cur_cid);
     endmethod
 endmodule
