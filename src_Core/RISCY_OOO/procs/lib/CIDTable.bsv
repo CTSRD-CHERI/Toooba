@@ -28,6 +28,7 @@
 
 import CHERICC_Fat :: *;
 import ProcTypes :: *;
+import Vector :: *;
 
 interface CIDTableInput;
     method Action shootdown(CompIndex cid);
@@ -44,15 +45,32 @@ function CompIndex reduce(CapMem acid);
     return hash(acid);
 endfunction
 
+typedef struct {
+    CapMem acid;
+    Bool v;
+} CIDTableEntry deriving (Bits, Eq, FShow);
+
 module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
 
     Reg#(CapMem) rg_cur_cid <- mkReg(0);
+
+    // used a direct mapped cache, where mcid is the index
+    Vector#(CompNumber, Reg#(CIDTableEntry)) tab <- replicateM(mkReg(unpack(0)));
 
     method Action setNewCID(CapMem acid);
         $display("setNewCID");
         rg_cur_cid <= acid;
         let mcid = reduce(acid);
+        let entry = tab[mcid];
+        if(!entry.v && acid != entry.acid) inIfc.shootdown(mcid);
+        CIDTableEntry e = CIDTableEntry{acid: acid, v: True};
+        tab[mcid] <= e;
+
+        for(Integer i = 0; i < valueOf(CompNumber); i = i + 1) begin
+            $display("tab: ", fshow(tab[i]));
+        end
     endmethod
+
     method CompIndex getCID();
         return reduce(rg_cur_cid);
     endmethod
