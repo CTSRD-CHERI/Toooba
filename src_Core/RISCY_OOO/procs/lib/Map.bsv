@@ -128,6 +128,7 @@ interface MapSplitCore#(type ky, type ix, type vl, numeric type as, numeric type
     method Action clear;
     method Action clearWays(Vector#(as, Bool) v);
     method Bool clearDone;
+    method Action shootdown();
 endinterface
 
 typedef MapSplitCore#(ky, ix, vl, as, as) MapSplit#(type ky, type ix, type vl, numeric type as);
@@ -147,6 +148,9 @@ Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
 Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     Vector#(as, RWBramCore#(ix, MapKeyValue#(ky,vl))) mem <- replicateM(mkRWBramCoreUG);
     Vector#(as, RWBramCore#(ix, ky)) updateKeys <- replicateM(mkRWBramCoreUG);
+    Vector#(as, Vector#(128, Ehr#(2, Bool))) valid;
+    // indicate whether shootdown in progress
+    RWire#(Bool) sd_prog <- mkRWire;
     Reg#(MapKeyIndex#(ky,ix)) lookupReg <- mkRegU;
     Reg#(MapKeyIndexValue#(ky,ix,vl)) updateReg <- mkRegU;
     Reg#(Bool) updateFresh <- mkDReg(False);
@@ -155,6 +159,9 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     for(Integer i = 0; i < valueOf(as); i = i + 1) begin
         if(i < valueOf(en)) avWays[i] <- mkReg(True);
         else avWays[i] <- mkReg(False);
+    end
+    for(Integer i = 0; i < valueof(as); i = i + 1) begin
+        valid[i] <- replicateM(mkEhr(False));
     end
     Integer a = valueof(as);
 
@@ -188,7 +195,11 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
             /*$display("MapUpdate - index: %x, key: %x, value: %x, way: %x",
                      u.index, u.key, u.value, way);*/
             mem[way].wrReq(u.index, MapKeyValue{key: u.key, value: u.value});
-            updateKeys[way].wrReq(u.index, u.key);
+            if(sd_prog.wget matches Invalid) begin
+                updateKeys[way].wrReq(u.index, u.key);
+                // write valid tag
+                valid[way][u.index][1] <= True;
+            end
             wayNext <= getNextWay;
         end
     endrule
@@ -211,7 +222,7 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
         for (Integer i = 0; i < a; i = i + 1) begin
             if(avWays[i]) begin
                 let resp = mem[i].rdResp;
-                if (lookupReg.key == resp.key) readVal = Valid(resp.value);
+                if (lookupReg.key == resp.key && !valid[i][lookupReg.index][1]) readVal = Valid(resp.value);
             end
         end
         // If there has been a recent write, take that one.
@@ -236,4 +247,12 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
         clearReg[1] <= True;
     endmethod
     method clearDone = clearReg[0];
+
+    method Action shootdown();
+        $display("shootdown");
+        for(Integer i = 0; i < valueof(as); i = i + 1) begin
+            writeVReg(getVEhrPort(valid[i], 0), replicate(False));
+        end
+        sd_prog.wset(True);
+    endmethod
 endmodule
