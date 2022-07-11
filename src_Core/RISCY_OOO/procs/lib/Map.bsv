@@ -148,7 +148,8 @@ Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
 Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     Vector#(as, RWBramCore#(ix, MapKeyValue#(ky,vl))) mem <- replicateM(mkRWBramCoreUG);
     Vector#(as, RWBramCore#(ix, ky)) updateKeys <- replicateM(mkRWBramCoreUG);
-    Vector#(as, Vector#(128, Ehr#(2, Bool))) valid;
+    Vector#(as, Vector#(128, Ehr#(2, Bool))) valid <- replicateM(replicateM(mkEhr(False)));
+
     // indicate whether shootdown in progress
     RWire#(Bool) sd_prog <- mkRWire;
     Reg#(MapKeyIndex#(ky,ix)) lookupReg <- mkRegU;
@@ -159,9 +160,6 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     for(Integer i = 0; i < valueOf(as); i = i + 1) begin
         if(i < valueOf(en)) avWays[i] <- mkReg(True);
         else avWays[i] <- mkReg(False);
-    end
-    for(Integer i = 0; i < valueof(as); i = i + 1) begin
-        valid[i] <- replicateM(mkEhr(False));
     end
     Integer a = valueof(as);
 
