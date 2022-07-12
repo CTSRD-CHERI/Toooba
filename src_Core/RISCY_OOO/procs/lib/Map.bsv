@@ -148,7 +148,7 @@ Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
 Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     Vector#(as, RWBramCore#(ix, MapKeyValue#(ky,vl))) mem <- replicateM(mkRWBramCoreUG);
     Vector#(as, RWBramCore#(ix, ky)) updateKeys <- replicateM(mkRWBramCoreUG);
-    //Vector#(as, Vector#(128, Ehr#(2, Bool))) valid <- replicateM(replicateM(mkEhr(False)));
+    Vector#(as, Vector#(128, Ehr#(2, Bool))) valid <- replicateM(replicateM(mkEhr(False)));
 
     // indicate whether shootdown in progress
     RWire#(Bool) sd_prog <- mkRWire;
@@ -196,7 +196,7 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
             if(sd_prog.wget matches Invalid) begin
                 updateKeys[way].wrReq(u.index, u.key);
                 // write valid tag
-                //valid[way][u.index][1] <= True;
+                valid[way][u.index][1] <= True;
             end
             wayNext <= getNextWay;
         end
@@ -220,7 +220,7 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
         for (Integer i = 0; i < a; i = i + 1) begin
             if(avWays[i]) begin
                 let resp = mem[i].rdResp;
-                if (lookupReg.key == resp.key /*&& !valid[i][lookupReg.index][1]*/) readVal = Valid(resp.value);
+                if (lookupReg.key == resp.key && !valid[i][lookupReg.index][1]) readVal = Valid(resp.value);
             end
         end
         // If there has been a recent write, take that one.
@@ -248,9 +248,9 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
 
     method Action shootdown();
         $display("shootdown");
-        //for(Integer i = 0; i < valueof(as); i = i + 1) begin
-        //    writeVReg(getVEhrPort(valid[i], 0), replicate(False));
-        //end
+        for(Integer i = 0; i < valueof(as); i = i + 1) begin
+            writeVReg(getVEhrPort(valid[i], 0), replicate(False));
+        end
         sd_prog.wset(True);
     endmethod
 endmodule

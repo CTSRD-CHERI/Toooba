@@ -116,7 +116,11 @@ module mkBtbCore(NextAddrPred#(hashSz_))
         noAction;
     endmethod
     method Action shootdown(CompIndex cid);
-        $display("shootdown not implemented");
+        $display("shootdown");
+        for(Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
+            fullRecords[i].shootdown();
+            compressedRecords[i].shootdown();
+        end
     endmethod
 `endif
 
