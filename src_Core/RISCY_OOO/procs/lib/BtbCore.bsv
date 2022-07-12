@@ -49,14 +49,17 @@ import DReg::*;
 
 
 
-module mkBtbCore(NextAddrPred#(hashSz))
-    provisos (NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
+module mkBtbCore(NextAddrPred#(hashSz_))
+    provisos (NumAlias#(hashSz, HashSize),
+        NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
         Add#(1, a__, TDiv#(tagSz, hashSz)),
     Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
     // Read and Write ordering doesn't matter since this is a predictor
     Reg#(CapMem) addr_reg <- mkRegU;
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CapMem), 1))
-        fullRecords <- replicateM(mkMapLossyBRAM);
+    //Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CapMem), 1))
+    //    fullRecords <- replicateM(mkMapLossyBRAM);
+    Vector#(SupSizeX2, MapLossyBRAM1)
+        fullRecords <- replicateM(mkMapLossyBRAM1);
     Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CompressedTarget), BtbAssociativity))
         compressedRecords <- replicateM(mkMapLossyBRAM);
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
@@ -131,4 +134,12 @@ module mkBtbCore(NextAddrPred#(hashSz))
     method flush = noAction;
     method flush_done = True;
 `endif
+endmodule
+
+typedef MapSplit#(HashedTag#(HashSize), BtbIndex, VnD#(CapMem), 1) MapLossyBRAM1;
+
+
+module mkMapLossyBRAM1(MapLossyBRAM1);
+    MapLossyBRAM1 m <- mkMapLossyBRAM;
+    return m;
 endmodule
