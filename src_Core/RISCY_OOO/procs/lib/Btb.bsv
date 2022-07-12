@@ -54,15 +54,16 @@ export mkBtb;
 
 
 (* synthesize *)
-module mkBtb(NextAddrPred#(16));
+module mkBtb(NextAddrPred#(HashSize));
 `ifdef CID
-    //NextAddrPred#(16) btb <- mkBtbDynamic;
-    //NextAddrPred#(16) btb <- mkBtbPartition;
-    //NextAddrPred#(16) btb <- mkBtbCoreCID(inIfc);
-    //NextAddrPred#(16) btb <- mkBtbTaggedCID;
-    NextAddrPred#(16) btb <- mkBtbCore;
+    //let btb <- mkBtbDynamic;
+    //let btb <- mkBtbPartition;
+    //let btb <- mkBtbCoreCID(inIfc);
+    //let btb <- mkBtbTaggedCID;
+    //let btb <- mkBtbCore;
+    let btb <- mkBtbCore;
 `else
-    NextAddrPred#(16) btb <- mkBtbCore;
+    let btb <- mkBtbCore;
 `endif
     return btb;
 endmodule

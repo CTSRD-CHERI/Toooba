@@ -93,6 +93,8 @@ typedef struct {
     c_type c;
 } VnDnC#(type data, type c_type) deriving (Bits, Eq, FShow);
 
+typedef 16 HashSize;
+
 function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
 function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
 function BtbIndex getIndex(CapMem pc) = getBtbAddr(pc).index;
