@@ -63,6 +63,7 @@ typedef 1 PcLsbsIgnore;
 typedef 1024 BtbEntries;
 typedef Bit#(16) CompressedTarget;
 typedef 2 BtbAssociativity;
+typedef 1 BtbAssociativityFullRecords;
 typedef Bit#(TLog#(SupSizeX2)) BtbBank;
 // Total entries/lanes of superscalar lookup/associativity
 typedef TDiv#(TDiv#(BtbEntries,SupSizeX2),BtbAssociativity) BtbIndices;
