@@ -56,12 +56,10 @@ module mkBtbCore(NextAddrPred#(hashSz_))
     Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
     // Read and Write ordering doesn't matter since this is a predictor
     Reg#(CapMem) addr_reg <- mkRegU;
-    //Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CapMem), 1))
-    //    fullRecords <- replicateM(mkMapLossyBRAM);
     Vector#(SupSizeX2, MapLossyBRAM1)
         fullRecords <- replicateM(mkMapLossyBRAM1);
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CompressedTarget), BtbAssociativity))
-        compressedRecords <- replicateM(mkMapLossyBRAM);
+    Vector#(SupSizeX2, MapLossyBRAMAs)
+        compressedRecords <- replicateM(mkMapLossyBRAMAs);
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
     
     function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(CapMem pc) =
@@ -138,8 +136,16 @@ endmodule
 
 typedef MapSplit#(HashedTag#(HashSize), BtbIndex, VnD#(CapMem), 1) MapLossyBRAM1;
 
+typedef MapSplit#(HashedTag#(HashSize), BtbIndex, VnD#(CompressedTarget), BtbAssociativity) MapLossyBRAMAs;
 
+(* synthesize *)
 module mkMapLossyBRAM1(MapLossyBRAM1);
     MapLossyBRAM1 m <- mkMapLossyBRAM;
+    return m;
+endmodule
+
+(* synthesize *)
+module mkMapLossyBRAMAs(MapLossyBRAMAs);
+    MapLossyBRAMAs m <- mkMapLossyBRAM;
     return m;
 endmodule
