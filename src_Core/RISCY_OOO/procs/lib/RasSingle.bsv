@@ -117,8 +117,8 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
     method Action setCID(CompIndex cid);
         noAction;
     endmethod
+    
     method Action shootdown(CompIndex cid);
-        $display("shootdown not implemented");
         // write to last port to overwrite any potential change
         writeVReg(getVEhrPort(stack, 2), replicate(nullCap));
         writeVReg(getVEhrPort(valids, 3), replicate(False));
