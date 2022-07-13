@@ -47,11 +47,11 @@ import Ras_IFC::*;
 
 
 module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
-    Vector#(RasEntries, Ehr#(2, CapMem)) stack <- replicateM(mkEhr(nullCap));
-    Vector#(RasEntries, Ehr#(3, Bool)) valids <- replicateM(mkEhr(False));
+    Vector#(RasEntries, Ehr#(3, CapMem)) stack <- replicateM(mkEhr(nullCap));
+    Vector#(RasEntries, Ehr#(4, Bool)) valids <- replicateM(mkEhr(False));
     // head points past valid data
     // to gracefully overflow, head is allowed to overflow to 0 and overwrite the oldest data
-    Ehr#(TAdd#(SupSize, 3), RasIndex) head <- mkEhr(0);
+    Ehr#(TAdd#(SupSize, 4), RasIndex) head <- mkEhr(0);
 
     Bool invalidHead = !(valids[head[0]][0]);
     Reg#(Bit#(6)) delay <- mkReg(0);
@@ -62,6 +62,7 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
             delay <= 0;
         end
     endrule
+
 `ifdef SECURITY
     Reg#(Bool) flushDone <- mkReg(True);
 
@@ -118,6 +119,10 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
     endmethod
     method Action shootdown(CompIndex cid);
         $display("shootdown not implemented");
+        // write to last port to overwrite any potential change
+        writeVReg(getVEhrPort(stack, 2), replicate(nullCap));
+        writeVReg(getVEhrPort(valids, 3), replicate(False));
+        head[valueof(SupSize) + 1] <= 0;
     endmethod
 `endif
 
