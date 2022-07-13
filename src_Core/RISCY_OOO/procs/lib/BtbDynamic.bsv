@@ -187,6 +187,10 @@ module mkBtbDynamic(NextAddrPred#(hashSz))
         updateEn.wset(BtbUpdate {pc: pc, nextPc: nextPc, taken: taken});
     endmethod
 
+    method Action shootdown(CompIndex cid);
+        $display("BtbDynamic shootdown not implemented");
+    endmethod
+
     method Action setCID(CompIndex cid);
         // only if this is a real update
         if(rg_cid != cid)  cidUpdate.wset(cid);
