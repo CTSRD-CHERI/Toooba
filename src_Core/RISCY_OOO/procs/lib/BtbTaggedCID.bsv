@@ -50,19 +50,22 @@ import CHERICC_Fat::*;
 import CHERICap::*;
 import Btb_IFC::*;
 import DReg::*;
+import MapLossyBRAMFullRecordsCID::*;
+import MapLossyBRAMCompressedRecordsCID::*;
 
 
 
-module mkBtbTaggedCID(NextAddrPred#(hashSz))
-    provisos (NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
-        Add#(1, a__, TDiv#(tagSz, hashSz)),
-    Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
+module mkBtbTaggedCID(NextAddrPred#(hashSz_))
+    provisos (NumAlias#(hashSz, HashSize),
+              NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
+              Add#(1, a__, TDiv#(tagSz, hashSz)),
+              Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
     // Read and Write ordering doesn't matter since this is a predictor
     Reg#(CapMem) addr_reg <- mkRegU;
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnDnC#(CapMem, CompIndex), 1))
-        fullRecords <- replicateM(mkMapLossyBRAM);
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnDnC#(CompressedTarget, CompIndex), BtbAssociativity))
-        compressedRecords <- replicateM(mkMapLossyBRAM);
+    Vector#(SupSizeX2, MapLossyBRAMFullRecordsCID)
+        fullRecords <- replicateM(mkMapLossyBRAMFullRecordsCID);
+    Vector#(SupSizeX2, MapLossyBRAMCompressedRecordsCID)
+        compressedRecords <- replicateM(mkMapLossyBRAMCompressedRecordsCID);
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
     Reg#(CompIndex) rg_cid <- mkReg(0);
 

@@ -45,15 +45,17 @@ import CHERICC_Fat::*;
 import CHERICap::*;
 import Btb_IFC::*;
 import DReg::*;
+import MapLossyBRAMFullRecords::*;
+import MapLossyBRAMCompressedRecords::*;
 
 
 
 
 module mkBtbCore(NextAddrPred#(hashSz_))
     provisos (NumAlias#(hashSz, HashSize),
-        NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
-        Add#(1, a__, TDiv#(tagSz, hashSz)),
-    Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
+              NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
+              Add#(1, a__, TDiv#(tagSz, hashSz)),
+              Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
     // Read and Write ordering doesn't matter since this is a predictor
     Reg#(CapMem) addr_reg <- mkRegU;
     Vector#(SupSizeX2, MapLossyBRAMFullRecords)
@@ -136,20 +138,4 @@ module mkBtbCore(NextAddrPred#(hashSz_))
     method flush = noAction;
     method flush_done = True;
 `endif
-endmodule
-
-typedef MapSplit#(HashedTag#(HashSize), BtbIndex, VnD#(CapMem), BtbAssociativityFullRecords) MapLossyBRAMFullRecords;
-
-typedef MapSplit#(HashedTag#(HashSize), BtbIndex, VnD#(CompressedTarget), BtbAssociativity) MapLossyBRAMCompressedRecords;
-
-(* synthesize *)
-module mkMapLossyBRAMFullRecords(MapLossyBRAMFullRecords);
-    MapLossyBRAMFullRecords m <- mkMapLossyBRAM;
-    return m;
-endmodule
-
-(* synthesize *)
-module mkMapLossyBRAMCompressedRecords(MapLossyBRAMCompressedRecords);
-    MapLossyBRAMCompressedRecords m <- mkMapLossyBRAM;
-    return m;
 endmodule
