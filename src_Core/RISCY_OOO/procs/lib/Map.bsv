@@ -178,12 +178,12 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule updateCanon;
-        if (clearReg[1]) begin
+        if (clearReg[2]) begin
             for (Integer i = 0; i < a; i = i + 1) begin
                 if(rg_clearWays[i][0]) mem[i].wrReq(clearCount, unpack(0));
             end
             clearCount <= clearCount + 1;
-            if (clearCount == ~0) clearReg[1] <= False;
+            if (clearCount == ~0) clearReg[2] <= False;
         end else if (updateFresh) begin
             let u = updateReg;
             Bit#(TLog#(as)) way = wayNext;
@@ -240,9 +240,9 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
         for(Integer i = 0; i < a; i = i + 1) rg_clearWays[i][1] <= True;
         clearReg[0] <= True;
     endmethod
-    method Action clearWays(Vector#(as, Bool) v) if(!clearReg[0]);
+    method Action clearWays(Vector#(as, Bool) v) if(!clearReg[1]);
         for(Integer i = 0; i < a; i = i + 1) rg_clearWays[i][1] <= v[i];
-        clearReg[2] <= True;
+        clearReg[1] <= True;
     endmethod
     method clearDone = clearReg[0];
 
