@@ -148,7 +148,7 @@ Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
 Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     Vector#(as, RWBramCore#(ix, MapKeyValue#(ky,vl))) mem <- replicateM(mkRWBramCoreUG);
     Vector#(as, RWBramCore#(ix, ky)) updateKeys <- replicateM(mkRWBramCoreUG);
-    Vector#(as, Vector#(128, Ehr#(2, Bool))) valid <- replicateM(replicateM(mkEhr(False)));
+    Vector#(as, Vector#(SizeOf#(ix), Ehr#(2, Bool))) valid <- replicateM(replicateM(mkEhr(False)));
 
     // indicate whether shootdown in progress
     RWire#(Bool) sd_prog <- mkRWire;
