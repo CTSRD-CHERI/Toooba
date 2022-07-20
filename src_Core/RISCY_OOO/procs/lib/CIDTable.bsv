@@ -35,7 +35,6 @@ interface CIDTableInput;
 endinterface
 
 interface CIDTable;
-    //method Action shootdown();
     method Action setNewCID(CapMem cid);
     method CompIndex getCID();
 endinterface
@@ -62,10 +61,13 @@ module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
         rg_cur_cid <= acid;
         let mcid = reduce(acid);
         let entry = tab[mcid];
-        if(!entry.v && acid != entry.acid) inIfc.shootdown(mcid);
-        CIDTableEntry e = CIDTableEntry{acid: acid, v: True};
-        tab[mcid] <= e;
+        if(!entry.v && acid != entry.acid) begin
+            inIfc.shootdown(mcid);
+            CIDTableEntry e = CIDTableEntry{acid: acid, v: True};
+            tab[mcid] <= e;
+        end
 
+        $display("CIDTable:");
         for(Integer i = 0; i < valueOf(CompNumber); i = i + 1) begin
             $display("tab: ", fshow(tab[i]));
         end

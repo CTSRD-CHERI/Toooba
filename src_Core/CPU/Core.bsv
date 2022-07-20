@@ -640,10 +640,11 @@ module mkCore#(CoreId coreId)(Core);
 `endif
 
 `ifdef CID
-    RWire#(CapMem) cidWire <- mkRWire;
+    RWire#(CompIndex) cidWire <- mkRWire;
     let cidTableInput = (interface CIDTableInput;
         method Action shootdown(CompIndex cid);
-            $display("shootdown in core");
+            $display("shootdown Core");
+            cidWire.wset(cid);
         endmethod
     endinterface);
 `endif
@@ -861,9 +862,9 @@ module mkCore#(CoreId coreId)(Core);
         fp <= tfp;
     endrule
 
-    /*rule doShootdown(cidWire.wget() matches Valid .cid);
+    rule doShootdown(cidWire.wget() matches tagged Valid .cid);
         fetchStage.shootdown(cid);
-    endrule*/
+    endrule
 `endif
 
 `ifdef SECURITY_OR_INCLUDE_GDB_CONTROL
