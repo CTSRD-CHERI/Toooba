@@ -199,5 +199,5 @@ module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), 
 
 
 endmodule
-`endif
 */
+`endif
