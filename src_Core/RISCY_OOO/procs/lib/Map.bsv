@@ -48,10 +48,15 @@ typedef struct {
     vl value;
 } MapKeyValue#(type ky, type vl) deriving(Bits, Eq, FShow);
 typedef struct {
+    tg tag;
+    vl value;
+} MapTagValue#(type tg, type vl) deriving(Bits, Eq, FShow);
+typedef struct {
     ky key;
     ix index;
+    tg tag;
     vl value;
-} MapKeyIndexValue#(type ky, type ix, type vl) deriving(Bits, Eq, FShow);
+} MapKeyIndexTagValue#(type ky, type ix, type tg, type vl) deriving(Bits, Eq, FShow);
 
 
 // Type parameters are for index and key (which together are the "address"),
@@ -131,6 +136,18 @@ interface MapSplitCore#(type ky, type ix, type vl, numeric type as, numeric type
     method Action shootdown();
 endinterface
 
+interface MapSplitCoreTagged#(type ky, type ix, type tg, type vl, numeric type as, numeric type en);
+    method Action update(MapKeyIndex#(ky,ix) key, tg tag, vl value);
+    method Action lookupStart(MapKeyIndex#(ky,ix) lookup_key);
+    method Maybe#(MapTagValue#(tg,vl)) lookupRead;
+    method Action changeWays(Vector#(as, Bool) v);
+    method Action clear;
+    method Action clearWays(Vector#(as, Bool) v);
+    method Bool clearDone;
+    method Action shootdown();
+    method Action shootdownTag(tg tag);
+endinterface
+
 typedef MapSplitCore#(ky, ix, vl, as, as) MapSplit#(type ky, type ix, type vl, numeric type as);
 
 module mkMapLossyBRAM(MapSplit#(ky, ix, vl, as)) provisos (
@@ -142,18 +159,43 @@ module mkMapLossyBRAM(MapSplit#(ky, ix, vl, as)) provisos (
     return m;
 endmodule
 
-module mkMapLossyBRAMCore(MapSplitCore#(ky,ix,vl,as, en)) provisos (
-Bits#(ky,ky_sz), Bits#(vl,vl_sz), Eq#(ky), Arith#(ky),
-Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
-Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
+module mkMapLossyBRAMCore(MapSplitCore#(ky,ix,vl,as,en)) provisos (
+    Bits#(ky,ky_sz), Bits#(vl,vl_sz), Eq#(ky), Arith#(ky),
+    Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
+    Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
+
+    MapSplitCoreTagged#(ky,ix, Bit#(0), vl, as, en) m <- mkMapLossyBRAMCoreTagged;
+
+    // do not care about tag
+    method Action update(MapKeyIndex#(ky,ix) key, vl value) = m.update(key, ?, value);
+    method Action lookupStart(MapKeyIndex#(ky,ix) lookup_key) = m.lookupStart(lookup_key);
+    method Maybe#(vl) lookupRead();
+        if(m.lookupRead matches tagged Valid .tup) return tagged Valid tup.value;
+        else return tagged Invalid;
+    endmethod
+    method Action changeWays(Vector#(as, Bool) v) = m.changeWays(v);
+    method Action clear = m.clear;
+    method Action clearWays(Vector#(as, Bool) v) = m.clearWays(v);
+    method Bool clearDone = m.clearDone;
+    method Action shootdown = m.shootdown;
+endmodule
+
+
+module mkMapLossyBRAMCoreTagged(MapSplitCoreTagged#(ky,ix,tg,vl,as,en)) provisos (
+    Bits#(ky,ky_sz), Bits#(vl,vl_sz), Eq#(ky), Arith#(ky),
+    Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
+    Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__),
+    Bits#(tg,tg_sz), Literal#(tg), Eq#(tg));
     Vector#(as, RWBramCore#(ix, MapKeyValue#(ky,vl))) mem <- replicateM(mkRWBramCoreUG);
     Vector#(as, RWBramCore#(ix, ky)) updateKeys <- replicateM(mkRWBramCoreUG);
-    Vector#(as, Vector#(SizeOf#(ix), Ehr#(2, Bool))) valid <- replicateM(replicateM(mkEhr(False)));
+    Vector#(as, Vector#(SizeOf#(ix), Ehr#(3, Bool))) valid <- replicateM(replicateM(mkEhr(False)));
+    // extra storage for tags
+    Vector#(as, Vector#(SizeOf#(ix), Reg#(tg))) tags <- replicateM(replicateM(mkReg(0)));
 
     // indicate whether shootdown in progress
     RWire#(Bool) sd_prog <- mkRWire;
     Reg#(MapKeyIndex#(ky,ix)) lookupReg <- mkRegU;
-    Reg#(MapKeyIndexValue#(ky,ix,vl)) updateReg <- mkRegU;
+    Reg#(MapKeyIndexTagValue#(ky,ix,tg,vl)) updateReg <- mkRegU;
     Reg#(Bool) updateFresh <- mkDReg(False);
     Reg#(Bit#(TLog#(as))) wayNext <- mkReg(0);
     Vector#(as,Reg#(Bool)) avWays;
@@ -202,8 +244,8 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
         end
     endrule
 
-    method Action update(MapKeyIndex#(ky,ix) ki, vl value);
-        updateReg <= MapKeyIndexValue{key: ki.key, index: ki.index, value: value};
+    method Action update(MapKeyIndex#(ky,ix) ki, tg tag, vl value);
+        updateReg <= MapKeyIndexTagValue{key: ki.key, index: ki.index, tag: tag, value: value};
         updateFresh <= True;
         for (Integer i = 0; i < a; i = i + 1)begin
             if(avWays[i]) updateKeys[i].rdReq(ki.index);
@@ -215,17 +257,18 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
             if(avWays[i]) mem[i].rdReq(ki.index);
         end
     endmethod
-    method Maybe#(vl) lookupRead;
-        Maybe#(vl) readVal = Invalid;
+    method Maybe#(MapTagValue#(tg,vl)) lookupRead;
+        Maybe#(MapTagValue#(tg,vl)) readVal = Invalid;
         for (Integer i = 0; i < a; i = i + 1) begin
             if(avWays[i]) begin
                 let resp = mem[i].rdResp;
-                if (lookupReg.key == resp.key && !valid[i][lookupReg.index][1]) readVal = Valid(resp.value);
+                let tag = tags[i][lookupReg.index];
+                if (lookupReg.key == resp.key && !valid[i][lookupReg.index][1]) readVal = Valid(MapTagValue{tag: tag, value: resp.value});
             end
         end
         // If there has been a recent write, take that one.
         if (updateReg.index == lookupReg.index && updateReg.key == lookupReg.key)
-            readVal = Valid(updateReg.value);
+            readVal = Valid(MapTagValue{tag: updateReg.tag, value: updateReg.value});
         // done for security reasons:
         // do not return anything valid when we are still clearing
         if(clearReg[0]) return tagged Invalid;
@@ -252,5 +295,14 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
             writeVReg(getVEhrPort(valid[i], 0), replicate(False));
         end
         sd_prog.wset(True);
+    endmethod
+
+    method Action shootdownTag(tg tag);
+        $display("shootdownTag");
+        for(Integer i = 0; i < valueof(as); i = i + 1) begin
+            for(Integer j = 0; j < valueof(SizeOf#(ix)); j = j + 1) begin
+                if(tags[i][j] == tag) valid[i][j][2] <= False;
+            end
+        end
     endmethod
 endmodule

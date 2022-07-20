@@ -83,16 +83,20 @@ module mkBtbTaggedCID(NextAddrPred#(hashSz_))
         CompressedTarget shortMask = -1;
         CapMem mask = ~zeroExtend(shortMask);
         if ((pc&mask) == (nextPc&mask))
-            compressedRecords[getBank(pc)].update(lookupKey(pc), VnDnC{v:taken, d:truncate(nextPc), c:rg_cid});
+            compressedRecords[getBank(pc)].update(lookupKey(pc), rg_cid, VnD{v:taken, d:truncate(nextPc)});
         else
-            fullRecords[getBank(pc)].update(lookupKey(pc), VnDnC{v:taken, d:nextPc, c:rg_cid});
+            fullRecords[getBank(pc)].update(lookupKey(pc), rg_cid, VnD{v:taken, d:nextPc});
     endrule
 
     method Action setCID(CompIndex cid);
         rg_cid <= cid;
     endmethod
     method Action shootdown(CompIndex cid);
-        $display("shootdown not implemented");
+        $display("shootdown BtbTaggedCID");
+        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
+            fullRecords[i].shootdownTag(rg_cid);
+            compressedRecords[i].shootdownTag(rg_cid);
+        end
     endmethod
 
     method Action put_pc(CapMem pc);
@@ -113,9 +117,9 @@ module mkBtbTaggedCID(NextAddrPred#(hashSz_))
         Vector#(SupSizeX2, Maybe#(CapMem)) ppcs = replicate(Invalid);
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             if (fullRecords[i].lookupRead matches tagged Valid .r)
-                ppcs[i] = (r.v && r.c == rg_cid) ? Valid(r.d):Invalid;
+                if(r.value.v && r.tag == rg_cid) ppcs[i] = tagged Valid r.value.d;
             if (compressedRecords[i].lookupRead matches tagged Valid .r)
-                ppcs[i] = (r.v && r.c == rg_cid) ? Valid({truncateLSB(addr_reg),r.d}):Invalid;
+                if(r.value.v && r.tag == rg_cid) ppcs[i] = tagged Valid ({truncateLSB(addr_reg),r.value.d});
         end
         ppcs = rotateBy(ppcs,unpack(-getBtbAddr(addr_reg).bank)); // Rotate firstBank down to zeroeth element.
         return ppcs;

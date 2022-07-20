@@ -88,12 +88,6 @@ typedef struct {
     data d;
 } VnD#(type data) deriving(Bits, Eq, FShow);
 
-typedef struct {
-    Bool v;
-    data d;
-    c_type c;
-} VnDnC#(type data, type c_type) deriving (Bits, Eq, FShow);
-
 typedef 16 HashSize;
 
 function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));

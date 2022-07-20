@@ -31,10 +31,10 @@ import Btb_IFC::*;
 import CHERICC_Fat::*;
 import ProcTypes::*;
 
-typedef MapSplit#(HashedTag#(HashSize), BtbIndex, VnDnC#(CompressedTarget, CompIndex), BtbAssociativity) MapLossyBRAMCompressedRecordsCID;
+typedef MapSplitCoreTagged#(HashedTag#(HashSize), BtbIndex, CompIndex, VnD#(CompressedTarget), BtbAssociativity, BtbAssociativity) MapLossyBRAMCompressedRecordsCID;
 
 (* synthesize *)
 module mkMapLossyBRAMCompressedRecordsCID(MapLossyBRAMCompressedRecordsCID);
-    MapLossyBRAMCompressedRecordsCID m <- mkMapLossyBRAM;
+    MapLossyBRAMCompressedRecordsCID m <- mkMapLossyBRAMCoreTagged;
     return m;
 endmodule
