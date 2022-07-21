@@ -851,6 +851,7 @@ module mkCore#(CoreId coreId)(Core);
         cidReport.setCID(cid);
     endrule
 
+`ifdef CID_SIM
     rule doSetFileName(fp == InvalidFile);
         File tfp <- $fopen("cid_log.txt", "w+");
         if (tfp == InvalidFile) begin
@@ -861,6 +862,7 @@ module mkCore#(CoreId coreId)(Core);
         cidReport.setFP(tfp);
         fp <= tfp;
     endrule
+`endif
 
     rule doShootdown(cidWire.wget() matches tagged Valid .cid);
         fetchStage.shootdown(cid);
