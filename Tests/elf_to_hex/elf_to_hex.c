@@ -16,6 +16,8 @@
 #ifdef __APPLE__
 #include <libelf/gelf.h>
 #include <vector>
+#else
+#include <gelf.h>
 #endif
 
 
