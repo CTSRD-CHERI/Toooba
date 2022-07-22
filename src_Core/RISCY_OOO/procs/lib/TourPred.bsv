@@ -131,9 +131,6 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
     Ehr#(TAdd#(1, SupSize), SupCnt) predCnt <- mkEhr(0);
     Ehr#(TAdd#(1, SupSize), Bit#(SupSize)) predRes <- mkEhr(0);
 
-    Reg#(Bool) sd_reg <- mkReg(False);
-    //Reg
-
     function PCIndex getPCIndex(Addr pc);
         return truncate(pc >> 1);
     endfunction
@@ -184,14 +181,13 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
                         pcIndex: pcIndex
                     }
                 };
-                if (sd_reg) ret_val = unpack(0);
                 return ret_val;
             endmethod
         endinterface);
     end
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule canonGlobalHist(!sd_reg);
+    rule canonGlobalHist;
         gHistReg.addHistory(predRes[valueof(SupSize)], predCnt[valueof(SupSize)]);
         // Buffer useLocalVec
         // Reproduce next history; this would ideally be done in GlobalBrHistReg to avoid duplicating logic.
@@ -205,11 +201,6 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
         predCnt[valueof(SupSize)] <= 0;
     endrule
 
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule doShootdown(sd_reg);
-        
-    endrule
-
     method nextPc = pc_reg._write;
 
     interface pred = predIfc;
@@ -217,31 +208,33 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
 `ifdef CID
     method Action setCID(CompIndex cid) = noAction;
     method Action shootdown(CompIndex cid);
-        sd_reg <= True;
+        localHistTab.shootdown();
+        localBht.shootdown();
+        gHistReg.shootdown();
+        globalBht.shootdown();
+        choiceBht.shootdown();
     endmethod
 `endif
 
     method Action update(Bool taken, TourTrainInfo train, Bool mispred);
         // update history if mispred
-        if(!sd_reg) begin
-            if(mispred) begin
-                TourGlobalHist newHist = truncateLSB({pack(taken), train.globalHist});
-                gHistReg.redirect(newHist);
-            end
-            // update local history (assume only 1 branch for an PC in flight)
-            localHistTab.upd(train.pcIndex, truncateLSB({pack(taken), train.localHist}));
-            // update local sat cnt
-            let localCnt = localBht.sub(train.localHist);
-            localBht.upd(train.localHist, updateCnt(localCnt, taken));
-            // update global sat cnt
-            let globalCnt = globalBht.sub(train.globalHist);
-            globalBht.upd(train.globalHist, updateCnt(globalCnt, taken));
-            // update choice cnt
-            if(train.globalTaken != train.localTaken) begin
-                Bool useLocal = train.localTaken == taken;
-                let choiceCnt = choiceBht.sub(train.globalHist);
-                choiceBht.upd(train.globalHist, updateCnt(choiceCnt, useLocal));
-            end
+        if(mispred) begin
+            TourGlobalHist newHist = truncateLSB({pack(taken), train.globalHist});
+            gHistReg.redirect(newHist);
+        end
+        // update local history (assume only 1 branch for an PC in flight)
+        localHistTab.upd(train.pcIndex, truncateLSB({pack(taken), train.localHist}));
+        // update local sat cnt
+        let localCnt = localBht.sub(train.localHist);
+        localBht.upd(train.localHist, updateCnt(localCnt, taken));
+        // update global sat cnt
+        let globalCnt = globalBht.sub(train.globalHist);
+        globalBht.upd(train.globalHist, updateCnt(globalCnt, taken));
+        // update choice cnt
+        if(train.globalTaken != train.localTaken) begin
+            Bool useLocal = train.localTaken == taken;
+            let choiceCnt = choiceBht.sub(train.globalHist);
+            choiceBht.upd(train.globalHist, updateCnt(choiceCnt, useLocal));
         end
     endmethod
 
