@@ -963,10 +963,12 @@ module mkFetchStage(FetchStage);
     method Action setCID(CompIndex cid);
         ras.setCID(cid);
         nextAddrPred.setCID(cid);
+        dirPred.setCID(cid);
     endmethod
     method Action shootdown(CompIndex cid);
         ras.shootdown(cid);
         nextAddrPred.shootdown(cid);
+        dirPred.shootdown(cid);
     endmethod
 `endif
 
