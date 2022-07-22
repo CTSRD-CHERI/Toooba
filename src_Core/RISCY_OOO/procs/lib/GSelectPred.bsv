@@ -153,6 +153,7 @@ module mkGSelectPred(DirPredictor#(GSelectTrainInfo));
 
 `ifdef CID
     method Action setCID(CompIndex cid) = noAction;
+    method Action shootdown(CompIndex cid) = noAction;
 `endif
 
     method Action update(Bool taken, GSelectTrainInfo train, Bool mispred);

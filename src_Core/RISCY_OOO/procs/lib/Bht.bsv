@@ -83,6 +83,7 @@ module mkBht(DirPredictor#(BhtTrainInfo));
 
 `ifdef CID
     method Action setCID(CompIndex cid) = noAction;
+    method Action shootdown(CompIndex cid) = noAction;
 `endif
     method Action update(Bool taken, BhtTrainInfo train, Bool mispred);
         let index = train;

@@ -152,6 +152,7 @@ module mkGSharePred(DirPredictor#(GShareTrainInfo));
 
 `ifdef CID
     method Action setCID(CompIndex cid) = noAction;
+    method Action shootdown(CompIndex cid) = noAction;
 `endif
 
     method Action update(Bool taken, GShareTrainInfo train, Bool mispred);
