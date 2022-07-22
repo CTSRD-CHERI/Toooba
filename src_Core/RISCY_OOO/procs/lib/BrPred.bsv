@@ -5,6 +5,7 @@
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Peter Rugg
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2022 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -84,6 +85,7 @@ interface DirPredictor#(type trainInfoT);
     interface Vector#(SupSize, DirPred#(trainInfoT)) pred;
 `ifdef CID
     method Action setCID(CompIndex cid);
+    method Action shootdown(CompIndex cid);
 `endif
     method Action update(Bool taken, trainInfoT train, Bool mispred);
     method Action flush;

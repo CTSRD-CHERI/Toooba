@@ -33,6 +33,9 @@ interface GlobalBrHistReg#(numeric type histLen);
     // taken[num-1] is the latest branch
     method Action addHistory(Bit#(SupSize) taken, Bit#(TLog#(TAdd#(SupSize, 1))) num);
     method Action redirect(Bit#(histLen) newHist);
+`ifdef CID
+    method Action shootdown();
+`endif
 endinterface
 
 typedef struct {
@@ -48,17 +51,36 @@ module mkGlobalBrHistReg(GlobalBrHistReg#(histLen));
     RWire#(AddHistory) addHist <- mkRWire; // used by addHistory
     RWire#(Bit#(histLen)) redirectHist <- mkRWire; // used by redirect
 
+`ifdef CID
+    // wire to delete history
+    RWire#(Bool) sdHist <- mkRWire; // used by shootdown
+`endif
+
     (* fire_when_enabled, no_implicit_conditions *)
+`ifdef CID
+    rule canon_redirect(!isValid(sdHist.wget) && isValid(redirectHist.wget));
+`else
     rule canon_redirect(isValid(redirectHist.wget));
+`endif
         hist <= validValue(redirectHist.wget);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
+`ifdef CID
+    rule canon_addHistory(!isValid(sdHist.wget) && !isValid(redirectHist.wget) && isValid(addHist.wget));
+`else
     rule canon_addHistory(!isValid(redirectHist.wget) && isValid(addHist.wget));
+`endif
         let x = validValue(addHist.wget);
         // shift into hist from MSB
         hist <= truncate({x.taken, hist} >> x.num);
     endrule
+
+`ifdef CID
+    rule canon_shootdown(isValid(sdHist.wget));
+        hist <= 0;
+    endrule
+`endif
     
     method history = hist;
 
@@ -72,4 +94,10 @@ module mkGlobalBrHistReg(GlobalBrHistReg#(histLen));
     method Action redirect(Bit#(histLen) newHist);
         redirectHist.wset(newHist);
     endmethod
+
+`ifdef CID
+    method Action shootdown();
+        sdHist.wset(True);
+    endmethod
+`endif
 endmodule

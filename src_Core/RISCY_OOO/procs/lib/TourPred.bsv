@@ -4,7 +4,7 @@
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jonathan Woodruff
-//     Copyright (c) 2021 Franz Fuchs
+//     Copyright (c) 2021-2022 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -60,6 +60,8 @@ typedef 12 TourGlobalHistSz;
 typedef 10 TourLocalHistSz;
 typedef 10 PCIndexSz;
 
+typedef 0 DefValue;
+
 typedef Bit#(TourGlobalHistSz) TourGlobalHist;
 typedef Bit#(TourLocalHistSz) TourLocalHist;
 typedef Bit#(PCIndexSz) PCIndex;
@@ -101,6 +103,9 @@ module mkTourPredPartition(DirPredictor#(TourTrainInfo));
     method Action setCID(CompIndex cid);
         rg_cid <= cid;
     endmethod
+    method Action shootdown(CompIndex cid);
+        preds[cid].shootdown(cid);
+    endmethod
     method update = preds[rg_cid].update;
     method flush = preds[rg_cid].flush;
     method flush_done = preds[rg_cid].flush_done;
@@ -109,15 +114,15 @@ endmodule
 
 module mkTourPredCore(DirPredictor#(TourTrainInfo));
     // local history: MSB is the latest branch
-    RegFile#(PCIndex, TourLocalHist) localHistTab <- mkRegFileWCF(0, maxBound);
+    RegFileSD#(PCIndex, TourLocalHist) localHistTab <- mkRegFileWCFSD(0, maxBound, fromInteger(valueOf(DefValue)));
     // local sat counters
-    RegFile#(TourLocalHist, Int#(3)) localBht <- mkRegFileWCF(0, maxBound);
+    RegFileSD#(TourLocalHist, Int#(3)) localBht <- mkRegFileWCFSD(0, maxBound, fromInteger(valueOf(DefValue)));
     // global history reg
     TourGHistReg gHistReg <- mkTourGHistReg;
     // global sat counters
-    RegFile#(TourGlobalHist, Int#(2)) globalBht <- mkRegFileWCF(0, maxBound);
+    RegFileSD#(TourGlobalHist, Int#(2)) globalBht <- mkRegFileWCFSD(0, maxBound, fromInteger(valueOf(DefValue)));
     // choice sat counters: large (taken) -- use local, small (not taken) -- use global
-    RegFile#(TourGlobalHist, Int#(2)) choiceBht <- mkRegFileWCF(0, maxBound);
+    RegFileSD#(TourGlobalHist, Int#(2)) choiceBht <- mkRegFileWCFSD(0, maxBound, fromInteger(valueOf(DefValue)));
 
     // Lookup PC
     Reg#(Addr) pc_reg <- mkRegU;
@@ -125,6 +130,9 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
     // EHR to record predict results in this cycle
     Ehr#(TAdd#(1, SupSize), SupCnt) predCnt <- mkEhr(0);
     Ehr#(TAdd#(1, SupSize), Bit#(SupSize)) predRes <- mkEhr(0);
+
+    Reg#(Bool) sd_reg <- mkReg(False);
+    //Reg
 
     function PCIndex getPCIndex(Addr pc);
         return truncate(pc >> 1);
@@ -166,7 +174,7 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
                 predRes[i] <= res;
 
                 // return
-                return DirPredResult {
+                let ret_val = DirPredResult {
                     taken: taken,
                     train: TourTrainInfo {
                         globalHist: curGHist >> predCnt[i],
@@ -176,12 +184,14 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
                         pcIndex: pcIndex
                     }
                 };
+                if (sd_reg) ret_val = unpack(0);
+                return ret_val;
             endmethod
         endinterface);
     end
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule canonGlobalHist;
+    rule canonGlobalHist(!sd_reg);
         gHistReg.addHistory(predRes[valueof(SupSize)], predCnt[valueof(SupSize)]);
         // Buffer useLocalVec
         // Reproduce next history; this would ideally be done in GlobalBrHistReg to avoid duplicating logic.
@@ -195,36 +205,76 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
         predCnt[valueof(SupSize)] <= 0;
     endrule
 
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule doShootdown(sd_reg);
+        
+    endrule
+
     method nextPc = pc_reg._write;
 
     interface pred = predIfc;
 
 `ifdef CID
     method Action setCID(CompIndex cid) = noAction;
+    method Action shootdown(CompIndex cid);
+        sd_reg <= True;
+    endmethod
 `endif
 
     method Action update(Bool taken, TourTrainInfo train, Bool mispred);
         // update history if mispred
-        if(mispred) begin
-            TourGlobalHist newHist = truncateLSB({pack(taken), train.globalHist});
-            gHistReg.redirect(newHist);
-        end
-        // update local history (assume only 1 branch for an PC in flight)
-        localHistTab.upd(train.pcIndex, truncateLSB({pack(taken), train.localHist}));
-        // update local sat cnt
-        let localCnt = localBht.sub(train.localHist);
-        localBht.upd(train.localHist, updateCnt(localCnt, taken));
-        // update global sat cnt
-        let globalCnt = globalBht.sub(train.globalHist);
-        globalBht.upd(train.globalHist, updateCnt(globalCnt, taken));
-        // update choice cnt
-        if(train.globalTaken != train.localTaken) begin
-            Bool useLocal = train.localTaken == taken;
-            let choiceCnt = choiceBht.sub(train.globalHist);
-            choiceBht.upd(train.globalHist, updateCnt(choiceCnt, useLocal));
+        if(!sd_reg) begin
+            if(mispred) begin
+                TourGlobalHist newHist = truncateLSB({pack(taken), train.globalHist});
+                gHistReg.redirect(newHist);
+            end
+            // update local history (assume only 1 branch for an PC in flight)
+            localHistTab.upd(train.pcIndex, truncateLSB({pack(taken), train.localHist}));
+            // update local sat cnt
+            let localCnt = localBht.sub(train.localHist);
+            localBht.upd(train.localHist, updateCnt(localCnt, taken));
+            // update global sat cnt
+            let globalCnt = globalBht.sub(train.globalHist);
+            globalBht.upd(train.globalHist, updateCnt(globalCnt, taken));
+            // update choice cnt
+            if(train.globalTaken != train.localTaken) begin
+                Bool useLocal = train.localTaken == taken;
+                let choiceCnt = choiceBht.sub(train.globalHist);
+                choiceBht.upd(train.globalHist, updateCnt(choiceCnt, useLocal));
+            end
         end
     endmethod
 
     method flush = noAction;
     method flush_done = True;
+endmodule
+
+interface RegFileSD #(type index_t, type data_t);
+    method Action upd(index_t addr, data_t d);
+    method data_t sub(index_t addr);
+    method Action shootdown();
+endinterface
+
+module mkRegFileWCFSD#(index_t lo, index_t hi, data_t default_value)(RegFileSD#(index_t, data_t)) provisos (
+    Bits#(index_t, index_sz),
+    Bits#(data_t, data_sz),
+    Literal#(index_t),
+    PrimIndex#(index_t, a__));
+    
+    RegFile#(index_t, data_t) rf <- mkRegFileWCF(lo, hi);
+    Vector#(SizeOf#(index_t), Ehr#(2, Bool)) valids <- replicateM(mkEhr(False));
+
+    method Action upd(index_t addr, data_t d);
+        rf.upd(addr, d);
+        valids[addr][0] <= True;
+    endmethod
+
+    method data_t sub(index_t addr);
+        if(valids[addr][0]) return rf.sub(addr);
+        else return default_value;
+    endmethod
+
+    method Action shootdown();
+        writeVReg(getVEhrPort(valids, 1), replicate(False));
+    endmethod
 endmodule
