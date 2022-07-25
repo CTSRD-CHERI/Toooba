@@ -261,6 +261,7 @@ module mkTourPredSecure(DirPredictor#(TourTrainInfo));
 
 `ifdef CID
     method Action setCID(CompIndex cid) = noAction;
+    method Action shootdown(CompIndex cid) = noAction;
 `endif
 
     method Action update(Bool taken, TourTrainInfo train, Bool mispred);
