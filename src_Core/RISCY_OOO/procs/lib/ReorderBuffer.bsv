@@ -265,8 +265,8 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Reg#(IType)                                                     iType                <- mkRegU;
     Reg #(Maybe #(ArchRIndx))                                       rg_dst_reg           <- mkRegU;
 `ifdef CID
-    Reg #(Maybe #(ArchRIndx))                                       rg_rs1                  <- mkRegU;
-    Reg #(Maybe #(ArchRIndx))                                       rg_rs2                  <- mkRegU;
+    Reg #(Maybe #(ArchRIndx))                                       rg_rs1               <- mkRegU;
+    Reg #(Maybe #(ArchRIndx))                                       rg_rs2               <- mkRegU;
 `endif
 `ifdef INCLUDE_TANDEM_VERIF
     Reg #(Data)                                                     rg_dst_data          <- mkRegU;
