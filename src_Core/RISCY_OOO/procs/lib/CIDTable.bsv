@@ -61,10 +61,11 @@ module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
         let mcid = reduce(acid);
         $display("setNewCID - acid: ", fshow(acid), "; mcid: ", fshow(mcid));
         let entry = tab[mcid];
-        if(!entry.v && acid != entry.acid) begin
-            inIfc.shootdown(mcid);
+        if(acid != entry.acid) begin
             CIDTableEntry e = CIDTableEntry{acid: acid, v: True};
             tab[mcid] <= e;
+            // only if previously valid, we need to shootdown
+            if(entry.v) inIfc.shootdown(mcid);
         end
 
         $display("CIDTable:");
