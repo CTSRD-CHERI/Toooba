@@ -57,9 +57,9 @@ module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
     Vector#(CompNumber, Reg#(CIDTableEntry)) tab <- replicateM(mkReg(unpack(0)));
 
     method Action setNewCID(CapMem acid);
-        $display("setNewCID");
         rg_cur_cid <= acid;
         let mcid = reduce(acid);
+        $display("setNewCID - acid: ", fshow(acid), "; mcid: ", fshow(mcid));
         let entry = tab[mcid];
         if(!entry.v && acid != entry.acid) begin
             inIfc.shootdown(mcid);
