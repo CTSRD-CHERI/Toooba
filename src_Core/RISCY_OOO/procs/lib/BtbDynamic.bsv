@@ -31,8 +31,7 @@
 
 
 
- // TODO: ADAPT TO NEW CHANGES FROM JON
- // THIS IS CURRENTLY NOT FUNCTIONAL
+ // TODO: Needs to be re-implemented
 
 `ifdef CID
 import Types::*;

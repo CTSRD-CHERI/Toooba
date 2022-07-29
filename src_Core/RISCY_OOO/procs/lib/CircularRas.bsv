@@ -60,6 +60,8 @@ typedef struct {
         Age age;
 } SegAge deriving (Bits, Eq, FShow);
 
+// TODO: needs to be re-implemented
+
 /*
 module mkCircularRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(Entries)), Entries),
     NumAlias#(TAdd#(SupSize, 1), nStackIFC));

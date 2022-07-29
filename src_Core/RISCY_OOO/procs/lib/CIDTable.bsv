@@ -49,6 +49,8 @@ typedef struct {
     Bool v;
 } CIDTableEntry deriving (Bits, Eq, FShow);
 
+// NOTE: rnw mentioned that a fully associative table might be needed due to hashing side channels
+
 module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
 
     Reg#(CapMem) rg_cur_cid <- mkReg(0);
