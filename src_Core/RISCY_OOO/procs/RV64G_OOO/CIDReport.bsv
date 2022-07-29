@@ -72,20 +72,28 @@ module mkCIDReport(CIDReport);
     endmethod
 
     method Action reportPred(ToReorderBuffer x);
+`ifdef CID_SIM
         $display("reportPred");
+`endif
         let ppc = x.ppc_vaddr_csrData.PPC;
         let addr = getAddr(ppc);
         Addr a = getInvalidAddr();
         if (x.iType == CJALR && addr != 0 && addr != a) begin
+`ifdef CID_SIM
             $display("CJALR instruction");
+`endif
             log.logPrediction(rg_cid, x);
         end
     endmethod
 
     method Action reportInstr(ToReorderBuffer x);
+`ifdef CID_SIM
         $display("reportInstr ", fshow(x));
+`endif
         if (x.iType == CJALR || x.iType == Jr) begin
+`ifdef CID_SIM
             $display("CJALR instruction");
+`endif
             log.logCommittedInstr(rg_cid, x);
         end
     endmethod
