@@ -655,10 +655,10 @@ module mkFetchStage(FetchStage);
          end
    endrule: doDecodeFlush
 
-   rule printStuff;
+   /*rule printStuff;
       $display("main_epoch_spec.first.spec_bits: %x, main_epoch_spec.notEmpty: %x, isCurrent: %x, f_main_epoch: %x, next_epoch: %x",
                 main_epoch_spec.first.spec_bits, main_epoch_spec.notEmpty, isCurrent(f32d.deqS[0].first), f_main_epoch, f32d.deqS[0].first.main_epoch);
-   endrule
+   endrule*/
 
    Vector#(SupSize, Maybe#(InstrFromFetch3)) decodeIn = replicate(Invalid);
    // Express the incoming fragments as a vector of maybes.
@@ -1002,7 +1002,7 @@ module mkFetchStage(FetchStage);
 `endif
     );
         //if (verbose)
-        $display("Redirect: newpc %h, old f_main_epoch %d, new f_main_epoch %d, specBits %x",new_pc,f_main_epoch,f_main_epoch+1, specBits);
+        //$display("Redirect: newpc %h, old f_main_epoch %d, new f_main_epoch %d, specBits %x",new_pc,f_main_epoch,f_main_epoch+1, specBits);
         pc_reg[pc_redirect_port] <= new_pc;
 `ifdef RVFI_DII
         dii_pid_reg[pc_redirect_port] <= dii_pid;
@@ -1055,7 +1055,7 @@ module mkFetchStage(FetchStage);
         if (iType == Br) begin
             // Train the direction predictor for all branches
             dirPred.update(taken, trainInfo.dir, mispred);
-            $display("Branch train PC: %x, taken: %x, mispred: %x", getAddr(pc), taken, mispred);
+            //$display("Branch train PC: %x, taken: %x, mispred: %x", getAddr(pc), taken, mispred);
         end
         // train next addr pred when mispred
         if(mispred) begin

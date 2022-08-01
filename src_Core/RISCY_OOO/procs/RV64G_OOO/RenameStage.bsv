@@ -837,9 +837,9 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         return rdy[idx] ? Valid (idx) : Invalid;
     endfunction
 
-    rule displayRenameCount;
+    /*rule displayRenameCount;
         $display("%d : rc:%d", cur_cycle, supRenameCnt);
-    endrule
+    endrule*/
 
     // rename correct path inst
     rule doRenaming(
