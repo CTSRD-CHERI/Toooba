@@ -720,6 +720,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
    Reg #(Data) rg_tdata3  <- mkConfigRegU;
 `ifdef CID
    Reg #(Data) rg_cid     <- mkConfigRegU;
+   Reg #(Data) rg_regusage     <- mkConfigRegU;
 `endif
 
 `ifdef INCLUDE_GDB_CONTROL
@@ -917,6 +918,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrTDATA3:     rg_tdata3;
 `ifdef CID
             csrAddrCID:        rg_cid;
+            csrAddrREGUSAGE:   rg_regusage;
 `endif
 
 `ifdef INCLUDE_GDB_CONTROL

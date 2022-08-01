@@ -165,5 +165,6 @@
 `endif
 
 `ifdef CID
-`CSR(CID,         12'h810) // random number for CID
+`CSR(CID,         12'h810) // random CSR number for CID
+`CSR(REGUSAGE,         12'h811) // random CSR number for register usage
 `endif

@@ -1128,6 +1128,9 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         // CHERI-specific counters
         SupCnt ldCapCnt = 0;
         SupCnt stCapCnt = 0;
+`ifdef CID
+        Data reg_usage = 0;
+`endif
 
 `ifdef RVFI
         Rvfi_Traces rvfis = replicate(tagged Invalid);
@@ -1289,6 +1292,32 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                         end
                     endcase
                     if (opcode == opcMiscMem && funct3 == fnFENCE) fenceCnt = fenceCnt + 1;
+`ifdef CID
+                    Vector#(DataSz, Bit#(1)) rg_use = unpack(0);
+                    if(x.dst matches tagged Valid .d) begin
+                        if(d matches tagged Gpr .g) rg_use[g] = 1;
+                        if(d matches tagged Fpu .f) begin
+                            Bit#(TLog#(DataSz)) idxF = zeroExtend(f) + 32;
+                            rg_use[idxF] = 1;
+                        end
+                    end
+                    if(x.rs1 matches tagged Valid .r1) begin
+                        if(r1 matches tagged Gpr .g) rg_use[g] = 1;
+                        if(r1 matches tagged Fpu .f) begin
+                            Bit#(TLog#(DataSz)) idxF = zeroExtend(f) + 32;
+                            rg_use[idxF] = 1;
+                        end
+                    end
+                    if(x.rs2 matches tagged Valid .r2) begin
+                        if(r2 matches tagged Gpr .g) rg_use[g] = 1;
+                        if(r2 matches tagged Fpu .f) begin
+                            Bit#(TLog#(DataSz)) idxF = zeroExtend(f) + 32;
+                            rg_use[idxF] = 1;
+                        end
+                    end
+                    reg_usage = reg_usage | pack(rg_use);
+`endif
+
                 end
             end
 `ifdef PERFORMANCE_MONITORING
@@ -1307,6 +1336,10 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 
         // incr inst cnt
         csrf.incInstret(comInstCnt);
+
+`ifdef CID
+        csrf.csrInstWr(csrAddrREGUSAGE, reg_usage);
+`endif
 
 `ifdef RENAME_DEBUG
         // set rename error
