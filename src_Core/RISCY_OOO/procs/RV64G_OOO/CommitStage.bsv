@@ -923,7 +923,6 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                 csr_data = getAddr(d);
 `ifdef CID
                 if(csr_idx == csrAddrCID) begin
-                    $display("csrAddrCID");
                     inIfc.setNewCID(d);
                 end
 `endif

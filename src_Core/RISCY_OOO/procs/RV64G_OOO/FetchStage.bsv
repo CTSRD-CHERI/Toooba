@@ -822,10 +822,10 @@ module mkFetchStage(FetchStage);
                      end
                   end
                   trainInfo.ras <- ras.ras[i].pop(doPop);
-                  if(verbose) begin
+                  /*if(verbose) begin
                      $display("Branch prediction: ", fshow(dInst.iType), " ; ", fshow(pc), " ; ",
                               fshow(ppc), " ; ", fshow(nextPc));
-                  end
+                  end*/
 
 `ifdef NO_SPEC_STRAIGHT_PATH
                   // If we don't have a good guess about where we are going, don't proceed.
