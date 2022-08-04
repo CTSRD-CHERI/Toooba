@@ -102,7 +102,7 @@ BSC_COMPILATION_FLAGS += \
 # ================================================================
 # Runs simulation executable on ELF given by EXAMPLE
 
-EXAMPLE ?= /local/scratch/faf28/comp_benchmark/build/simple.out
+EXAMPLE ?= /local/scratch/faf28/Toooba/builds/RV64ACDFIMSUxCHERI_Toooba_bluesim/coremark.bin
 
 .PHONY: run_example
 run_example:
