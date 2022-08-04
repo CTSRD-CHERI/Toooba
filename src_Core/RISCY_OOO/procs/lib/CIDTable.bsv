@@ -29,6 +29,7 @@
 import CHERICC_Fat :: *;
 import ProcTypes :: *;
 import Vector :: *;
+import FIFOF::*;
 
 interface CIDTableInput;
     method Action shootdown(CompIndex cid);
@@ -42,6 +43,11 @@ endinterface
 function CompIndex reduce(CapMem acid);
     // currently a hash implementation
     return hash(acid);
+endfunction
+
+// TODO: implement correct version
+function CompIndex getRandomIndex();
+    return 0;
 endfunction
 
 typedef struct {
@@ -58,9 +64,29 @@ module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
     // used a direct mapped cache, where mcid is the index
     Vector#(CompNumber, Reg#(CIDTableEntry)) tab <- replicateM(mkReg(unpack(0)));
 
+    // FIFO for empty slots
+    FIFOF#(CompIndex) freeQ <- mkUGSizedFIFOF(valueOf(CompNumber));
+
+    // freeQ needs initialization
+    Reg#(Bool) inited <- mkReg(False);
+    Reg#(CompIndex) initIdx <- mkReg(0);
+
+    rule initFreeQ(!inited);
+        freeQ.enq(initIdx);
+        initIdx <= initIdx + 1;
+        if(initIdx == fromInteger(valueOf(CompNumber) - 1)) begin
+            inited <= True;
+        end
+    endrule
+
     method Action setNewCID(CapMem acid);
         rg_cur_cid <= acid;
-        let mcid = reduce(acid);
+        let mcid = 0;
+        if(freeQ.notEmpty) begin
+            mcid = freeQ.first;
+            freeQ.deq;
+        end
+        else mcid = getRandomIndex;
         $display("setNewCID - acid: ", fshow(acid), "; mcid: ", fshow(mcid));
         let entry = tab[mcid];
         if(acid != entry.acid) begin
