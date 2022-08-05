@@ -45,11 +45,6 @@ function CompIndex reduce(CapMem acid);
     return hash(acid);
 endfunction
 
-// TODO: implement correct version
-function CompIndex getRandomIndex();
-    return 0;
-endfunction
-
 typedef struct {
     CapMem acid;
     Bool v;
@@ -71,6 +66,9 @@ module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
     Reg#(Bool) inited <- mkReg(False);
     Reg#(CompIndex) initIdx <- mkReg(0);
 
+    // "random" cycle count
+    Reg#(CompIndex) count <- mkReg(0);
+
     rule initFreeQ(!inited);
         freeQ.enq(initIdx);
         initIdx <= initIdx + 1;
@@ -79,7 +77,16 @@ module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
         end
     endrule
 
+    // will wrap around
+    rule doIncCycleCount;
+        count <= count + 1;
+    endrule
+
     method Action setNewCID(CapMem acid);
+        // TODO: implement correct version
+        function CompIndex getRandomIndex();
+            return 0;
+        endfunction
         rg_cur_cid <= acid;
         let mcid = 0;
         if(freeQ.notEmpty) begin
