@@ -87,20 +87,30 @@ module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
         function CompIndex getRandomIndex();
             return 0;
         endfunction
+
+        function Maybe#(CompIndex) findEntry(CapMem a);
+            Maybe#(CompIndex) ret = Invalid;
+            for(Integer i = 0; i < valueOf(CompNumber); i = i + 1) begin
+                let e = tab[i];
+                if(e.v && e.acid == a) ret = tagged Valid (fromInteger(i));
+            end
+            return ret;
+        endfunction
         rg_cur_cid <= acid;
-        let mcid = 0;
-        if(freeQ.notEmpty) begin
-            mcid = freeQ.first;
-            freeQ.deq;
-        end
-        else mcid = getRandomIndex;
-        $display("setNewCID - acid: ", fshow(acid), "; mcid: ", fshow(mcid));
-        let entry = tab[mcid];
-        if(acid != entry.acid) begin
+        let mcid_m = findEntry(acid);
+        if(mcid_m matches tagged Invalid) begin
+            CompIndex mcid = 0;
+            if(freeQ.notEmpty) begin
+                mcid = freeQ.first;
+                freeQ.deq;
+            end
+            else begin
+                mcid = getRandomIndex;
+                inIfc.shootdown(mcid);
+            end
             CIDTableEntry e = CIDTableEntry{acid: acid, v: True};
             tab[mcid] <= e;
-            // only if previously valid, we need to shootdown
-            if(entry.v) inIfc.shootdown(mcid);
+            $display("setNewCID - acid: ", fshow(acid), "; mcid: ", fshow(mcid));
         end
 
         $display("CIDTable:");
