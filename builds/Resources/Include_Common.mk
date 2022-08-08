@@ -54,13 +54,20 @@ CORE_DIRS = $(REPO)/src_Core/CPU:$(REPO)/src_Core/ISA:$(REPO)/src_Core/Core:$(RE
 
 TESTBENCH_DIRS = $(REPO)/src_Testbench/Top:$(REPO)/src_Testbench/SoC
 
-BLUESTUFF_DIRS = $(REPO)/libs/BlueStuff:$(REPO)/libs/BlueStuff/AXI:$(REPO)/libs/BlueStuff/BlueUtils:$(REPO)/libs/BlueStuff/BlueBasics
+BLUESTUFFDIR = $(REPO)/libs/BlueStuff
+BLUEAXI4DIR = $(BLUESTUFFDIR)/BlueAXI4
+BLUEAXI4DIRS = $(BLUEAXI4DIR):$(BLUEAXI4DIR)/AXI4:$(BLUEAXI4DIR)/AXI4Lite:$(BLUEAXI4DIR)/AXI4Stream:$(BLUEAXI4DIR)/BlueUnixBridges
+BLUEBASICSDIR = $(BLUESTUFFDIR)/BlueBasics
+BLUEUTILSDIR = $(BLUESTUFFDIR)/BlueUtils
+BLUESTUFF_DIRS = $(BLUESTUFFDIR):$(BLUEAXI4DIRS):$(BLUEBASICSDIR):$(BLUEUTILSDIR)
+
+WINDCOREIFC_DIRS = $(REPO)/libs/WindCoreInterface
 
 TAGCONTROLLER_DIRS = $(REPO)/libs/TagController/TagController:$(REPO)/libs/TagController/TagController/CacheCore
 
 RISCV_HPM_Events_DIR = $(REPO)/libs/RISCV_HPM_Events
 
-BSC_PATH = $(BLUESTUFF_DIRS):$(ALL_RISCY_DIRS):$(CORE_DIRS):$(TESTBENCH_DIRS):$(TAGCONTROLLER_DIRS):$(RISCV_HPM_Events_DIR):+
+BSC_PATH = $(BLUESTUFF_DIRS):$(WINDCOREIFC_DIRS):$(ALL_RISCY_DIRS):$(CORE_DIRS):$(TESTBENCH_DIRS):$(TAGCONTROLLER_DIRS):$(RISCV_HPM_Events_DIR):+
 
 # ----------------
 # Top-level file and module
@@ -91,13 +98,14 @@ BSC_COMPILATION_FLAGS += \
 	-D CID \
 	-D RAS_HIT_TRACING \
 	-D TSO_MM \
-	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D NO_SPEC_RSB_PUSH \
+	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D MELTDOWN_CF \
 	-keep-fires -aggressive-conditions -no-warn-action-shadowing -check-assert \
 	-suppress-warnings G0020 -steps-max-intervals 10000000   \
 	-steps-warn-interval 1000000 \
+	-promote-warnings T0054 \
 	+RTS -K128M -RTS  -show-range-conflict
 
-#	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D NO_SPEC_RSB_PUSH
+#	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D NO_SPEC_RSB_PUSH -D NO_SPEC_STL
 
 # ================================================================
 # Runs simulation executable on ELF given by EXAMPLE

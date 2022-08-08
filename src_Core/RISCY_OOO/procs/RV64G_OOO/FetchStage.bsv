@@ -921,10 +921,6 @@ module mkFetchStage(FetchStage);
        dirPred.nextPc(decode_pc_reg[decode_pc_final_port]);
    endrule
 
-   rule displayRedirects;
-        $display("%d : dr: %d er: %d", cur_cycle, decode_redirect_count, execute_redirect_count);
-   endrule
-
     // train next addr pred: we use a wire to catch outputs of napTrainByDecQ.
     // This prevents napTrainByDecQ from clogging doDecode rule when
     // superscalar size is large
