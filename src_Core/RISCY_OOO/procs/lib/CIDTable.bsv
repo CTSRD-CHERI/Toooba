@@ -50,8 +50,6 @@ typedef struct {
     Bool v;
 } CIDTableEntry deriving (Bits, Eq, FShow);
 
-// NOTE: rnw mentioned that a fully associative table might be needed due to hashing side channels
-
 module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
 
     Reg#(CapMem) rg_cur_cid <- mkReg(0);
@@ -83,9 +81,9 @@ module mkCIDTable#(CIDTableInput inIfc)(CIDTable);
     endrule
 
     method Action setNewCID(CapMem acid);
-        // TODO: implement correct version
+        // cycle counter is the "pseudo random number generator"
         function CompIndex getRandomIndex();
-            return 0;
+            return count;
         endfunction
 
         function Maybe#(CompIndex) findEntry(CapMem a);
