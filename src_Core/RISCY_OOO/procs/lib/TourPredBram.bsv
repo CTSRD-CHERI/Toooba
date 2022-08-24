@@ -43,6 +43,7 @@ import Vector::*;
 import GlobalBrHistReg::*;
 import BrPred::*;
 import SDPMem::*;
+import RWBramCore::*;
 
 
 module mkTourPredBram(DirPredictor#(TourTrainInfo));
@@ -51,11 +52,11 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
     // global history reg
     TourGHistReg gHistReg <- mkTourGHistReg;
     // global sat counters
-    Vector#(SupSize, MEM2#(TourGlobalHist, Int#(2))) globalBhtBram <- replicateM(mkMEMNoFlow2);
+    Vector#(SupSize, RWBramCoreDual#(TourGlobalHist, Int#(2))) globalBhtBram <- replicateM(mkRWBramCoreDualUG);
     // choice sat counters: large (taken) -- use local, small (not taken) -- use global
-    Vector#(SupSize, MEM2#(TourGlobalHist, Int#(2))) choiceBhtBram <- replicateM(mkMEMNoFlow2);
+    Vector#(SupSize, RWBramCoreDual#(TourGlobalHist, Int#(2))) choiceBhtBram <- replicateM(mkRWBramCoreDualUG);
     // local sat counters
-    Vector#(SupSize, MEM2#(TourLocalHist, Int#(3))) localBhtBram <- replicateM(mkMEMNoFlow2);
+    Vector#(SupSize, RWBramCoreDual#(TourLocalHist, Int#(3))) localBhtBram <- replicateM(mkRWBramCoreDualUG);
 
     // Lookup PC
     Reg#(Addr) pc_reg <- mkRegU;
@@ -87,16 +88,16 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
         let globalTaken = updateInfo.globalTaken;
         let localHist = updateInfo.localHist;
         let globalHist = updateInfo.globalHist;
-        let localCnt = localBhtBram[0].readB.peek();
-        for(Integer i = 0; i < valueof(SupSize); i = i + 1) localBhtBram[i].write(localHist, updateCnt(localCnt, taken));
+        let localCnt = localBhtBram[0].rdRespB;
+        for(Integer i = 0; i < valueof(SupSize); i = i + 1) localBhtBram[i].wrReq(localHist, updateCnt(localCnt, taken));
         // update global sat cnt
-        let globalCnt = globalBhtBram[0].readB.peek();
-        for(Integer i = 0; i < valueof(SupSize); i = i + 1) globalBhtBram[i].write(globalHist, updateCnt(globalCnt, taken));
+        let globalCnt = globalBhtBram[0].rdRespB();
+        for(Integer i = 0; i < valueof(SupSize); i = i + 1) globalBhtBram[i].wrReq(globalHist, updateCnt(globalCnt, taken));
         // update choice cnt
         if(globalTaken != localTaken) begin
             Bool useLocal = localTaken == taken;
-            let choiceCnt = choiceBhtBram[0].readB.peek();
-            for(Integer i = 0; i < valueof(SupSize); i = i + 1) choiceBhtBram[i].write(globalHist, updateCnt(choiceCnt, useLocal));
+            let choiceCnt = choiceBhtBram[0].rdRespB();
+            for(Integer i = 0; i < valueof(SupSize); i = i + 1) choiceBhtBram[i].wrReq(globalHist, updateCnt(choiceCnt, useLocal));
         end
     endrule
 
@@ -104,16 +105,16 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         predIfc[i] = (interface DirPred;
             Vector#(SupSize, Bool) ulv;
-            for(Integer i = 0; i < valueof(SupSize); i = i + 1) ulv[i] = isTaken(choiceBhtBram[i].read.peek());
+            for(Integer i = 0; i < valueof(SupSize); i = i + 1) ulv[i] = isTaken(choiceBhtBram[i].rdRespA());
             Vector#(SupSize, Bool) ugv;
-            for(Integer i = 0; i < valueof(SupSize); i = i + 1) ugv[i] = isTaken(globalBhtBram[i].read.peek());
+            for(Integer i = 0; i < valueof(SupSize); i = i + 1) ugv[i] = isTaken(globalBhtBram[i].rdRespA());
             method ActionValue#(DirPredResult#(TourTrainInfo)) pred;
 
                 PCIndex pcIndex = getPCIndex(offsetPc(pc_reg, i));
                 // get local history & prediction
                 TourLocalHist localHist = localHistTab.sub(pcIndex);
 
-                Bool localTaken = isTaken(localBhtBram[i].read.peek());
+                Bool localTaken = isTaken(localBhtBram[i].rdRespA());
 
                 // get the global history
                 // all previous branch in this cycle must be not taken
@@ -164,9 +165,9 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
             // get local history & prediction
             TourLocalHist localHist = localHistTab.sub(pcIndex);
             TourGlobalHist nHist = truncate({predRes[valueof(SupSize)], curGHist} >> predCnt[valueof(SupSize)]);
-            globalBhtBram[i].read.put(nHist >> i);
-            choiceBhtBram[i].read.put(nHist >> i);
-            localBhtBram[i].read.put(localHist);
+            globalBhtBram[i].rdReqA(nHist >> i);
+            choiceBhtBram[i].rdReqA(nHist >> i);
+            localBhtBram[i].rdReqA(localHist);
         end
     endmethod
 
@@ -195,9 +196,9 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
         updateTaken <= taken;
         updateInfo <= train;
         // update local sat cnt
-        localBhtBram[0].readB.put(train.localHist);
-        globalBhtBram[0].readB.put(train.globalHist);
-        choiceBhtBram[0].readB.put(train.globalHist);
+        localBhtBram[0].rdReqB(train.localHist);
+        globalBhtBram[0].rdReqB(train.globalHist);
+        choiceBhtBram[0].rdReqB(train.globalHist);
 
     endmethod
 

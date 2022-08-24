@@ -45,6 +45,17 @@ interface RWBramCore#(type addrT, type dataT);
     method Action deqRdResp;
 endinterface
 
+interface RWBramCoreDual#(type addrT, type dataT);
+    method Action wrReq(addrT a, dataT d);
+    method Action rdReqA(addrT a);
+    method Action rdReqB(addrT a);
+    method dataT rdRespA;
+    method dataT rdRespB;
+`ifdef CID
+    method Action shootdown;
+`endif
+endinterface
+
 module mkRWBramCore(RWBramCore#(addrT, dataT)) provisos(
     Bits#(addrT, addrSz), Bits#(dataT, dataSz)
 );
@@ -100,4 +111,66 @@ module mkRWBramCoreUG(RWBramCore#(addrT, dataT)) provisos(
     method Action deqRdResp;
         noAction;
     endmethod
+endmodule
+
+module mkRWBramCoreDualUG(RWBramCoreDual#(addrT, dataT)) provisos(
+    Bits#(addrT, addrSz), Bits#(dataT, dataSz),
+    Eq#(addrT), Arith#(addrT), Literal#(dataT)
+);
+
+    BRAM_DUAL_PORT#(addrT, dataT) bramA <- mkBRAMCore2(valueOf(TExp#(addrSz)), False);
+    BRAM_DUAL_PORT#(addrT, dataT) bramB <- mkBRAMCore2(valueOf(TExp#(addrSz)), False);
+    BRAM_PORT#(addrT, dataT) wrPortA = bramA.a;
+    BRAM_PORT#(addrT, dataT) rdPortA = bramA.b;
+    BRAM_PORT#(addrT, dataT) wrPortB = bramB.a;
+    BRAM_PORT#(addrT, dataT) rdPortB = bramB.b;
+
+    RWire#(Tuple2#(addrT, dataT)) wwire <- mkRWire;
+    // used as initialisation as well
+    Reg#(Bool) sd_prog <- mkReg(True);
+    Reg#(addrT) counter <- mkReg(0);
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule canonWrite;
+        if(sd_prog) begin
+            wrPortA.put(True, counter, 0);
+            wrPortB.put(True, counter, 0);
+            counter <= counter + 1;
+            if (counter == 0) sd_prog <= False;
+        end
+        else if(wwire.wget() matches tagged Valid .t) begin
+            wrPortA.put(True, tpl_1(t), tpl_2(t));
+            wrPortB.put(True, tpl_1(t), tpl_2(t));
+        end
+    endrule
+
+
+    method Action wrReq(addrT a, dataT d);
+        wwire.wset(tuple2(a, d));
+        wrPortA.put(True, a, d);
+        wrPortB.put(True, a, d);
+    endmethod
+    
+    method Action rdReqA(addrT a);
+        rdPortA.put(False, a, ?);
+    endmethod
+
+    method Action rdReqB(addrT a);
+        rdPortB.put(False, a, ?);
+    endmethod
+
+    method dataT rdRespA;
+        return rdPortA.read;
+    endmethod
+
+    method dataT rdRespB;
+        return rdPortB.read;
+    endmethod
+
+`ifdef CID
+    method Action shootdown();
+        sd_prog <= True;
+    endmethod
+`endif
+
 endmodule
