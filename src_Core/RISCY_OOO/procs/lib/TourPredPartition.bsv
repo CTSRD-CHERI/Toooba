@@ -45,27 +45,24 @@ import BrPred::*;
 import SDPMem::*;
 import TourPredCore::*;
 import TourPredBram::*;
-import TourPredPartition::*;
-
-export TourLocalHistSz;
-export TourLocalHist;
-export TourGlobalHistSz;
-export TourGlobalHist;
-export TourTrainInfo(..);
-export TourGHistReg(..);
-export mkTourGHistReg;
-export mkTourPred;
-export PCIndexSz;
-export PCIndex;
 
 
-(* synthesize *)
-module mkTourPred(DirPredictor#(TourTrainInfo));
+
 `ifdef CID
-    let m <- mkTourPredPartition;
-    //let m <- mkTourPredBram;
-`else
-    let m <- mkTourPredCore;
-`endif
-    return m;
+(* synthesize *)
+module mkTourPredPartition(DirPredictor#(TourTrainInfo));
+    Vector#(CompNumber, DirPredictor#(TourTrainInfo)) preds <- replicateM(mkTourPredCore);
+    Reg#(CompIndex) rg_cid <- mkReg(0);
+    interface pred = preds[rg_cid].pred;
+    method nextPc = preds[rg_cid].nextPc;
+    method Action setCID(CompIndex cid);
+        rg_cid <= cid;
+    endmethod
+    method Action shootdown(CompIndex cid);
+        preds[cid].shootdown(cid);
+    endmethod
+    method update = preds[rg_cid].update;
+    method flush = preds[rg_cid].flush;
+    method flush_done = preds[rg_cid].flush_done;
 endmodule
+`endif
