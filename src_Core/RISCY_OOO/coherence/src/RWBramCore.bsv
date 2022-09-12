@@ -36,6 +36,7 @@
 
 import BRAMCore::*;
 import Fifos::*;
+import Ehr::*;
 
 interface RWBramCore#(type addrT, type dataT);
     method Action wrReq(addrT a, dataT d);
@@ -127,16 +128,16 @@ module mkRWBramCoreDualUG(RWBramCoreDual#(addrT, dataT)) provisos(
 
     RWire#(Tuple2#(addrT, dataT)) wwire <- mkRWire;
     // used as initialisation as well
-    Reg#(Bool) sd_prog <- mkReg(True);
+    Ehr#(2, Bool) sd_prog <- mkEhr(True);
     Reg#(addrT) counter <- mkReg(0);
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule canonWrite;
-        if(sd_prog) begin
+        if(sd_prog[0]) begin
             wrPortA.put(True, counter, 0);
             wrPortB.put(True, counter, 0);
             counter <= counter + 1;
-            if (counter == 0) sd_prog <= False;
+            if (counter == 0) sd_prog[0] <= False;
         end
         else if(wwire.wget() matches tagged Valid .t) begin
             wrPortA.put(True, tpl_1(t), tpl_2(t));
@@ -147,8 +148,6 @@ module mkRWBramCoreDualUG(RWBramCoreDual#(addrT, dataT)) provisos(
 
     method Action wrReq(addrT a, dataT d);
         wwire.wset(tuple2(a, d));
-        wrPortA.put(True, a, d);
-        wrPortB.put(True, a, d);
     endmethod
     
     method Action rdReqA(addrT a);
@@ -169,7 +168,7 @@ module mkRWBramCoreDualUG(RWBramCoreDual#(addrT, dataT)) provisos(
 
 `ifdef CID
     method Action shootdown();
-        sd_prog <= True;
+        sd_prog[1] <= True;
     endmethod
 `endif
 
