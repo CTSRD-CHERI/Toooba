@@ -100,14 +100,14 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
             for(Integer i = 0; i < valueof(SupSize); i = i + 1) choiceBhtBram[i].wrReq(globalHist, updateCnt(choiceCnt, useLocal));
         end
     endrule
+    Vector#(SupSize, Bool) ulv;
+    for(Integer i = 0; i < valueof(SupSize); i = i + 1) ulv[i] = isTaken(choiceBhtBram[i].rdRespA());
+    Vector#(SupSize, Bool) ugv;
+    for(Integer i = 0; i < valueof(SupSize); i = i + 1) ugv[i] = isTaken(globalBhtBram[i].rdRespA());
 
     Vector#(SupSize, DirPred#(TourTrainInfo)) predIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         predIfc[i] = (interface DirPred;
-            Vector#(SupSize, Bool) ulv;
-            for(Integer i = 0; i < valueof(SupSize); i = i + 1) ulv[i] = isTaken(choiceBhtBram[i].rdRespA());
-            Vector#(SupSize, Bool) ugv;
-            for(Integer i = 0; i < valueof(SupSize); i = i + 1) ugv[i] = isTaken(globalBhtBram[i].rdRespA());
             method ActionValue#(DirPredResult#(TourTrainInfo)) pred;
 
                 PCIndex pcIndex = getPCIndex(offsetPc(pc_reg, i));
