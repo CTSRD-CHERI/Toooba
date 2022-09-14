@@ -177,18 +177,20 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
 
 `ifdef CID
     method Action setCID(CompIndex cid) = noAction;
-    //method Action shootdown(CompIndex cid);
-    //    localHistTab.shootdown();
-    //    localBht.shootdown();
-    //    gHistReg.shootdown();
-    //    globalBht.shootdown();
-    //    choiceBht.shootdown();
-    //endmethod
+
+    method Action shootdown(CompIndex cid);
+        localHistTab.shootdown();
+        gHistReg.shootdown();
+        for(Integer i = 0; i < valueof(SupSize); i = i + 1) begin
+            localBhtBram[i].shootdown();
+            globalBhtBram[i].shootdown();
+            choiceBhtBram[i].shootdown();
+        end
+    endmethod
 `endif
 
     method Action update(Bool taken, TourTrainInfo train, Bool mispred);
         // update history if mispred
-        //$display("TourPredBram - update: taken = ", fshow(taken), "; train = ", fshow(train), "; mispred = ", fshow(mispred));
         if(mispred) begin
             TourGlobalHist newHist = truncateLSB({pack(taken), train.globalHist});
             gHistReg.redirect(newHist);
