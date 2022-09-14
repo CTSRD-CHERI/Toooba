@@ -105,12 +105,13 @@ BSC_COMPILATION_FLAGS += \
 	-promote-warnings T0054 \
 	+RTS -K128M -RTS  -show-range-conflict
 
-#	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D NO_SPEC_RSB_PUSH -D NO_SPEC_STL
+#	-show-schedule -sched-dot
+#	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D NO_SPEC_RSB_PUSH
 
 # ================================================================
 # Runs simulation executable on ELF given by EXAMPLE
 
-EXAMPLE ?= /local/scratch/faf28/Toooba/builds/RV64ACDFIMSUxCHERI_Toooba_bluesim/coremark.bin
+EXAMPLE ?= /Users/faf28/cheri/Toooba/builds/RV64ACDFIMSUxCHERI_Toooba_bluesim/coremark.bin
 
 .PHONY: run_example
 run_example:

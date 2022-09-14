@@ -41,6 +41,7 @@ import ProcTypes::*;
 import Vector::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
+import GlobalBrHistReg::*;
 
 (* noinline *)
 function Maybe#(CapMem) decodeBrPred( CapMem pc, DecodedInst dInst, Bool histTaken, Bool is_32b_inst);
@@ -91,3 +92,32 @@ interface DirPredictor#(type trainInfoT);
     method Action flush;
     method Bool flush_done;
 endinterface
+
+// 4KB tournament predictor
+
+typedef 12 TourGlobalHistSz;
+typedef 10 TourLocalHistSz;
+typedef 10 PCIndexSz;
+
+typedef 0 DefValue;
+
+typedef Bit#(TourGlobalHistSz) TourGlobalHist;
+typedef Bit#(TourLocalHistSz) TourLocalHist;
+typedef Bit#(PCIndexSz) PCIndex;
+
+typedef struct {
+    TourGlobalHist globalHist;
+    TourLocalHist localHist;
+    Bool globalTaken;
+    Bool localTaken;
+    PCIndex pcIndex;
+} TourTrainInfo deriving(Bits, Eq, FShow);
+
+// global history reg
+typedef GlobalBrHistReg#(TourGlobalHistSz) TourGHistReg;
+
+(* synthesize *)
+module mkTourGHistReg(TourGHistReg);
+    let m <- mkGlobalBrHistReg;
+    return m;
+endmodule

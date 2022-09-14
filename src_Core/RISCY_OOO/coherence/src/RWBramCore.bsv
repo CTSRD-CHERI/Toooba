@@ -36,6 +36,8 @@
 
 import BRAMCore::*;
 import Fifos::*;
+import Ehr::*;
+import ConfigReg::*;
 
 interface RWBramCore#(type addrT, type dataT);
     method Action wrReq(addrT a, dataT d);
@@ -43,6 +45,17 @@ interface RWBramCore#(type addrT, type dataT);
     method dataT rdResp;
     method Bool rdRespValid;
     method Action deqRdResp;
+endinterface
+
+interface RWBramCoreDual#(type addrT, type dataT);
+    method Action wrReq(addrT a, dataT d);
+    method Action rdReqA(addrT a);
+    method Action rdReqB(addrT a);
+    method dataT rdRespA;
+    method dataT rdRespB;
+`ifdef CID
+    method Action shootdown;
+`endif
 endinterface
 
 module mkRWBramCore(RWBramCore#(addrT, dataT)) provisos(
@@ -100,4 +113,75 @@ module mkRWBramCoreUG(RWBramCore#(addrT, dataT)) provisos(
     method Action deqRdResp;
         noAction;
     endmethod
+endmodule
+
+module mkRWBramCoreDualUG(RWBramCoreDual#(addrT, dataT)) provisos(
+    Bits#(addrT, addrSz), Bits#(dataT, dataSz),
+    Eq#(addrT), Arith#(addrT), Literal#(dataT), Bitwise#(addrT), FShow#(addrT)
+);
+
+    BRAM_DUAL_PORT#(addrT, dataT) bramA <- mkBRAMCore2(valueOf(TExp#(addrSz)), False);
+    BRAM_DUAL_PORT#(addrT, dataT) bramB <- mkBRAMCore2(valueOf(TExp#(addrSz)), False);
+    BRAM_PORT#(addrT, dataT) wrPortA = bramA.a;
+    BRAM_PORT#(addrT, dataT) rdPortA = bramA.b;
+    BRAM_PORT#(addrT, dataT) wrPortB = bramB.a;
+    BRAM_PORT#(addrT, dataT) rdPortB = bramB.b;
+
+    Reg#(addrT) readAddrA <- mkConfigRegU;
+    Reg#(addrT) readAddrB <- mkConfigRegU;
+    Reg#(addrT) writeAddr <- mkConfigRegU;
+    Reg#(dataT) writeData <- mkConfigRegU;
+
+    RWire#(Tuple2#(addrT, dataT)) wwire <- mkRWire;
+    // used as initialisation as well
+    Ehr#(2, Bool) sd_prog <- mkEhr(True);
+    Reg#(addrT) counter <- mkReg(0);
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule canonWrite;
+        if(sd_prog[0]) begin
+            wrPortA.put(True, counter, 0);
+            wrPortB.put(True, counter, 0);
+            counter <= counter + 1;
+            if (counter == ~0) sd_prog[0] <= False;
+        end
+        else if(wwire.wget() matches tagged Valid .t) begin
+            wrPortA.put(True, tpl_1(t), tpl_2(t));
+            wrPortB.put(True, tpl_1(t), tpl_2(t));
+        end
+    endrule
+
+
+    method Action wrReq(addrT a, dataT d);
+        wwire.wset(tuple2(a, d));
+        writeAddr <= a;
+        writeData <= d;
+        if(a == readAddrA) $display("A equal");
+        if(a == readAddrB) $display("B equal");
+    endmethod
+    
+    method Action rdReqA(addrT a);
+        rdPortA.put(False, a, ?);
+        readAddrA <= a;
+    endmethod
+
+    method Action rdReqB(addrT a);
+        rdPortB.put(False, a, ?);
+        readAddrB <= a;
+    endmethod
+
+    method dataT rdRespA;
+        return (readAddrA == writeAddr) ? writeData : rdPortA.read;
+    endmethod
+
+    method dataT rdRespB;
+        return (readAddrB == writeAddr) ? writeData : rdPortB.read;
+    endmethod
+
+`ifdef CID
+    method Action shootdown();
+        sd_prog[1] <= True;
+    endmethod
+`endif
+
 endmodule

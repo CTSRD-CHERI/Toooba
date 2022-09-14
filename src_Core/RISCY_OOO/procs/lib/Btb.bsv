@@ -57,11 +57,10 @@ export mkBtb;
 module mkBtb(NextAddrPred#(HashSize));
 `ifdef CID
     //let btb <- mkBtbDynamic;
-    //let btb <- mkBtbPartition;
+    let btb <- mkBtbPartition;
     //let btb <- mkBtbCoreCID(inIfc);
     //let btb <- mkBtbTaggedCID;
     //let btb <- mkBtbCore;
-    let btb <- mkBtbCore;
 `else
     let btb <- mkBtbCore;
 `endif
