@@ -42,8 +42,9 @@ import Ehr::*;
 import Vector::*;
 import GlobalBrHistReg::*;
 import BrPred::*;
-import SDPMem::*;
 import RWBramCore::*;
+import FIFO::*;
+import SpecialFIFOs::*;
 
 
 module mkTourPredBram(DirPredictor#(TourTrainInfo));
@@ -61,10 +62,8 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
     // Lookup PC
     Reg#(Addr) pc_reg <- mkRegU;
 
-    // registers/EHRs for two-cycle update
-    Ehr#(2, Bool) updateNeeded <- mkEhr(False);
-    Reg#(Bool) updateTaken <- mkReg(False);
-    Reg#(TourTrainInfo) updateInfo <- mkRegU;
+    FIFO#(Bool) updateTakenFF <- mkPipelineFIFO;
+    FIFO#(TourTrainInfo) updateInfoFF <- mkPipelineFIFO;
 
     // EHR to record predict results in this cycle
     Ehr#(TAdd#(1, SupSize), SupCnt) predCnt <- mkEhr(0);
@@ -81,9 +80,10 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
 
     TourGlobalHist curGHist = gHistReg.history; // global history: MSB is the latest branch
 
-    rule doUpdate(updateNeeded[0]);
-        updateNeeded[0] <= False;
-        let taken = updateTaken;
+    (* fire_when_enabled *)
+    rule doUpdate;
+        let taken = updateTakenFF.first;
+        let updateInfo = updateInfoFF.first;
         let localTaken = updateInfo.localTaken;
         let globalTaken = updateInfo.globalTaken;
         let localHist = updateInfo.localHist;
@@ -100,6 +100,7 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
             for(Integer i = 0; i < valueof(SupSize); i = i + 1) choiceBhtBram[i].wrReq(globalHist, updateCnt(choiceCnt, useLocal));
         end
     endrule
+
     Vector#(SupSize, Bool) ulv;
     for(Integer i = 0; i < valueof(SupSize); i = i + 1) ulv[i] = isTaken(choiceBhtBram[i].rdRespA());
     Vector#(SupSize, Bool) ugv;
@@ -186,15 +187,15 @@ module mkTourPredBram(DirPredictor#(TourTrainInfo));
 
     method Action update(Bool taken, TourTrainInfo train, Bool mispred);
         // update history if mispred
+        //$display("TourPredBram - update: taken = ", fshow(taken), "; train = ", fshow(train), "; mispred = ", fshow(mispred));
         if(mispred) begin
             TourGlobalHist newHist = truncateLSB({pack(taken), train.globalHist});
             gHistReg.redirect(newHist);
         end
         // update local history (assume only 1 branch for an PC in flight)
         localHistTab.upd(train.pcIndex, truncateLSB({pack(taken), train.localHist}));
-        updateNeeded[1] <= True;
-        updateTaken <= taken;
-        updateInfo <= train;
+        updateTakenFF.enq(taken);
+        updateInfoFF.enq(train);
         // update local sat cnt
         localBhtBram[0].rdReqB(train.localHist);
         globalBhtBram[0].rdReqB(train.globalHist);
