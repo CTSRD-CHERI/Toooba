@@ -36,7 +36,6 @@
 // SOFTWARE.
 
 import Types::*;
-//import TourPred::*;
 import ProcTypes::*;
 import RegFile::*;
 import Ehr::*;
@@ -44,7 +43,6 @@ import Vector::*;
 import GlobalBrHistReg::*;
 import BrPred::*;
 import SDPMem::*;
-//import TourPred::*;
 
 
 module mkTourPredCore(DirPredictor#(TourTrainInfo));
