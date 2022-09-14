@@ -43,19 +43,20 @@ import Vector::*;
 import GlobalBrHistReg::*;
 import BrPred::*;
 import SDPMem::*;
+import RegFileSD::*;
 
 
 module mkTourPredCore(DirPredictor#(TourTrainInfo));
     // local history: MSB is the latest branch
-    RegFileSD#(PCIndex, TourLocalHist) localHistTab <- mkRegFileWCFSD(0, maxBound, fromInteger(valueOf(DefValue)));
+    RegFileSD#(PCIndex, TourLocalHist) localHistTab <- mkRegFileSD(0, maxBound, fromInteger(valueOf(DefValue)));
     // local sat counters
-    RegFileSD#(TourLocalHist, Int#(3)) localBht <- mkRegFileWCFSD(0, maxBound, fromInteger(valueOf(DefValue)));
+    RegFileSD#(TourLocalHist, Int#(3)) localBht <- mkRegFileSD(0, maxBound, fromInteger(valueOf(DefValue)));
     // global history reg
     TourGHistReg gHistReg <- mkTourGHistReg;
     // global sat counters
-    RegFileSD#(TourGlobalHist, Int#(2)) globalBht <- mkRegFileWCFSD(0, maxBound, fromInteger(valueOf(DefValue)));
+    RegFileSD#(TourGlobalHist, Int#(2)) globalBht <- mkRegFileSD(0, maxBound, fromInteger(valueOf(DefValue)));
     // choice sat counters: large (taken) -- use local, small (not taken) -- use global
-    RegFileSD#(TourGlobalHist, Int#(2)) choiceBht <- mkRegFileWCFSD(0, maxBound, fromInteger(valueOf(DefValue)));
+    RegFileSD#(TourGlobalHist, Int#(2)) choiceBht <- mkRegFileSD(0, maxBound, fromInteger(valueOf(DefValue)));
 
     // Lookup PC
     Reg#(Addr) pc_reg <- mkRegU;
@@ -173,35 +174,4 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
 
     method flush = noAction;
     method flush_done = True;
-endmodule
-
-
-interface RegFileSD #(type index_t, type data_t);
-    method Action upd(index_t addr, data_t d);
-    method data_t sub(index_t addr);
-    method Action shootdown();
-endinterface
-
-module mkRegFileWCFSD#(index_t lo, index_t hi, data_t default_value)(RegFileSD#(index_t, data_t)) provisos (
-    Bits#(index_t, index_sz),
-    Bits#(data_t, data_sz),
-    Literal#(index_t),
-    PrimIndex#(index_t, a__));
-    
-    RegFile#(index_t, data_t) rf <- mkRegFileWCF(lo, hi);
-    Vector#(SizeOf#(index_t), Ehr#(2, Bool)) valids <- replicateM(mkEhr(False));
-
-    method Action upd(index_t addr, data_t d);
-        rf.upd(addr, d);
-        valids[addr][0] <= True;
-    endmethod
-
-    method data_t sub(index_t addr);
-        if(valids[addr][0]) return rf.sub(addr);
-        else return default_value;
-    endmethod
-
-    method Action shootdown();
-        writeVReg(getVEhrPort(valids, 1), replicate(False));
-    endmethod
 endmodule
