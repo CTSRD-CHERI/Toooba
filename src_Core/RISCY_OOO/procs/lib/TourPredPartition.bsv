@@ -42,7 +42,7 @@ import TourPredBram::*;
 `ifdef CID
 (* synthesize *)
 module mkTourPredPartition(DirPredictor#(TourTrainInfo));
-    Vector#(CompNumber, DirPredictor#(TourTrainInfo)) preds <- replicateM(mkTourPredCore);
+    Vector#(CompNumber, DirPredictor#(TourTrainInfo)) preds <- replicateM(mkTourPredBram);
     Reg#(CompIndex) rg_cid <- mkReg(0);
     interface pred = preds[rg_cid].pred;
     method nextPc = preds[rg_cid].nextPc;

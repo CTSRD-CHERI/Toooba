@@ -63,7 +63,6 @@ export PCIndex;
 module mkTourPred(DirPredictor#(TourTrainInfo));
 `ifdef CID
     let m <- mkTourPredPartition;
-    //let m <- mkTourPredBram;
 `else
     let m <- mkTourPredCore;
 `endif
