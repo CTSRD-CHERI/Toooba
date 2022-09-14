@@ -37,6 +37,7 @@
 import BRAMCore::*;
 import Fifos::*;
 import Ehr::*;
+import ConfigReg::*;
 
 interface RWBramCore#(type addrT, type dataT);
     method Action wrReq(addrT a, dataT d);
@@ -116,7 +117,7 @@ endmodule
 
 module mkRWBramCoreDualUG(RWBramCoreDual#(addrT, dataT)) provisos(
     Bits#(addrT, addrSz), Bits#(dataT, dataSz),
-    Eq#(addrT), Arith#(addrT), Literal#(dataT)
+    Eq#(addrT), Arith#(addrT), Literal#(dataT), Bitwise#(addrT), FShow#(addrT)
 );
 
     BRAM_DUAL_PORT#(addrT, dataT) bramA <- mkBRAMCore2(valueOf(TExp#(addrSz)), False);
@@ -125,6 +126,11 @@ module mkRWBramCoreDualUG(RWBramCoreDual#(addrT, dataT)) provisos(
     BRAM_PORT#(addrT, dataT) rdPortA = bramA.b;
     BRAM_PORT#(addrT, dataT) wrPortB = bramB.a;
     BRAM_PORT#(addrT, dataT) rdPortB = bramB.b;
+
+    Reg#(addrT) readAddrA <- mkConfigRegU;
+    Reg#(addrT) readAddrB <- mkConfigRegU;
+    Reg#(addrT) writeAddr <- mkConfigRegU;
+    Reg#(dataT) writeData <- mkConfigRegU;
 
     RWire#(Tuple2#(addrT, dataT)) wwire <- mkRWire;
     // used as initialisation as well
@@ -137,7 +143,7 @@ module mkRWBramCoreDualUG(RWBramCoreDual#(addrT, dataT)) provisos(
             wrPortA.put(True, counter, 0);
             wrPortB.put(True, counter, 0);
             counter <= counter + 1;
-            if (counter == 0) sd_prog[0] <= False;
+            if (counter == ~0) sd_prog[0] <= False;
         end
         else if(wwire.wget() matches tagged Valid .t) begin
             wrPortA.put(True, tpl_1(t), tpl_2(t));
@@ -148,22 +154,28 @@ module mkRWBramCoreDualUG(RWBramCoreDual#(addrT, dataT)) provisos(
 
     method Action wrReq(addrT a, dataT d);
         wwire.wset(tuple2(a, d));
+        writeAddr <= a;
+        writeData <= d;
+        if(a == readAddrA) $display("A equal");
+        if(a == readAddrB) $display("B equal");
     endmethod
     
     method Action rdReqA(addrT a);
         rdPortA.put(False, a, ?);
+        readAddrA <= a;
     endmethod
 
     method Action rdReqB(addrT a);
         rdPortB.put(False, a, ?);
+        readAddrB <= a;
     endmethod
 
     method dataT rdRespA;
-        return rdPortA.read;
+        return (readAddrA == writeAddr) ? writeData : rdPortA.read;
     endmethod
 
     method dataT rdRespB;
-        return rdPortB.read;
+        return (readAddrB == writeAddr) ? writeData : rdPortB.read;
     endmethod
 
 `ifdef CID
