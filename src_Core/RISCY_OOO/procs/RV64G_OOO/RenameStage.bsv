@@ -7,6 +7,7 @@
 //     Copyright (c) 2020 Jessica Clarke
 //     Copyright (c) 2020 Peter Rugg
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2022 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -124,7 +125,7 @@ interface RenameStage;
 endinterface
 
 module mkRenameStage#(RenameInput inIfc)(RenameStage);
-    Bool verbose = False;
+    Bool verbose = True;
     Integer verbosity = 0;
 
     // func units
@@ -462,6 +463,9 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     // check for system inst that needs to replay
     Bool firstReplay = doReplay(fetchStage.pipelines[0].first.dInst.iType);
 
+    // check for {c,fp}clear instructions
+    Bool clearInst = isClear(fetchStage.pipelines[0].first.dInst.iType);
+
     // System inst is renamed only when ROB is empty
     rule doRenaming_SystemInst(
         !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
@@ -619,6 +623,32 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 `ifdef CHECK_DEADLOCK
         renameCorrectPath.send;
 `endif
+    endrule
+
+    rule doRename_Clear(
+        !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
+        && epochManager.checkEpoch[0].check(fetchStage.pipelines[0].first.main_epoch) // correct path
+        && !isValid(firstTrap) // not trap
+        && clearInst // clear inst
+`ifdef INCLUDE_GDB_CONTROL
+        && inIfc.core_is_running
+`endif
+    );
+
+        fetchStage.pipelines[0].deq;
+        let x = fetchStage.pipelines[0].first;
+        let pc = x.pc;
+        let orig_inst = x.orig_inst;
+        let dst = x.regs.dst;
+        let ppc = x.ppc;
+        let main_epoch = x.main_epoch;
+        let trainInfo = x.trainInfo;
+        let inst = x.inst;
+        let dInst = x.dInst;
+        let arch_regs = x.regs;
+        let cause = x.cause;
+        if(verbose) $display("[doRenaming] clear inst: ", fshow(x));
+
     endrule
 
 `ifdef SECURITY
@@ -826,6 +856,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         && epochManager.checkEpoch[0].check(fetchStage.pipelines[0].first.main_epoch) // correct path
         && !isValid(firstTrap) // not trap
         && !firstReplay // not system inst
+        && !clearInst // not clear inst
 `ifdef SECURITY
         // stall for ROB empty if we don't allow speculation at all
         && (!specNone || rob.isEmpty)
@@ -910,6 +941,9 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 end
                 // for system inst, process in next cycle (in a different rule)
                 if(doReplay(dInst.iType)) begin
+                    stop = True;
+                end
+                if(isClear(dInst.iType)) begin
                     stop = True;
                 end
 `ifdef SECURITY
