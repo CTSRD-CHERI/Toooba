@@ -282,6 +282,7 @@ typedef enum {
     CCall, CJAL, CJALR, Cap,
     Auipc,
     Auipcc,
+    CClear,
     Fpu,
     Csr,
     Scr,
@@ -877,6 +878,10 @@ function Bool isSystem(IType iType) = (
     iType == Ecall || iType == Ebreak || iType == Csr || iType == Scr ||
     iType == SFence || iType == FenceI ||
     iType == Sret || iType == Mret
+);
+
+function Bool isClear(IType iType) = (
+    iType == CClear
 );
 
 // instruction requires replaying (i.e. fetch next instruction after current
