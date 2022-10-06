@@ -649,6 +649,42 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         let cause = x.cause;
         if(verbose) $display("[doRenaming] clear inst: ", fshow(x));
 
+        let y = ToReorderBuffer{pc: cast(pc),
+                                orig_inst: orig_inst,
+                                iType: dInst.iType,
+                                dst: arch_regs.dst,
+`ifdef INCLUDE_TANDEM_VERIF
+                                dst_data: ?,    // Available only after execution
+                                store_data: ?,
+                                store_data_BE: ?,
+`endif
+                                csr: dInst.csr,
+                                scr: dInst.scr,
+                                claimed_phy_reg: False, // no renaming is done
+                                trap: firstTrap,
+                                // default values of FullResult
+                                ppc_vaddr_csrData: PPC (ppc),
+                                fflags: 0,
+                                ////////
+                                will_dirty_fpu_state: False,
+                                // does not need to be sent to a pipeline
+                                rob_inst_state: Executed,
+                                lsqTag: ?,
+                                ldKilled: Invalid,
+                                memAccessAtCommit: False,
+                                lsqAtCommitNotified: False,
+                                nonMMIOStDone: False,
+                                epochIncremented: False,
+                                spec_bits: specTagManager.currentSpecBits
+`ifdef RVFI_DII
+                                , dii_pid: x.dii_pid
+`endif
+`ifdef RVFI
+                                , traceBundle: unpack(0)
+`endif
+                               };
+        rob.enqPort[0].enq(y);
+
     endrule
 
 `ifdef SECURITY
