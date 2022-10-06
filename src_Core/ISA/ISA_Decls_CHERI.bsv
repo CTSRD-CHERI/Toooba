@@ -178,7 +178,6 @@ Bit #(5) f5rs2_cap_CRAM        = 5'h09;
 Bit #(5) f5rs2_cap_CMove       = 5'h0a;
 Bit #(5) f5rs2_cap_CClearTag   = 5'h0b;
 Bit #(5) f5rs2_cap_JALR_CAP    = 5'h0c;
-Bit #(5) f5rs2_cap_CClearReg   = 5'h0d;
 Bit #(5) f5rs2_cap_CClearCap   = 5'h0e;
 Bit #(5) f5rs2_cap_CGetAddr    = 5'h0f;
 Bit #(5) f5rs2_cap_CClearFPReg = 5'h10;
