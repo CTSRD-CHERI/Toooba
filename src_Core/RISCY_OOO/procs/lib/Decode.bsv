@@ -279,7 +279,9 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
         csr: tagged Invalid,
         scr: tagged Invalid,
         imm: tagged Invalid,
-        capChecks: unpack(0)
+        capChecks: unpack(0),
+        quarter: tagged Invalid,
+        mask: tagged Invalid
     };
     ArchRegs regs = ArchRegs {
         src1: tagged Invalid,
@@ -305,6 +307,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
     Bool rl       =       unpack(inst[ 25 ]);
     // For "xCHERI" ISA extension
     let funct5rs2 =              inst[ 24 : 20 ];
+    let qu        =              inst[ 19 : 18 ];
+    let ma        =              {inst[ 17 : 15 ], inst[ 11 : 7 ]};
 
     ImmData immI  = signExtend(inst[31:20]);
     ImmData immS  = signExtend({ inst[31:25], inst[11:7] });
@@ -1345,6 +1349,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                 f5rs2_cap_CClearCap: begin
                                     // do register clearing
                                     dInst.iType = CClear;
+                                    dInst.quarter = Valid(qu);
+                                    dInst.mask = Valid(ma);
                                 end
                                 f5rs2_cap_CGetAddr: begin
                                     dInst.iType = Cap;
