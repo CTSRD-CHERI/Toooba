@@ -630,6 +630,10 @@ typedef Bit#(65) CapTop;
 
 typedef Bit#(32) ImmData; // 32-bit decoded immediate data
 
+typedef Bit#(2) QuData;
+
+typedef Bit#(8) MaskData;
+
 typedef struct {
 `define CAP_CHECK_FIELD(x,s) Bool x;
 `include "CapChecks.bsvi"
@@ -675,6 +679,8 @@ typedef struct {
     Maybe#(CSR)     csr;
     Maybe#(SCR)     scr; // Special Capability Register.
     Maybe#(ImmData) imm;
+    Maybe#(QuData) quarter;
+    Maybe#(MaskData) mask;
 } DecodedInst deriving(Bits, Eq, FShow);
 
 function Bool linkedR(Maybe#(ArchRIndx) register);
