@@ -1239,6 +1239,10 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capFunc = CapModify (ClearTag);
                                 end
+                                f5rs2_cap_CClearCap: begin
+                                    // do register clearing
+                                    dInst.iType = CClear;
+                                end
                                 f5rs2_cap_CGetAddr: begin
                                     dInst.iType = Cap;
                                     regs.dst = Valid(tagged Gpr rd);
