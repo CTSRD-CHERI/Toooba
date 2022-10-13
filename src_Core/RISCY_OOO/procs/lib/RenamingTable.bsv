@@ -37,12 +37,6 @@ import ProcTypes::*;
 import HasSpecBits::*;
 import Ehr::*;
 
-/*
-export RenameResult;
-export RegRenamingTable(..);
-export RTRename(..);
-export RTCommit(..);
-*/
 
 typedef struct {
     PhyRegs phy_regs;
@@ -135,7 +129,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(NumArchReg, Ehr#(SupSize, PhyRIndx)) renaming_table <- genWithM(compose(mkEhr, fromInteger));
 
     // bit vector for cleared registers
-    Vector#(NumArchReg, Reg#(Bool)) cleared <- replicateM(mkReg(False));
+    Vector#(NumArchReg, Ehr#(SupSize, Bool)) cleared <- replicateM(mkEhr(False));
 
     // A FIFO of
     // - in-flight renaming: when valid = True i.e. within [enqP, deqP)
@@ -434,13 +428,13 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     dst: tagged Invalid
                 };
                 if (r.src1 matches tagged Valid .valid_src1) begin
-                    if (valid_src1 matches tagged Gpr .g &&& cleared[g]) begin
+                    if (valid_src1 matches tagged Gpr .g &&& cleared[i][g]) begin
                         phy_regs.src1 = tagged Valid zero_reg;
                     end
                     else phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
                 end
                 if (r.src2 matches tagged Valid .valid_src2) begin
-                    if (valid_src2 matches tagged Gpr .g &&& cleared[g]) begin
+                    if (valid_src2 matches tagged Gpr .g &&& cleared[i][g]) begin
                         phy_regs.src2 = tagged Valid zero_reg;
                     end
                     else phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
@@ -450,9 +444,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 end
                 
                 if (r.dst matches tagged Valid .valid_dst) begin
-                    /*if (valid_dst matches tagged Gpr .g) begin
-                        cleared[g] <= False;
-                    end*/
+                    if (valid_dst matches tagged Gpr .g) begin
+                        cleared[i][g] <= False;
+                    end
                     phy_regs.dst = Valid (PhyDst {
                         indx: claim_phy_reg,
                         isFpuReg: isFpuReg(valid_dst)
