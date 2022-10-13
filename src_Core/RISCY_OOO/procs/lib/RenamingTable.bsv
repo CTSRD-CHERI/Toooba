@@ -37,6 +37,13 @@ import ProcTypes::*;
 import HasSpecBits::*;
 import Ehr::*;
 
+/*
+export RenameResult;
+export RegRenamingTable(..);
+export RTRename(..);
+export RTCommit(..);
+*/
+
 typedef struct {
     PhyRegs phy_regs;
 } RenameResult deriving(Bits, Eq, FShow);
@@ -46,7 +53,7 @@ interface RTRename;
     // XXX This will **ALWAYS** claim a new physical register as a speculative
     // in-flight renaming, no matter whether the dst reg is valid or not.
     // This simplifies the implementation for superscalar renaming
-    method RenameResult getRename(ArchRegs r);
+    method ActionValue#(RenameResult) getRename(ArchRegs r);
     method Action claimRename(ArchRegs r, SpecBits sb);
     method Bool canRename; // guard of rename
 endinterface
@@ -126,6 +133,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     // non-speculative renaming table at commit port
     // initially arch reg i --> phy reg i
     Vector#(NumArchReg, Ehr#(SupSize, PhyRIndx)) renaming_table <- genWithM(compose(mkEhr, fromInteger));
+
+    // bit vector for cleared registers
+    Vector#(NumArchReg, Reg#(Bool)) cleared <- replicateM(mkReg(False));
 
     // A FIFO of
     // - in-flight renaming: when valid = True i.e. within [enqP, deqP)
@@ -412,9 +422,10 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         // XXX we always claim a free phy reg, but only return it if arch dst reg is valid
         Bool guard = !valid[claimIndex[i]][valid_get_port];
+        PhyRIndx zero_reg = 0;
         PhyRIndx claim_phy_reg = get_dst_renaming(i);
         renameIfc[i] = (interface RTRename;
-            method RenameResult getRename(ArchRegs r) if(guard);
+            method ActionValue#(RenameResult) getRename(ArchRegs r) if(guard);
                 // get renamings
                 PhyRegs phy_regs = PhyRegs {
                     src1: tagged Invalid,
@@ -423,21 +434,31 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     dst: tagged Invalid
                 };
                 if (r.src1 matches tagged Valid .valid_src1) begin
-                    phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
+                    if (valid_src1 matches tagged Gpr .g &&& cleared[g]) begin
+                        phy_regs.src1 = tagged Valid zero_reg;
+                    end
+                    else phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
                 end
                 if (r.src2 matches tagged Valid .valid_src2) begin
-                    phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
+                    if (valid_src2 matches tagged Gpr .g &&& cleared[g]) begin
+                        phy_regs.src2 = tagged Valid zero_reg;
+                    end
+                    else phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
                 end
                 if (r.src3 matches tagged Valid .valid_src3) begin
                     phy_regs.src3 = tagged Valid (get_src_renaming(i, tagged Fpu valid_src3));
                 end
+                
                 if (r.dst matches tagged Valid .valid_dst) begin
+                    /*if (valid_dst matches tagged Gpr .g) begin
+                        cleared[g] <= False;
+                    end*/
                     phy_regs.dst = Valid (PhyDst {
                         indx: claim_phy_reg,
                         isFpuReg: isFpuReg(valid_dst)
                     });
                 end
-
+                
                 return RenameResult {
                     phy_regs: phy_regs
                 };

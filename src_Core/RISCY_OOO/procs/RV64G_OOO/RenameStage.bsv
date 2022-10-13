@@ -504,7 +504,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         doAssert(spec_bits == 0, "cannot have spec bits");
 
         // do renaming (renaming is non-speculative)
-        let rename_result = regRenamingTable.rename[0].getRename(arch_regs);
+        let rename_result <- regRenamingTable.rename[0].getRename(arch_regs);
         let phy_regs = rename_result.phy_regs;
         regRenamingTable.rename[0].claimRename(arch_regs, spec_bits);
 
@@ -1028,7 +1028,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                     // If the renaming is speculative, then the renaming will
                     // depend on the current spec_tag too.
                     let renaming_spec_bits = spec_bits | (speculative_renaming ? (1 << fromMaybe(?,spec_tag)) : 0);
-                    let rename_result = regRenamingTable.rename[i].getRename(arch_regs);
+                    let rename_result <- regRenamingTable.rename[i].getRename(arch_regs);
                     let phy_regs = rename_result.phy_regs;
 
                     // scoreboard lookup
