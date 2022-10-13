@@ -1248,6 +1248,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     dInst.iType = CClear;
                                     dInst.quarter = Valid(qu);
                                     dInst.mask = Valid(ma);
+                                    // invalid sources and destination
                                 end
                                 f5rs2_cap_CGetAddr: begin
                                     dInst.iType = Cap;
