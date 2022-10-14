@@ -144,6 +144,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(size, Reg#(PhyRIndx)) new_renamings_phy <- genWithM(genNewRenamingsPhy);
     Vector#(size, Ehr#(2, Bool)) valid <- replicateM(mkEhr(False));
     Vector#(size, Ehr#(2, SpecBits)) spec_bits <- replicateM(mkEhr(0));
+    Vector#(size, Ehr#(SupSize, Bit#(NumArchReg))) cleared_vec <- replicateM(mkEhr(0));
     Reg#(indexT) enqP <- mkReg(0); // point to claim free phy reg
     Reg#(indexT) deqP <- mkReg(0); // point to commit renaming and make phy reg free
 
@@ -446,6 +447,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 if (r.dst matches tagged Valid .valid_dst) begin
                     if (valid_dst matches tagged Gpr .g) begin
                         cleared[i][g] <= False;
+                        let ve = readVEhr(i, cleared);
+                        ve[g] = False;
+                        cleared_vec[claimIndex[i]][i] <= pack(ve);
                     end
                     phy_regs.dst = Valid (PhyDst {
                         indx: claim_phy_reg,
