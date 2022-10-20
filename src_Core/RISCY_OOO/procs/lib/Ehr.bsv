@@ -4,6 +4,7 @@
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2020 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -53,6 +54,14 @@ function Vector#(n, t) readVEhr(i ehr_index, Vector#(n, Ehr#(n2, t)) vec_ehr) pr
     function Reg#(t) get_ehr_index(Ehr#(n2, t) e) = e[ehr_index];
     return readVReg(map(get_ehr_index, vec_ehr));
 endfunction
+
+function Action writeVEhr(i ehr_index, Vector#(n, Ehr#(n2, t)) vec_ehr, Vector#(n, t) vdin) provisos (PrimIndex#(i, __a));
+  function Action write_ehr_index(Ehr#(n2, t) e, t val) = e[ehr_index]._write(val);
+  return (action
+            joinActions (zipWith (write_ehr_index, vec_ehr, vdin));
+          endaction);
+endfunction
+
 
 // extract vector ports from vector of EHRs
 function Vector#(n, Reg#(t)) getVEhrPort(Vector#(n, Ehr#(m, t)) ehrs, Integer p);
