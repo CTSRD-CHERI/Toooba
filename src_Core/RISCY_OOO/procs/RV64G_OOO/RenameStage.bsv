@@ -316,6 +316,16 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     endaction
     endfunction
 
+    // check for {c,fp}clear instructions
+    Bool clearInst = isClear(fetchStage.pipelines[0].first.dInst.iType);
+
+    /*rule doDebugRenaming;
+        $display("isValid(firstTrap): ", fshow(isValid(firstTrap)));
+        $display("rob.isEmpty: ", fshow(rob.isEmpty));
+        $display("clearInst: ", fshow(clearInst));
+        $display("firstInst: ", fshow(fetchStage.pipelines[0].first));
+    endrule*/
+
     // rename single trap
     rule doRenaming_Trap(
         !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
@@ -463,8 +473,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     // check for system inst that needs to replay
     Bool firstReplay = doReplay(fetchStage.pipelines[0].first.dInst.iType);
 
-    // check for {c,fp}clear instructions
-    Bool clearInst = isClear(fetchStage.pipelines[0].first.dInst.iType);
 
     // System inst is renamed only when ROB is empty
     rule doRenaming_SystemInst(
@@ -649,6 +657,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         let cause = x.cause;
         if(verbose) $display("[doRenaming] clear inst: ", fshow(x));
 
+        regRenamingTable.rename[0].cclear(fromMaybe(?, dInst.quarter), fromMaybe(?, dInst.mask));
+
         let y = ToReorderBuffer{pc: cast(pc),
                                 orig_inst: orig_inst,
                                 iType: dInst.iType,
@@ -660,7 +670,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 `endif
                                 csr: dInst.csr,
                                 scr: dInst.scr,
-                                claimed_phy_reg: False, // no renaming is done
+                                claimed_phy_reg: True, // In some way claims physical registers, but it does not
+                                // do so in the traditional way
                                 trap: firstTrap,
                                 // default values of FullResult
                                 ppc_vaddr_csrData: PPC (ppc),
