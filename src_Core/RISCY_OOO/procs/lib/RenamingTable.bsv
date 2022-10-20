@@ -50,6 +50,7 @@ interface RTRename;
     method ActionValue#(RenameResult) getRename(ArchRegs r);
     method Action claimRename(ArchRegs r, SpecBits sb);
     method Bool canRename; // guard of rename
+    method Action cclear(QuData qu, MaskData ma);
 endinterface
 
 interface RTCommit;
@@ -129,7 +130,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(NumArchReg, Ehr#(SupSize, PhyRIndx)) renaming_table <- genWithM(compose(mkEhr, fromInteger));
 
     // bit vector for cleared registers
-    Vector#(NumArchReg, Ehr#(SupSize, Bool)) cleared <- replicateM(mkEhr(False));
+    Vector#(NumArchReg, Ehr#(3, Bool)) cleared <- replicateM(mkEhr(False));
 
     // A FIFO of
     // - in-flight renaming: when valid = True i.e. within [enqP, deqP)
@@ -242,6 +243,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 indexT curDeqP = commitIndex[i]; // deqP for new renamings
                 PhyRIndx commit_phy_reg = new_renamings_phy[curDeqP];
                 Maybe#(ArchRIndx) commit_arch_reg = new_renamings_arch[curDeqP];
+                $display("commit_arch_reg: ", fshow(commit_arch_reg));
                 if(commit_arch_reg matches tagged Valid .arch) begin
                     let rtIdx = getRTIndex(arch);
                     // free phy reg being overwritten in the renaming_table (arch reg is don't care)
@@ -299,6 +301,11 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 nextEnqP = idx;
             end
             enqP <= nextEnqP;
+            //cleared <= writeVEhr(0, unpack(cleared_vec[nextEnqP-1][0]));
+            for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
+                let v = cleared_vec[nextEnqP-1][0];
+                cleared[j][2] <= unpack(v[j]);
+            end
         end
         else begin
             // claim phy reg
@@ -429,13 +436,13 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     dst: tagged Invalid
                 };
                 if (r.src1 matches tagged Valid .valid_src1) begin
-                    if (valid_src1 matches tagged Gpr .g &&& cleared[i][g]) begin
+                    if (valid_src1 matches tagged Gpr .g &&& cleared[g][i]) begin
                         phy_regs.src1 = tagged Valid zero_reg;
                     end
                     else phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
                 end
                 if (r.src2 matches tagged Valid .valid_src2) begin
-                    if (valid_src2 matches tagged Gpr .g &&& cleared[i][g]) begin
+                    if (valid_src2 matches tagged Gpr .g &&& cleared[g][i]) begin
                         phy_regs.src2 = tagged Valid zero_reg;
                     end
                     else phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
@@ -446,7 +453,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 
                 if (r.dst matches tagged Valid .valid_dst) begin
                     if (valid_dst matches tagged Gpr .g) begin
-                        cleared[i][g] <= False;
+                        cleared[g][i] <= False;
                         let ve = readVEhr(i, cleared);
                         ve[g] = False;
                         cleared_vec[claimIndex[i]][i] <= pack(ve);
@@ -476,6 +483,22 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
             endmethod
             
             method canRename = guard;
+
+            method Action cclear(QuData qu, MaskData ma);
+                $display("cclear");
+                Bit#(NumArchReg) v0 = 0;
+                case(qu)
+                    2'b00:  v0 = zeroExtend(ma);
+                    2'b01:  v0 = zeroExtend({ma, 8'b0});
+                    2'b10:  v0 = zeroExtend({ma, 16'b0});
+                    2'b11:  v0 = zeroExtend({ma, 24'b0});
+                endcase
+                let v1 = pack(readVEhr(0, cleared));
+                let v2 = v0 | v1;
+                for(Integer i = 0; i < valueof(NumArchReg); i = i + 1) begin
+                    cleared[i][0] <= unpack(v2[i]);
+                end
+            endmethod
         endinterface);
     end
 
