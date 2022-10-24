@@ -642,8 +642,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         && inIfc.core_is_running
 `endif
     );
-
-        fetchStage.pipelines[0].deq;
         let x = fetchStage.pipelines[0].first;
         let pc = x.pc;
         let orig_inst = x.orig_inst;
@@ -657,7 +655,13 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         let cause = x.cause;
         if(verbose) $display("[doRenaming] clear inst: ", fshow(x));
 
-        regRenamingTable.rename[0].cclear(fromMaybe(?, dInst.quarter), fromMaybe(?, dInst.mask));
+        SpecBits spec_bits = specTagManager.currentSpecBits;
+
+        if(regRenamingTable.rename[0].canRename) begin
+            fetchStage.pipelines[0].deq;
+            regRenamingTable.rename[0].cclear(fromMaybe(?, dInst.quarter), fromMaybe(?, dInst.mask));
+            regRenamingTable.rename[0].claimRename(arch_regs, spec_bits);
+        end
 
         let y = ToReorderBuffer{pc: cast(pc),
                                 orig_inst: orig_inst,
