@@ -1243,7 +1243,7 @@ module mkCore#(CoreId coreId)(Core);
                                 src2: tagged Invalid,
                                 src3: tagged Invalid,
                                 dst:  tagged Invalid};
-      let rename_result = regRenamingTable.rename[0].getRename (arch_regs);
+      let rename_result <- regRenamingTable.rename[0].getRename (arch_regs);
       let phy_rindx     = fromMaybe (?, rename_result.phy_regs.src1);
       let data_out      = rf.read [debuggerPort].rd1 (phy_rindx);
 
@@ -1265,7 +1265,7 @@ module mkCore#(CoreId coreId)(Core);
                                 src2: tagged Invalid,
                                 src3: tagged Invalid,
                                 dst:  tagged Invalid};
-      let rename_result = regRenamingTable.rename[0].getRename (arch_regs);
+      let rename_result <- regRenamingTable.rename[0].getRename (arch_regs);
       let phy_rindx     = fromMaybe (?, rename_result.phy_regs.src1);
       rf.write [debuggerPort].wr (phy_rindx, setAddrUnsafe(almightyCap, data_in));
 
@@ -1303,7 +1303,7 @@ module mkCore#(CoreId coreId)(Core);
                                 src2: tagged Invalid,
                                 src3: tagged Invalid,
                                 dst:  tagged Invalid};
-      let rename_result = regRenamingTable.rename[0].getRename (arch_regs);
+      let rename_result <- regRenamingTable.rename[0].getRename (arch_regs);
       let phy_rindx     = fromMaybe (?, rename_result.phy_regs.src1);
       let data_out      = rf.read [debuggerPort].rd1 (phy_rindx);
 
@@ -1325,7 +1325,7 @@ module mkCore#(CoreId coreId)(Core);
                                 src2: tagged Invalid,
                                 src3: tagged Invalid,
                                 dst:  tagged Invalid};
-      let rename_result = regRenamingTable.rename[0].getRename (arch_regs);
+      let rename_result <- regRenamingTable.rename[0].getRename (arch_regs);
       let phy_rindx     = fromMaybe (?, rename_result.phy_regs.src1);
       rf.write [debuggerPort].wr (phy_rindx, nullWithAddr(data_in));
 
