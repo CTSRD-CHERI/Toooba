@@ -1347,8 +1347,16 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     dInst.capFunc = CapModify (ClearTag);
                                 end
                                 f5rs2_cap_CClearCap: begin
-                                    // do register clearing
+                                    // do gp register clearing
                                     dInst.iType = CClear;
+                                    dInst.quarter = Valid(qu);
+                                    dInst.mask = Valid(ma);
+                                    dInst.execFunc = Other;
+                                    // invalid sources and destination
+                                end
+                                f5rs2_cap_CClearFPReg: begin
+                                    // do fp register clearing
+                                    dInst.iType = FPClear;
                                     dInst.quarter = Valid(qu);
                                     dInst.mask = Valid(ma);
                                     dInst.execFunc = Other;

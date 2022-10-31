@@ -274,6 +274,7 @@ typedef enum {
     Auipc,
     Auipcc,
     CClear,
+    FPClear,
     Fpu,
     Csr,
     Scr,
@@ -877,7 +878,7 @@ function Bool isSystem(IType iType) = (
 );
 
 function Bool isClear(IType iType) = (
-    iType == CClear
+    iType == CClear || iType == FPClear
 );
 
 // instruction requires replaying (i.e. fetch next instruction after current
