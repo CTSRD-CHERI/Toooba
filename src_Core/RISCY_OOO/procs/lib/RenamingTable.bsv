@@ -448,16 +448,26 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     if (valid_src1 matches tagged Gpr .g &&& cleared[g][fromInteger(cclear_getRename_start_port + i)]) begin
                         phy_regs.src1 = tagged Valid zero_reg;
                     end
+                    else if (valid_src1 matches tagged Fpu .f) begin
+                        Bit#(TLog#(NumArchReg)) idx = zeroExtend(f) + 32;
+                        if(cleared[idx][fromInteger(cclear_getRename_start_port + i)]) phy_regs.src1 = tagged Valid zero_reg;
+                    end
                     else phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
                 end
                 if (r.src2 matches tagged Valid .valid_src2) begin
                     if (valid_src2 matches tagged Gpr .g &&& cleared[g][fromInteger(cclear_getRename_start_port + i)]) begin
                         phy_regs.src2 = tagged Valid zero_reg;
                     end
+                    else if (valid_src2 matches tagged Fpu .f) begin
+                        Bit#(TLog#(NumArchReg)) idx = zeroExtend(f) + 32;
+                        if(cleared[idx][fromInteger(cclear_getRename_start_port + i)]) phy_regs.src2 = tagged Valid zero_reg;
+                    end
                     else phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
                 end
                 if (r.src3 matches tagged Valid .valid_src3) begin
-                    phy_regs.src3 = tagged Valid (get_src_renaming(i, tagged Fpu valid_src3));
+                    Bit#(TLog#(NumArchReg)) idx = zeroExtend(valid_src3) + 32;
+                    if(cleared[idx][fromInteger(cclear_getRename_start_port + i)]) phy_regs.src3 = tagged Valid zero_reg;
+                    else phy_regs.src3 = tagged Valid (get_src_renaming(i, tagged Fpu valid_src3));
                 end
                 
                 if (r.dst matches tagged Valid .valid_dst) begin
@@ -465,6 +475,13 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                         cleared[g][fromInteger(cclear_getRename_start_port + i)] <= False;
                         let ve = readVEhr(i, cleared);
                         ve[g] = False;
+                        cleared_vec[claimIndex[i]][i] <= pack(ve);
+                    end
+                    else if (valid_dst matches tagged Fpu .f) begin
+                        Bit#(TLog#(NumArchReg)) idx = zeroExtend(f) + 32;
+                        cleared[idx][fromInteger(cclear_getRename_start_port + i)] <= False;
+                        let ve = readVEhr(i, cleared);
+                        ve[idx] = False;
                         cleared_vec[claimIndex[i]][i] <= pack(ve);
                     end
                     phy_regs.dst = Valid (PhyDst {
