@@ -125,12 +125,18 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Integer sb_claim_port = 0;
     Integer sb_correctSpec_port = 1;
 
+    Integer cclear_getRename_start_port = 0;
+    Integer cclear_write_start_port = cclear_getRename_start_port + valueof(SupSize);
+    Integer cclear_wrongSpec_port = cclear_write_start_port + valueof(SupSize);
+
     // non-speculative renaming table at commit port
     // initially arch reg i --> phy reg i
     Vector#(NumArchReg, Ehr#(SupSize, PhyRIndx)) renaming_table <- genWithM(compose(mkEhr, fromInteger));
 
     // bit vector for cleared registers
-    Vector#(NumArchReg, Ehr#(3, Bool)) cleared <- replicateM(mkEhr(False));
+    Vector#(NumArchReg, Ehr#(5, Bool)) cleared <- replicateM(mkEhr(False));
+
+    // build-essential curl libffi-dev libffi7 libgmp-dev libgmp10 libncurses-dev libncurses5 libtinfo5
 
     // A FIFO of
     // - in-flight renaming: when valid = True i.e. within [enqP, deqP)
@@ -145,7 +151,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(size, Reg#(PhyRIndx)) new_renamings_phy <- genWithM(genNewRenamingsPhy);
     Vector#(size, Ehr#(2, Bool)) valid <- replicateM(mkEhr(False));
     Vector#(size, Ehr#(2, SpecBits)) spec_bits <- replicateM(mkEhr(0));
-    Vector#(size, Ehr#(SupSize, Bit#(NumArchReg))) cleared_vec <- replicateM(mkEhr(0));
+    Vector#(size, Ehr#(3, Bit#(NumArchReg))) cleared_vec <- replicateM(mkEhr(0));
     Reg#(indexT) enqP <- mkReg(0); // point to claim free phy reg
     Reg#(indexT) deqP <- mkReg(0); // point to commit renaming and make phy reg free
 
@@ -303,8 +309,8 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
             enqP <= nextEnqP;
             //cleared <= writeVEhr(0, unpack(cleared_vec[nextEnqP-1][0]));
             for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
-                let v = cleared_vec[nextEnqP-1][0];
-                cleared[j][2] <= unpack(v[j]);
+                let v = cleared_vec[nextEnqP-1][2];
+                cleared[j][4] <= unpack(v[j]);
             end
         end
         else begin
@@ -493,10 +499,11 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     2'b10:  v0 = zeroExtend({ma, 16'b0});
                     2'b11:  v0 = zeroExtend({ma, 24'b0});
                 endcase
-                let v1 = pack(readVEhr(0, cleared));
+                let v1 = pack(readVEhr(2 + fromInteger(i), cleared));
                 let v2 = v0 | v1;
-                for(Integer i = 0; i < valueof(NumArchReg); i = i + 1) begin
-                    cleared[i][0] <= unpack(v2[i]);
+                for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
+                    cleared[j][2 + fromInteger(i)] <= unpack(v2[j]);
+                    //cleared[j][2 + fromInteger(i)] <= False;
                 end
             endmethod
         endinterface);
@@ -514,6 +521,14 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
             method canCommit = guard;
         endinterface);
     end
+
+    /*rule doDebugRenamingTable;
+        for(Integer i = 0; i < valueof(size); i = i + 1) $display("valid: i = ", fshow(fromInteger(i)), ": ", fshow(valid[i][0]));
+        $display("enqP: ", fshow(enqP));
+        $display("deqP: ", fshow(deqP));
+        //for(Integer i = 0; i < valueof(SupSize); i = i + 1) $display("commit_SB_rename: i = ", fshow(fromInteger(i)), ": ", fshow(commit_SB_rename[i]));
+        //$display("commit_SB_wrongSpec: ", fshow(commit_SB_wrongSpec));
+    endrule*/
 
     interface rename = renameIfc;
     interface commit = commitIfc;
