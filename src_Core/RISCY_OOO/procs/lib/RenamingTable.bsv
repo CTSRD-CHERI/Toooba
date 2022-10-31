@@ -88,6 +88,8 @@ typedef struct {
     SpecTag specTag;
 } RTWrongSpec deriving(Bits, Eq, FShow);
 
+typedef 5 CClearPortNum;
+
 (* synthesize *)
 module mkRegRenamingTable(RegRenamingTable) provisos (
     NumAlias#(size, TSub#(NumPhyReg, NumArchReg)),
@@ -128,13 +130,14 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Integer cclear_getRename_start_port = 0;
     Integer cclear_write_start_port = cclear_getRename_start_port + valueof(SupSize);
     Integer cclear_wrongSpec_port = cclear_write_start_port + valueof(SupSize);
+    Integer cclear_port_num = cclear_wrongSpec_port + 1;
 
     // non-speculative renaming table at commit port
     // initially arch reg i --> phy reg i
     Vector#(NumArchReg, Ehr#(SupSize, PhyRIndx)) renaming_table <- genWithM(compose(mkEhr, fromInteger));
 
     // bit vector for cleared registers
-    Vector#(NumArchReg, Ehr#(5, Bool)) cleared <- replicateM(mkEhr(False));
+    Vector#(NumArchReg, Ehr#(CClearPortNum, Bool)) cleared <- replicateM(mkEhr(False));
 
     // build-essential curl libffi-dev libffi7 libgmp-dev libgmp10 libncurses-dev libncurses5 libtinfo5
 
@@ -151,7 +154,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(size, Reg#(PhyRIndx)) new_renamings_phy <- genWithM(genNewRenamingsPhy);
     Vector#(size, Ehr#(2, Bool)) valid <- replicateM(mkEhr(False));
     Vector#(size, Ehr#(2, SpecBits)) spec_bits <- replicateM(mkEhr(0));
-    Vector#(size, Ehr#(3, Bit#(NumArchReg))) cleared_vec <- replicateM(mkEhr(0));
+    Vector#(size, Ehr#(TAdd#(SupSize, 1), Bit#(NumArchReg))) cleared_vec <- replicateM(mkEhr(0));
     Reg#(indexT) enqP <- mkReg(0); // point to claim free phy reg
     Reg#(indexT) deqP <- mkReg(0); // point to commit renaming and make phy reg free
 
@@ -310,7 +313,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
             //cleared <= writeVEhr(0, unpack(cleared_vec[nextEnqP-1][0]));
             for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
                 let v = cleared_vec[nextEnqP-1][2];
-                cleared[j][4] <= unpack(v[j]);
+                cleared[j][cclear_wrongSpec_port] <= unpack(v[j]);
             end
         end
         else begin
@@ -442,13 +445,13 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     dst: tagged Invalid
                 };
                 if (r.src1 matches tagged Valid .valid_src1) begin
-                    if (valid_src1 matches tagged Gpr .g &&& cleared[g][i]) begin
+                    if (valid_src1 matches tagged Gpr .g &&& cleared[g][fromInteger(cclear_getRename_start_port + i)]) begin
                         phy_regs.src1 = tagged Valid zero_reg;
                     end
                     else phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
                 end
                 if (r.src2 matches tagged Valid .valid_src2) begin
-                    if (valid_src2 matches tagged Gpr .g &&& cleared[g][i]) begin
+                    if (valid_src2 matches tagged Gpr .g &&& cleared[g][fromInteger(cclear_getRename_start_port + i)]) begin
                         phy_regs.src2 = tagged Valid zero_reg;
                     end
                     else phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
@@ -459,7 +462,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 
                 if (r.dst matches tagged Valid .valid_dst) begin
                     if (valid_dst matches tagged Gpr .g) begin
-                        cleared[g][i] <= False;
+                        cleared[g][fromInteger(cclear_getRename_start_port + i)] <= False;
                         let ve = readVEhr(i, cleared);
                         ve[g] = False;
                         cleared_vec[claimIndex[i]][i] <= pack(ve);
@@ -499,11 +502,10 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     2'b10:  v0 = zeroExtend({ma, 16'b0});
                     2'b11:  v0 = zeroExtend({ma, 24'b0});
                 endcase
-                let v1 = pack(readVEhr(2 + fromInteger(i), cleared));
+                let v1 = pack(readVEhr(fromInteger(cclear_write_start_port + i), cleared));
                 let v2 = v0 | v1;
                 for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
-                    cleared[j][2 + fromInteger(i)] <= unpack(v2[j]);
-                    //cleared[j][2 + fromInteger(i)] <= False;
+                    cleared[j][fromInteger(cclear_write_start_port + i)] <= unpack(v2[j]);
                 end
             endmethod
         endinterface);

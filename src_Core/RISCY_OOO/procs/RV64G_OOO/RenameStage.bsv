@@ -328,8 +328,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     endaction
     endfunction
 
-    // check for {c,fp}clear instructions
-    Bool clearInst = isClear(fetchStage.pipelines[0].first.dInst.iType);
 
     /*rule doDebugRenaming;
         $display("isValid(firstTrap): ", fshow(isValid(firstTrap)));
@@ -663,74 +661,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 `endif
     endrule
 
-    /*rule doRename_Clear(
-        !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
-        && epochManager.checkEpoch[0].check(fetchStage.pipelines[0].first.main_epoch) // correct path
-        && !isValid(firstTrap) // not trap
-        && clearInst // clear inst
-`ifdef INCLUDE_GDB_CONTROL
-        && inIfc.core_is_running
-`endif
-    );
-        let x = fetchStage.pipelines[0].first;
-        let pc = x.pc;
-        let orig_inst = x.orig_inst;
-        let dst = x.regs.dst;
-        let ppc = x.ppc;
-        let main_epoch = x.main_epoch;
-        let trainInfo = x.trainInfo;
-        let inst = x.inst;
-        let dInst = x.dInst;
-        let arch_regs = x.regs;
-        let cause = x.cause;
-        if(verbose) $display("[doRenaming] clear inst: ", fshow(x));
-
-        SpecBits spec_bits = specTagManager.currentSpecBits;
-
-        if(regRenamingTable.rename[0].canRename) begin
-            fetchStage.pipelines[0].deq;
-            regRenamingTable.rename[0].cclear(fromMaybe(?, dInst.quarter), fromMaybe(?, dInst.mask));
-            regRenamingTable.rename[0].claimRename(arch_regs, spec_bits);
-        end
-
-        let y = ToReorderBuffer{pc: cast(pc),
-                                orig_inst: orig_inst,
-                                iType: dInst.iType,
-                                dst: arch_regs.dst,
-`ifdef INCLUDE_TANDEM_VERIF
-                                dst_data: ?,    // Available only after execution
-                                store_data: ?,
-                                store_data_BE: ?,
-`endif
-                                csr: dInst.csr,
-                                scr: dInst.scr,
-                                claimed_phy_reg: True, // In some way claims physical registers, but it does not
-                                // do so in the traditional way
-                                trap: firstTrap,
-                                // default values of FullResult
-                                ppc_vaddr_csrData: PPC (ppc),
-                                fflags: 0,
-                                ////////
-                                will_dirty_fpu_state: False,
-                                // does not need to be sent to a pipeline
-                                rob_inst_state: Executed,
-                                lsqTag: ?,
-                                ldKilled: Invalid,
-                                memAccessAtCommit: False,
-                                lsqAtCommitNotified: False,
-                                nonMMIOStDone: False,
-                                epochIncremented: False,
-                                spec_bits: specTagManager.currentSpecBits
-`ifdef RVFI_DII
-                                , dii_pid: x.dii_pid
-`endif
-`ifdef RVFI
-                                , traceBundle: unpack(0)
-`endif
-                               };
-        rob.enqPort[0].enq(y);
-
-    endrule*/
 
 `ifdef SECURITY
     // speculation control:
@@ -945,7 +875,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         && epochManager.checkEpoch[0].check(fetchStage.pipelines[0].first.main_epoch) // correct path
         && !isValid(firstTrap) // not trap
         && !firstReplay // not system inst
-        //&& !clearInst // not clear inst
 `ifdef SECURITY
         // stall for ROB empty if we don't allow speculation at all
         && (!specNone || rob.isEmpty)
@@ -1032,9 +961,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 if(doReplay(dInst.iType)) begin
                     stop = True;
                 end
-                /*if(isClear(dInst.iType)) begin
-                    stop = True;
-                end*/
 `ifdef SECURITY
                 // When speculation is not allowed at all, the second inst
                 // cannot be processed
