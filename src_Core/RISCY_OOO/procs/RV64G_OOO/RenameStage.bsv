@@ -633,7 +633,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 `endif
     endrule
 
-    rule doRename_Clear(
+    /*rule doRename_Clear(
         !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
         && epochManager.checkEpoch[0].check(fetchStage.pipelines[0].first.main_epoch) // correct path
         && !isValid(firstTrap) // not trap
@@ -700,7 +700,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                };
         rob.enqPort[0].enq(y);
 
-    endrule
+    endrule*/
 
 `ifdef SECURITY
     // speculation control:
@@ -907,7 +907,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         && epochManager.checkEpoch[0].check(fetchStage.pipelines[0].first.main_epoch) // correct path
         && !isValid(firstTrap) // not trap
         && !firstReplay // not system inst
-        && !clearInst // not clear inst
+        //&& !clearInst // not clear inst
 `ifdef SECURITY
         // stall for ROB empty if we don't allow speculation at all
         && (!specNone || rob.isEmpty)
@@ -994,9 +994,9 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 if(doReplay(dInst.iType)) begin
                     stop = True;
                 end
-                if(isClear(dInst.iType)) begin
+                /*if(isClear(dInst.iType)) begin
                     stop = True;
-                end
+                end*/
 `ifdef SECURITY
                 // When speculation is not allowed at all, the second inst
                 // cannot be processed
@@ -1190,6 +1190,11 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                         // Do renaming
                         regRenamingTable.rename[i].claimRename(arch_regs, renaming_spec_bits);
 
+                        // if cclear then do renaming table operation
+                        if(dInst.iType == CClear) begin
+                            regRenamingTable.rename[i].cclear(fromMaybe(?, dInst.quarter), fromMaybe(?, dInst.mask));
+                        end
+
                         // Scoreboard Operations
                         sbCons.setBusy[i].set(phy_regs.dst);
                         sbAggr.setBusy[i].set(phy_regs.dst);
@@ -1239,6 +1244,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                                 , traceBundle: unpack(0)
 `endif
                                                };
+                        $display("ROB-Entry: ", fshow(y));
                         rob.enqPort[i].enq(y);
 
                         // record activity
