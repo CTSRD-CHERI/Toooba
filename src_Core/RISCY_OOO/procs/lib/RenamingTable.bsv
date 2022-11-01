@@ -50,7 +50,7 @@ interface RTRename;
     method ActionValue#(RenameResult) getRename(ArchRegs r);
     method Action claimRename(ArchRegs r, SpecBits sb);
     method Bool canRename; // guard of rename
-    method Action cclear(QuData qu, MaskData ma);
+    method Action clear(IType iType, QuData qu, MaskData ma);
 endinterface
 
 interface RTCommit;
@@ -451,6 +451,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     else if (valid_src1 matches tagged Fpu .f) begin
                         Bit#(TLog#(NumArchReg)) idx = zeroExtend(f) + 32;
                         if(cleared[idx][fromInteger(cclear_getRename_start_port + i)]) phy_regs.src1 = tagged Valid zero_reg;
+                        else phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
                     end
                     else phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
                 end
@@ -461,6 +462,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     else if (valid_src2 matches tagged Fpu .f) begin
                         Bit#(TLog#(NumArchReg)) idx = zeroExtend(f) + 32;
                         if(cleared[idx][fromInteger(cclear_getRename_start_port + i)]) phy_regs.src2 = tagged Valid zero_reg;
+                        else phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
                     end
                     else phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
                 end
@@ -510,8 +512,8 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
             
             method canRename = guard;
 
-            method Action cclear(QuData qu, MaskData ma);
-                $display("cclear");
+            method Action clear(IType iType, QuData qu, MaskData ma);
+                $display("clear: ", fshow(iType));
                 Bit#(NumArchReg) v0 = 0;
                 case(qu)
                     2'b00:  v0 = zeroExtend(ma);
@@ -519,6 +521,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     2'b10:  v0 = zeroExtend({ma, 16'b0});
                     2'b11:  v0 = zeroExtend({ma, 24'b0});
                 endcase
+                if(iType == FPClear) begin
+                    v0 = {truncate(v0), 32'b0};
+                end
                 let v1 = pack(readVEhr(fromInteger(cclear_write_start_port + i), cleared));
                 let v2 = v0 | v1;
                 for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin

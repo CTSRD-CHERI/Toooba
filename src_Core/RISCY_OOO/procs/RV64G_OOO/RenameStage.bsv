@@ -1178,9 +1178,9 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                         // Do renaming
                         regRenamingTable.rename[i].claimRename(arch_regs, renaming_spec_bits);
 
-                        // if cclear then do renaming table operation
-                        if(dInst.iType == CClear) begin
-                            regRenamingTable.rename[i].cclear(fromMaybe(?, dInst.quarter), fromMaybe(?, dInst.mask));
+                        // if {c,fp}clear then do renaming table operation
+                        if(isClear(dInst.iType)) begin
+                            regRenamingTable.rename[i].clear(dInst.iType, fromMaybe(?, dInst.quarter), fromMaybe(?, dInst.mask));
                         end
 
                         // Scoreboard Operations
