@@ -261,7 +261,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         Bool fpr_access = (   fn_ArchReg_is_FpuReg (x.regs.src1)
                            || fn_ArchReg_is_FpuReg (x.regs.src2)
                            || isValid (x.regs.src3)
-                           || fn_ArchReg_is_FpuReg (x.regs.dst));
+                           || fn_ArchReg_is_FpuReg (x.regs.dst)
+                           || (x.dInst.iType == FPClear));
         let mstatus   = csrf.rd (csrAddrMSTATUS);
 
         // Check CSR access permission
