@@ -125,7 +125,7 @@ interface RenameStage;
 endinterface
 
 module mkRenameStage#(RenameInput inIfc)(RenameStage);
-    Bool verbose = True;
+    Bool verbose = False;
     Integer verbosity = 0;
 
     // func units
@@ -318,13 +318,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     endfunction
 
 
-    /*rule doDebugRenaming;
-        $display("isValid(firstTrap): ", fshow(isValid(firstTrap)));
-        $display("rob.isEmpty: ", fshow(rob.isEmpty));
-        $display("clearInst: ", fshow(clearInst));
-        $display("firstInst: ", fshow(fetchStage.pipelines[0].first));
-    endrule*/
-
     // rename single trap
     rule doRenaming_Trap(
         !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
@@ -471,7 +464,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 
     // check for system inst that needs to replay
     Bool firstReplay = doReplay(fetchStage.pipelines[0].first.dInst.iType);
-
 
     // System inst is renamed only when ROB is empty
     rule doRenaming_SystemInst(
@@ -631,7 +623,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         renameCorrectPath.send;
 `endif
     endrule
-
 
 `ifdef SECURITY
     // speculation control:
@@ -1171,7 +1162,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                                 , traceBundle: unpack(0)
 `endif
                                                };
-                        $display("ROB-Entry: ", fshow(y));
                         rob.enqPort[i].enq(y);
 
                         // record activity
