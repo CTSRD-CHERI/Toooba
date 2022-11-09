@@ -87,6 +87,7 @@ typedef struct {
     LdStQTag ldstq_tag;
     CapChecks cap_checks;
     Bool ddc_offset;
+    Maybe#(Bit#(2)) prv_override;
 } MemDispatchToRegRead deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -99,6 +100,7 @@ typedef struct {
     CapPipe rVal1;
     CapPipe rVal2;
     CapChecks cap_checks;
+    Maybe#(Bit#(2)) prv_override;
 } MemRegReadToExe deriving(Bits, FShow);
 
 typedef struct {
@@ -119,6 +121,7 @@ typedef struct {
     Bool allowCapLoad;
     Maybe#(CSR_XCapCause) capException;
     Maybe#(BoundsCheck) check;
+    Maybe#(Bit#(2)) prv_override;
 } MemExeToFinish deriving(Bits, FShow);
 
 // bookkeeping when waiting for MMIO resp which may cause exception
@@ -169,7 +172,8 @@ module mkDTlbSynth(DTlbSynth);
                         default: False;
                     endcase),
             capStore: x.capStore,
-            potentialCapLoad: x.allowCapLoad
+            potentialCapLoad: x.allowCapLoad,
+            prv_override: x.prv_override
         };
     endfunction
     let m <- mkDTlb(getTlbReq);
@@ -471,7 +475,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: x.tag,
                 ldstq_tag: x.data.ldstq_tag,
                 cap_checks: x.data.cap_checks,
-                ddc_offset: x.data.ddc_offset
+                ddc_offset: x.data.ddc_offset,
+                prv_override: x.data.prv_override
             },
             spec_bits: x.spec_bits
         });
@@ -517,7 +522,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 ldstq_tag: x.ldstq_tag,
                 rVal1: rVal1,
                 rVal2: rVal2,
-                cap_checks: x.cap_checks
+                cap_checks: x.cap_checks,
+                prv_override: x.prv_override
             },
             spec_bits: dispToReg.spec_bits
         });
@@ -594,7 +600,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && origBE == DataMemAccess(unpack(~0)),
                 capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, origBE),
                 check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                          ddc, getAddr(vaddr), accessByteCount, x.cap_checks)
+                                          ddc, getAddr(vaddr), accessByteCount, x.cap_checks),
+                prv_override: x.prv_override
             },
             specBits: regToExe.spec_bits
         });

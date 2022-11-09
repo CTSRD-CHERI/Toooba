@@ -166,7 +166,8 @@ function Maybe#(MemInst) decodeMemInst(Instruction inst, Bool cap_mode);
                                 byteOrTagEn: DataMemAccess(byteEn),
                                 aq: aq,
                                 rl: rl,
-                                reg_bounds: cap_mode } );
+                                reg_bounds: cap_mode,
+                                prv_override: Invalid } );
     end
 endfunction
 
@@ -177,20 +178,22 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
     // defaults when the instruction is not a capability memory operation.
     Bool illegalInst = False;
     Bit#(7) funct7 = inst[31:25];
-    Bit#(5) mem_code = (funct7==f7_cap_Loads) ? inst[24:20]:inst[11:7];
+    Bit#(5) mem_code = (funct7==f7_cap_Loads || funct7==f7_cap_UserLoads) ? inst[24:20]:inst[11:7];
     Bool amo = unpack(mem_code[4]);
     Bool bounds_from_register = unpack(mem_code[3]);
+    if ((funct7 == f7_cap_UserLoads || funct7 == f7_cap_UserStores) && !bounds_from_register)
+        illegalInst = True;
     // unsignedLd
     // it doesn't matter if this is set to True for stores
     Bool unsignedLd = unpack(mem_code[2]);
     Bit#(2) width = mem_code[1:0];
 
     Bool capWidth = False;
-    if (funct7 == f7_cap_Stores && unsignedLd) begin
+    if ((funct7 == f7_cap_Stores || funct7 == f7_cap_UserStores) && unsignedLd) begin
         capWidth = True;
         if (width != 0) illegalInst = True;
     end
-    if (funct7 == f7_cap_Loads && amo && unsignedLd) begin
+    if ((funct7 == f7_cap_Loads || funct7 == f7_cap_UserLoads) && amo && unsignedLd) begin
         unsignedLd = False;
         capWidth = True;
         case (width)
@@ -203,9 +206,9 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
     // mem_func + amo_func
     MemFunc mem_func = Ld;
     AmoFunc amo_func = None;
-    if (funct7 == f7_cap_Loads) begin
+    if (funct7 == f7_cap_Loads || funct7 == f7_cap_UserLoads) begin
         mem_func = (amo) ? Lr:Ld;
-    end else if (funct7 == f7_cap_Stores) begin
+    end else if (funct7 == f7_cap_Stores || funct7 == f7_cap_UserStores) begin
         mem_func = (amo) ? Sc:St;
     end
 
@@ -249,7 +252,9 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
                                 byteOrTagEn: DataMemAccess(byteEn),
                                 aq: amo,
                                 rl: amo,
-                                reg_bounds: bounds_from_register} );
+                                reg_bounds: bounds_from_register,
+                                prv_override: Invalid /* Updated outside */
+                              } );
     end
 endfunction
 
@@ -843,7 +848,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             byteOrTagEn: DataMemAccess(replicate(False)),
                             aq: reconcile,
                             rl: commit,
-                            reg_bounds: False // unused
+                            reg_bounds: False, // unused
+                            prv_override: Invalid
                         });
                     end
                     else begin
@@ -1290,6 +1296,57 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.imm = Valid (0);
                             dInst.capChecks = memCapChecks(mi.reg_bounds);
                         end
+                        f7_cap_UserLoads: begin
+                            if (funct5rs2 == cap_mem_UserCLoadTags) begin
+                                dInst.iType = Ld;
+                                dInst.imm = Valid(0);
+                                dInst.execFunc = tagged Mem MemInst{
+                                    mem_func: Ld,
+                                    amo_func: None,
+                                    unsignedLd: False,
+                                    byteOrTagEn: TagMemAccess,
+                                    aq: False,
+                                    rl: False,
+                                    reg_bounds: True,
+                                    prv_override: Valid(prvU) };
+                                regs.dst  = Valid(tagged Gpr rd);
+                                regs.src1 = Valid(tagged Gpr rs1);
+                                dInst.capChecks = memCapChecks(True);
+                            end else begin
+                                dInst.iType = Ld;
+                                MemInst mi = exp_bnds_mem_inst.Valid;
+                                mi.prv_override = Valid(prvU);
+                                if (isValid(exp_bnds_mem_inst)) begin
+                                    dInst.execFunc = tagged Mem mi;
+                                    if (mi.mem_func == Lr)
+                                        dInst.iType = Lr;
+                                end
+                                else illegalInst = True;
+                                if (!mi.reg_bounds) illegalInst = True;
+                                regs.dst  = Valid(tagged Gpr rd);
+                                regs.src1 = Valid(tagged Gpr rs1);
+                                dInst.imm = Valid (0);
+                                dInst.capChecks = memCapChecks(mi.reg_bounds);
+                            end
+                        end
+                        f7_cap_UserStores: begin
+                            dInst.iType = St;
+                            MemInst mi = exp_bnds_mem_inst.Valid;
+                            mi.prv_override = Valid(prvU);
+                            if (isValid(exp_bnds_mem_inst)) begin
+                                dInst.execFunc = tagged Mem mi;
+                                if (mi.mem_func == Sc) begin
+                                    dInst.iType = Sc;
+                                    regs.dst = Valid(tagged Gpr rs2);
+                                end
+                            end
+                            else illegalInst = True;
+                            if (!mi.reg_bounds) illegalInst = True;
+                            regs.src1 = Valid(tagged Gpr rs1);
+                            regs.src2 = Valid(tagged Gpr rs2);
+                            dInst.imm = Valid (0);
+                            dInst.capChecks = memCapChecks(mi.reg_bounds);
+                        end
                         f7_cap_TwoOp: begin
                             case (funct5rs2)
                                 f5rs2_cap_CGetLen: begin
@@ -1420,7 +1477,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                         byteOrTagEn: TagMemAccess,
                                         aq: False,
                                         rl: False,
-                                        reg_bounds: True };
+                                        reg_bounds: True,
+                                        prv_override: Invalid };
                                     regs.dst  = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capChecks = memCapChecks(True);

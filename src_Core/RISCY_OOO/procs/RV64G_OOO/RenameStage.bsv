@@ -722,7 +722,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             imm: validValue(dInst.imm),
                             ldstq_tag: lsqTag,
                             cap_checks: dInst.capChecks,
-                            ddc_offset: !dInst.execFunc.Mem.reg_bounds
+                            ddc_offset: !dInst.execFunc.Mem.reg_bounds,
+                            prv_override: dInst.execFunc.Mem.prv_override
                         },
                         regs: phy_regs,
                         tag: inst_tag,
@@ -1055,7 +1056,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                             imm: validValue(dInst.imm),
                                             ldstq_tag: lsqTag,
                                             cap_checks: dInst.capChecks,
-                                            ddc_offset: !dInst.execFunc.Mem.reg_bounds
+                                            ddc_offset: !dInst.execFunc.Mem.reg_bounds,
+                                            prv_override: dInst.execFunc.Mem.prv_override
                                         },
                                         regs: phy_regs,
                                         tag: inst_tag,

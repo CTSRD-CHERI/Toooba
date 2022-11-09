@@ -33,6 +33,7 @@ typedef struct{
     Bool  write;
     Bool  capStore;
     Bool  potentialCapLoad;
+    Maybe#(Bit#(2)) prv_override;
 } TlbReq deriving(Eq, Bits, FShow);
 typedef Tuple3#(Addr, Maybe#(Exception), Bool) TlbResp;
 
@@ -191,7 +192,7 @@ typedef struct {
 } TlbPermissionCheck deriving(Bits, Eq, FShow);
 
 function TlbPermissionCheck hasVMPermission(
-    VMInfo vm_info,
+    VMInfo vm_info, Maybe#(Bit#(2)) prv_override,
     PTEType pte_type, PTEUpperType pte_upper_type,
      Ppn ppn, PageWalkLevel level,
     TlbAccessType access,
@@ -218,19 +219,21 @@ function TlbPermissionCheck hasVMPermission(
         fault = True;
     end
 
+    Bit#(2) prv = fromMaybe(vm_info.prv, prv_override);
+
     // check permission related to user page
     if(pte_type.user) begin
         // S mode may not access user page. We need to consider mstatus.sum
         // bit. XXX Spike will raise page fault in case S-mode inst-fetch even
         // when mstatus.sum is set. We follow spike here.
-        if (vm_info.prv == prvS &&
+        if (prv == prvS &&
             (access == InstFetch || !vm_info.userAccessibleByS)) begin
             fault = True;
         end
     end
     else begin
         // U mode cannot access non-user page
-        if(vm_info.prv == prvU) begin
+        if(prv == prvU) begin
             fault = True;
         end
     end
