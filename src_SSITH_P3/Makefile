@@ -112,7 +112,7 @@ Verilog_RTL_sim:
 .PHONY: compile_synth
 compile_synth:  build_dir_synth Verilog_RTL
 	@echo  "INFO: Generating RTL into Verilog_RTL for synthesis ..."
-	bsc -u -elab -verilog  -vdir Verilog_RTL $(BUILD_DIRS_SYNTH)  $(BSC_COMPILATION_FLAGS)  $(SYNTH_BSC_OPTIONS) $(BSC_PATH)  $(TOPFILE)
+	bsc -u -elab -verilog  -vdir Verilog_RTL $(BUILD_DIRS_SYNTH)  $(BSC_COMPILATION_FLAGS)  $(SYNTH_BSC_OPTIONS) $(BSC_PATH)  $(TOPFILE) && sed -i 's/^module/(* keep_hierarchy = "yes" *) module/g' Verilog_RTL/*.v
 	@echo  "INFO: Generated Synth RTL into Verilog_RTL"
 	cp  Verilog_RTL/*  xilinx_ip/hdl/
 	@echo  "INFO: Copied RTL from  Verilog_RTL/  to  xilinx_ip/hdl/"
