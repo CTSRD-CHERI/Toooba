@@ -110,8 +110,12 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
       return toAXI4_Size(zeroExtend(pack(countIf(id, byteEn)))).Valid;
    endfunction
 
-   rule rl_handle_read_req (f_reqs_from_core.first.func matches Ld
-                            &&& (ctr_wr_rsps_pending.value == 0));
+   Bool req_ld = (f_reqs_from_core.first.func == Ld);
+   Bool req_lr = (f_reqs_from_core.first.func == Lr);
+   Bool req_st = (f_reqs_from_core.first.func == St);
+   Bool req_sc = (f_reqs_from_core.first.func == Sc);
+
+   rule rl_handle_read_req ((req_ld || req_lr) && ctr_wr_rsps_pending.value == 0);
       let req <- pop (f_reqs_from_core);
 
       if (cfg_verbosity > 0) begin
@@ -132,7 +136,7 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
                                             arlen:    (burst) ? 1:0,           // burst len = arlen+1
                                             arsize:   size,
                                             arburst:  fabric_default_burst,
-                                            arlock:   fabric_default_lock,
+                                            arlock:   (req_lr) ? EXCLUSIVE:NORMAL,
                                             arcache:  fabric_default_arcache,
                                             arprot:   fabric_default_prot,
                                             arqos:    fabric_default_qos,
@@ -194,8 +198,9 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
 
    // Each 128b word takes 2 beats, each handling 64 bits
    Reg #(Bit #(1)) rg_wr_req_beat <- mkReg (0);
+   FIFOF #(Bool) f_amo_sc <- mkFIFOF1;
 
-   rule rl_handle_write_req (f_reqs_from_core.first.func matches St);
+   rule rl_handle_write_req (req_st || req_sc);
       let req =  f_reqs_from_core.first;
 
       if (cfg_verbosity > 0) begin
@@ -226,7 +231,7 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
                                                awlen:    (burst) ? 1:0,           // burst len = awlen+1
                                                awsize:   size,
                                                awburst:  fabric_default_burst,
-                                               awlock:   fabric_default_lock,
+                                               awlock:   (req_sc) ? EXCLUSIVE:NORMAL,
                                                awcache:  fabric_default_awcache,
                                                awprot:   fabric_default_prot,
                                                awqos:    fabric_default_qos,
@@ -239,6 +244,7 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
             end
             // Expect a fabric response
             ctr_wr_rsps_pending.incr;
+            f_amo_sc.enq(req_sc);
          end
 
          // on last flit...
@@ -294,13 +300,15 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
 
       ctr_wr_rsps_pending.decr;
 
-      if (wr_resp.bresp != OKAY) begin
+      if (wr_resp.bresp != OKAY && wr_resp.bresp != EXOKAY) begin
          // TODO: need to raise a non-maskable interrupt (NMI) here
          $display ("%0d:%m.rl_discard_write_rsp: ERROR: fabric response error: exit.", cur_cycle);
          $display ("    ", fshow (wr_resp));
          $finish (1);
       end
-      f_rsps_to_core.enq (MMIODataPRs {valid: wr_resp.bresp == OKAY, data: 0});
+      Bool success = (wr_resp.bresp == (f_amo_sc.first ? EXOKAY : OKAY));
+      f_amo_sc.deq;
+      f_rsps_to_core.enq (MMIODataPRs {valid: success, data: 0});
    endrule
 
    // ================================================================

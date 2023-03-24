@@ -186,6 +186,7 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
    Reg #(MemDataByteEn)   reqBE      <- mkRegU;
    Reg #(Bit #(2))        reqSz      <- mkRegU;
    Reg #(MemTaggedData)   reqData    <- mkRegU;
+   Reg #(MMIODataPRs)     rspData    <- mkRegU;
 
    // For inst fetch, we need more bookkeepings
    // offset of the requested inst within a Data
@@ -871,7 +872,7 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
       // Byte enables are used in the AXI adapter to determine the size of the req. Set 8 bits (it
       // doesn't matter which) to preserve the behaviour of requesting 8 bytes).
       // TODO: instead specify access size in interface
-      let req = MMIOCRq {addr:addr, func:tagged Ld, byteEn:unpack(16'b0000_0000_1111_1111), data:?, loadTags:False};
+      let req = MMIOCRq {addr:addr, func:tagged Lr, byteEn:unpack(16'b0000_0000_1111_1111), data:?, loadTags:False};
       mmio_fabric_adapter_core_side.request.put (req);
       state <= WaitResp;
       amoWaitWriteResp <= False;
@@ -889,8 +890,12 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
       MMIODataPRs dprs <- mmio_fabric_adapter_core_side.response.get;
 
       if (amoWaitWriteResp) begin
-	 // Discard the write response; we're now ready for another request
-	 state <= SelectReq;
+        if (!dprs.valid) // If SC failed, try again!  Atomics cannot fail from an ISA perspective, so retry in hardware.
+          state <= ProcessReq;
+        else begin // Discard the write response; we're now ready for another request
+          cores[reqCore].pRs.enq (tagged DataAccess rspData);
+          state <= SelectReq;
+        end
       end
       else if (! dprs.valid) begin
          // Access fault
@@ -913,11 +918,10 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
                                   ld_val, reqData);
 
          // Write back new st_val to fabric
-         let req = MMIOCRq {addr:addr, func:tagged St, byteEn:reqBE, data: new_st_val, loadTags: False};
+         let req = MMIOCRq {addr:addr, func:tagged Sc, byteEn:reqBE, data: new_st_val, loadTags: False};
          mmio_fabric_adapter_core_side.request.put (req);
 
-         let prs = tagged DataAccess (MMIODataPRs { valid: True, data: ld_val });
-         cores[reqCore].pRs.enq (prs);
+         rspData <= MMIODataPRs { valid: True, data: ld_val };
 	 // Stay in WaitResp but wait to discard the write response
 	 amoWaitWriteResp <= True;
 

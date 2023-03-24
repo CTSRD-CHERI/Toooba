@@ -695,6 +695,10 @@ typedef union tagged {
     void Ld;
     void St;
     AmoFunc Amo;
+    // These two are needed between the MMIO Platform
+    // and the MMIO AXI adapter to implement the Amos.
+    void Lr;
+    void Sc;
 } MMIOFunc deriving(Bits, Eq, FShow);
 
 // req fom core to platform
