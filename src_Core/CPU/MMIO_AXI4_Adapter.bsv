@@ -76,7 +76,7 @@ endinterface
 module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
 
    // Verbosity: 0: quiet; 1: transactions
-   Integer verbosity = 0;
+   Integer verbosity = 1;
    Reg #(Bit #(4)) cfg_verbosity <- mkConfigReg (fromInteger (verbosity));
 
    // ================================================================
@@ -102,6 +102,7 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
    // This is just an adapter from MMIOCRq/MMIODataPRs to AXI4
    Reg #(Bit #(1)) rg_rd_rsp_beat <- mkReg (0);
    Reg #(MemTaggedData) rspData <- mkReg (unpack(0));
+   FIFOF #(Bool) f_amo_lr <- mkFIFOF1;
 
    // ================================================================
    // Convert a request's byte enables to an AXI 4 size, to ensure that
@@ -145,6 +146,7 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
 
          master_shim.slave.ar.put(mem_req_rd_addr);
          read_req_addr <= req.addr;
+         f_amo_lr.enq(req_lr);
 
           // Debugging
          if (cfg_verbosity > 0) begin
@@ -179,7 +181,7 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
 
       let newData = rspData;
       newData.data[read_req_addr[3]+rg_rd_rsp_beat] = mem_rsp.rdata;
-      let rsp = MMIODataPRs {valid: (mem_rsp.rresp == OKAY),
+      let rsp = MMIODataPRs {valid: (mem_rsp.rresp == ((f_amo_lr.first) ? EXOKAY:OKAY)),
                              data: newData };
       if (mem_rsp.rlast) begin
         f_rsps_to_core.enq (rsp);
@@ -187,6 +189,7 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
            $display ("    Response MMIO to core: ", fshow (rsp));
         rg_rd_rsp_beat <= 0;
         rspData <= unpack(0);
+        f_amo_lr.deq;
       end else begin
         rg_rd_rsp_beat <= rg_rd_rsp_beat + 1;
         rspData <= newData;
