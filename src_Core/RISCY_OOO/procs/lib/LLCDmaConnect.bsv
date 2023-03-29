@@ -98,12 +98,8 @@ typedef struct {
     LineDataOffset dataSel;
 } TlbDmaReqId deriving(Bits, Eq, FShow);
 
-typedef struct {
-    Bool exclusive;
-} ClientReqId deriving(Bits, Eq, FShow);
-
 typedef union tagged {
-    ClientReqId Client;
+    void Client;
     TlbDmaReqId Tlb;
 } LLCDmaReqId deriving(Bits, Eq, FShow);
 
@@ -141,6 +137,7 @@ module mkLLCDmaConnect #( DmaServer#(LLCDmaReqId) llc
 
    // Connector to AXI4 fabric
    let slavePortShim <- mkAXI4ShimFF;
+   Reg#(Maybe#(AXI4_ARFlit#(Wd_CoreW_Bus_SId, Wd_Addr, Wd_AR_User_Periph))) ar_exclusive <- mkReg(Invalid);
 
    // ================================================================
    // Write transactions from the external client (e.g., Debug Module)
@@ -151,30 +148,47 @@ module mkLLCDmaConnect #( DmaServer#(LLCDmaReqId) llc
       let wr_addr <- get (slavePortShim.master.aw);
       let wr_data <- get (slavePortShim.master.w);
 
-      internal_aw_ff.enq(wr_addr);
-
-      if (verbosity >= 2) begin
-         $display ("%0d: %m.rl_client_st for addr %0h", cur_cycle, wr_addr.awaddr);
+      Bool exclusive_proceed = True;
+      if (wr_addr.awlock == EXCLUSIVE) begin
+         if (ar_exclusive matches tagged Valid .ar &&& ar.arid == wr_addr.awid && ar.araddr == wr_addr.awaddr)
+            exclusive_proceed = True;
+         else exclusive_proceed = False;
       end
 
-      let line_addr = fn_align_addr_to_line (wr_addr.awaddr);
-      Vector#(TDiv#(CLineDataNumBytes,8), Bit#(TDiv#(Wd_Data_Periph,8))) line_be = replicate(0);
-      line_be[getCLineDataSel(wr_addr.awaddr)] = wr_data.wstrb;
-      dmaRqT req =  DmaRq {addr:   line_addr,
-                           byteEn: unpack(pack(line_be)),
-                           data:   setDataAt(unpack(0), getCLineDataSel(wr_addr.awaddr), wr_data.wdata),
-                           id:     tagged Client ClientReqId{exclusive: (wr_addr.awlock == EXCLUSIVE)}};    // TODO: change uniformly to  wr_addr.awid
-      llc.memReq.enq (req);
+      if (verbosity >= 2) begin
+         $display ("%0d: %m.rl_client_st for addr %0h, exclusive_proceed: %x", cur_cycle, wr_addr.awaddr, exclusive_proceed);
+      end
+
+      if (exclusive_proceed) begin
+         internal_aw_ff.enq(wr_addr);
+         if (ar_exclusive matches tagged Valid .ar &&& ar.araddr == wr_addr.awaddr) ar_exclusive <= Invalid;
+
+         let line_addr = fn_align_addr_to_line (wr_addr.awaddr);
+         Vector#(TDiv#(CLineDataNumBytes,8), Bit#(TDiv#(Wd_Data_Periph,8))) line_be = replicate(0);
+         line_be[getCLineDataSel(wr_addr.awaddr)] = wr_data.wstrb;
+         dmaRqT req =  DmaRq {addr:   line_addr,
+                              byteEn: unpack(pack(line_be)),
+                              data:   setDataAt(unpack(0), getCLineDataSel(wr_addr.awaddr), wr_data.wdata),
+                              id:     tagged Client};    // TODO: change uniformly to  wr_addr.awid
+         llc.memReq.enq (req);
+      end else begin
+         // Send response to external client
+         slavePortShim.master.b.put(AXI4_BFlit{
+           bid:   wr_addr.awid,
+           bresp: OKAY, // i.e., not EXOKAY
+           buser: ?
+         });
+      end
    endrule
 
-   rule rl_client_st_rsp(llc.respSt.first matches tagged Client .cid);
+   rule rl_client_st_rsp(llc.respSt.first matches tagged Client);
       llc.respSt.deq;
       let wr_addr <- get (internal_aw_ff);
 
       // Send response to external client
       slavePortShim.master.b.put(AXI4_BFlit{
         bid:   wr_addr.awid,
-        bresp: cid.exclusive ? EXOKAY:OKAY,
+        bresp: (wr_addr.awlock == EXCLUSIVE) ? EXOKAY:OKAY,
         buser: ?
       });
    endrule
@@ -187,11 +201,12 @@ module mkLLCDmaConnect #( DmaServer#(LLCDmaReqId) llc
    rule rl_client_ld_req;
       let rd_addr <- get (slavePortShim.master.ar);
       internal_ar_ff.enq(rd_addr);
+      ar_exclusive <= (rd_addr.arlock == EXCLUSIVE) ? tagged Valid rd_addr : Invalid;
       let line_addr = fn_align_addr_to_line (rd_addr.araddr);
       dmaRqT req =  DmaRq {addr:   line_addr,
                            byteEn: replicate(replicate(False)), // all False means 'read'
                            data:   ?,
-                           id:     tagged Client ClientReqId{exclusive: (rd_addr.arlock == EXCLUSIVE)}};    // TODO: change uniformly to  wr_addr.awid
+                           id:     tagged Client};    // TODO: change uniformly to  wr_addr.awid
       llc.memReq.enq (req);
 
       if (verbosity >= 2) begin
@@ -200,7 +215,7 @@ module mkLLCDmaConnect #( DmaServer#(LLCDmaReqId) llc
    endrule
 
    // Finish reload
-   rule rl_client_ld_rsp (llc.respLd.first.id matches tagged Client .cid);
+   rule rl_client_ld_rsp (llc.respLd.first.id matches tagged Client);
       let resp = llc.respLd.first;
       llc.respLd.deq;
 
@@ -212,7 +227,7 @@ module mkLLCDmaConnect #( DmaServer#(LLCDmaReqId) llc
       slavePortShim.master.r.put(AXI4_RFlit{
         rid: rd_addr.arid,
         rdata: dword,
-        rresp: cid.exclusive ? EXOKAY:OKAY,
+        rresp: (rd_addr.arlock == EXCLUSIVE) ? EXOKAY:OKAY,
         rlast: True,
         ruser: ?
       });
