@@ -163,7 +163,7 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
 
    provisos (Bits #(Data, 64)); // this module assumes Data is 64-bit wide
 
-   Integer verbosity = 0;
+   Integer verbosity = 2;
 
    // mtimecmp
    Vector#(CoreNum, Reg#(Data)) mtimecmp <- replicateM(mkReg(0));
@@ -883,53 +883,65 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
       end
    endrule
 
+   function Bool pred(Bool b) = b;
+   let set_bes = countIf(pred, reqBE);
+   Bool reqDWord = (set_bes > 4);
+
    // Get the Load-response; do the AMO op; send final write back to fabric, and respond to core
    rule rl_mmio_from_fabric_amo_rsp (curReq matches tagged MMIO_Fabric_Adapter .addr
                                      &&& (state == WaitResp)
                                      &&& isAmo);
       MMIODataPRs dprs <- mmio_fabric_adapter_core_side.response.get;
 
-      if (amoWaitWriteResp) begin
-        if (!dprs.valid) // If SC failed, try again!  Atomics cannot fail from an ISA perspective, so retry in hardware.
-          state <= ProcessReq;
-        else begin // Discard the write response; we're now ready for another request
-          cores[reqCore].pRs.enq (tagged DataAccess rspData);
-          state <= SelectReq;
-        end
-      end
-      else if (! dprs.valid) begin
-         // Access fault
-         let prs = tagged DataAccess dprs;
-         cores[reqCore].pRs.enq (prs);
-         state <= SelectReq;
-      end
-      else begin
-         MemTaggedData ld_val = dprs.data;
-         // Do the AMO op on the loaded value and the store value
-         function Bool pred(Bool b) = b;
-         let set_bes = countIf(pred, reqBE);
-         let amoInst = AmoInst {
-            func: reqAmofunc,
-            width: (set_bes > 4) ? DWord : Word,
-            aq: False,
-            rl: False
+      if (!amoWaitWriteResp) begin
+         if (dprs.valid) begin
+            MemTaggedData ld_val = dprs.data;
+            // Do the AMO op on the loaded value and the store value
+            let amoInst = AmoInst {
+               func: reqAmofunc,
+               width: (reqDWord) ? DWord : Word,
+               aq: False,
+               rl: False
             };
-         let new_st_val = amoExec(amoInst, addr[3:2],
-                                  ld_val, reqData);
+            let new_st_val = amoExec(amoInst, addr[3:2],
+                                     ld_val, reqData);
 
-         // Write back new st_val to fabric
-         let req = MMIOCRq {addr:addr, func:tagged Sc, byteEn:reqBE, data: new_st_val, loadTags: False};
-         mmio_fabric_adapter_core_side.request.put (req);
+            // Write back new st_val to fabric
+            let req = MMIOCRq {addr:addr, func:tagged Sc, byteEn:reqBE, data: new_st_val, loadTags: False};
+            mmio_fabric_adapter_core_side.request.put (req);
 
-         rspData <= MMIODataPRs { valid: True, data: ld_val };
-	 // Stay in WaitResp but wait to discard the write response
-	 amoWaitWriteResp <= True;
+            rspData <= MMIODataPRs { valid: True, data: ld_val };
+            // Stay in WaitResp but wait to discard the write response
+            amoWaitWriteResp <= True;
 
-         if (verbosity > 1) begin
-            $display ("MMIO_Platform.rl_mmio_from_fabric_amo_rsp: addr 0x%0h, size %0d, amofunc %0d",
-                      addr, reqSz, reqAmofunc);
-            $display ("    ld_val 0x%0h  op  st_val 0x%0h => new_st_val 0x%0h", ld_val, reqData, new_st_val);
+            if (verbosity > 1) begin
+               $display ("MMIO_Platform.rl_mmio_from_fabric_amo_rsp: addr 0x%0h, size %0d, amofunc %0d",
+                         addr, reqSz, reqAmofunc);
+               $display ("    ld_val 0x%0h  op  st_val 0x%0h => new_st_val 0x%0h", ld_val, reqData, new_st_val);
+            end
+         end else begin
+            // Access fault
+            let prs = tagged DataAccess dprs;
+            cores[reqCore].pRs.enq (prs);
+            state <= SelectReq;
          end
+      end else begin
+         if (dprs.valid) begin // Discard the write response; we're now ready for another request
+           if (verbosity > 1) begin
+              $display ("MMIO_Platform.rl_mmio_from_fabric_amo_rsp: addr 0x%0h, size %0d, amofunc %0d",
+                        addr, reqSz, reqAmofunc);
+              $display ("    rspData.valid %b  rspData.data 0x%0h", rspData.valid, rspData.data);
+           end
+           //cores[reqCore].pRs.enq (tagged DataAccess rspData);
+           let rsp = rspData;
+           if (reqDWord) rsp.data.data[0] = rspData.data.data[addr[3]];
+           else begin
+              Vector#(4, Bit#(32)) words = unpack(pack(rspData.data.data));
+              rsp.data.data[0] = zeroExtend(words[addr[3:2]]);
+           end
+           cores[reqCore].pRs.enq (tagged DataAccess rsp);
+           state <= SelectReq;
+         end else state <= ProcessReq; // If SC failed, try again!  Atomics cannot fail from an ISA perspective, so retry in hardware.
       end
    endrule
 

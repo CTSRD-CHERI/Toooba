@@ -201,7 +201,7 @@ module mkLLCDmaConnect #( DmaServer#(LLCDmaReqId) llc
    rule rl_client_ld_req;
       let rd_addr <- get (slavePortShim.master.ar);
       internal_ar_ff.enq(rd_addr);
-      ar_exclusive <= (rd_addr.arlock == EXCLUSIVE) ? tagged Valid rd_addr : Invalid;
+      if (rd_addr.arlock == EXCLUSIVE) ar_exclusive <= tagged Valid rd_addr;
       let line_addr = fn_align_addr_to_line (rd_addr.araddr);
       dmaRqT req =  DmaRq {addr:   line_addr,
                            byteEn: replicate(replicate(False)), // all False means 'read'
