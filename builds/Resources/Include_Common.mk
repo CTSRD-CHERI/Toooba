@@ -87,6 +87,7 @@ BSC_COMPILATION_FLAGS += \
 	-D SHIFT_BARREL    \
 	-D MULT_SYNTH    \
 	-D Near_Mem_Caches    \
+	-D SMALL_TAG_CACHE \
 	-D FABRIC64    \
 	-D CheriBusBytes=64 \
 	-D CheriMasterIDWidth=1 \
