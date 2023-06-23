@@ -13,6 +13,8 @@
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
 //-
+// Prefetcher modifications:
+//     Copyright (c) 2023 Karlis Susters
 //
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
@@ -60,6 +62,7 @@ import CrossBar::*;
 import Performance::*;
 import LatencyTimer::*;
 import RandomReplace::*;
+import Prefetcher::*;
 `ifdef PERFORMANCE_MONITORING
 import PerformanceMonitor::*;
 import StatCounters::*;
@@ -155,7 +158,7 @@ module mkL1Bank#(
     Add#(TAdd#(tagSz, indexSz), TAdd#(lgBankNum, LgLineSzBytes), AddrSz)
 );
 
-   Bool verbose = False;
+    Bool verbose = False;
 
     L1CRqMshr#(cRqNum, wayT, tagT, procRqT) cRqMshr <- mkL1CRqMshrLocal;
 
@@ -186,8 +189,12 @@ module mkL1Bank#(
     // we process AMO resp in a new cycle to cut critical path
     Reg#(Maybe#(AmoHitInfo#(cRqIdxT, procRqT))) processAmo <- mkReg(Invalid);
 
+    Vector#(cRqNum, Reg#(Bool)) cRqIsPrefetch <- replicateM(mkReg(?));
+    let prefetcher <- mkL1DPrefetcher;
+    let llcPrefetcher <- mkLLDPrefetcherInL1D;
+
     // security flush
-`ifdef SECURITY
+`ifdef SECURITY_CACHES
     Reg#(Bool) flushDone <- mkReg(True);
     Reg#(Bool) flushReqStart <- mkReg(False);
     Reg#(Bool) flushReqDone <- mkReg(False);
@@ -299,6 +306,7 @@ endfunction
             addr: req.addr,
             mshrIdx: n
         }));
+        cRqIsPrefetch[n] <= False;
        if (verbose)
         $display("%t L1 %m cRqTransfer_retry: ", $time,
             fshow(n), " ; ",
@@ -317,6 +325,7 @@ endfunction
             addr: r.addr,
             mshrIdx: n
         }));
+        cRqIsPrefetch[n] <= False;
         // performance counter: cRq type
         incrReqCnt(r.op);
        if (verbose)
@@ -355,7 +364,38 @@ endfunction
         $display("%t L1 %m pRsTransfer: ", $time, fshow(resp));
     endrule
 
-`ifdef SECURITY
+
+    (* descending_urgency = "pRsTransfer, cRqTransfer_retry, cRqTransfer_new, createPrefetchRq" *)
+    (* descending_urgency = "pRqTransfer, cRqTransfer_retry, cRqTransfer_new, createPrefetchRq" *)
+    rule createPrefetchRq(flushDone);
+        Addr addr <- prefetcher.getNextPrefetchAddr;
+        procRqT r = ProcRq {
+            id: ?, //Or maybe do 0 here
+            addr: addr,
+            toState: S,
+            op: Ld,
+            byteEn: ?,
+            data: ?,
+            amoInst: ?,
+            loadTags: ?,
+            pcHash: ?
+        };
+        cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
+        // send to pipeline
+        pipeline.send(CRq (L1PipeRqIn {
+            addr: r.addr,
+            mshrIdx: n
+        }));
+        cRqIsPrefetch[n] <= True;
+        // performance counter: cRq type
+       if (verbose)
+        $display("%t L1 %m createPrefetchRq: ", $time,
+            fshow(n), " ; ",
+            fshow(r)
+        );
+    endrule
+
+`ifdef SECURITY_CACHES
     // start flush when cRq MSHR is empty
     rule startFlushReq(!flushDone && !flushReqStart && cRqMshr.emptyForFlush);
         flushReqStart <= True;
@@ -454,6 +494,24 @@ endfunction
         );
     endrule
 
+    (* descending_urgency = "sendRqToP, sendPrefetchRqToP" *)
+    rule sendPrefetchRqToP;
+        let addr <- llcPrefetcher.getNextPrefetchAddr;
+        cRqToPT cRqToP = CRqMsg {
+            addr: addr,
+            fromState: ?,
+            toState: S,
+            canUpToE: True,
+            id: 0,
+            child: ?,
+            isPrefetchRq: True
+        };
+        rqToPQ.enq(cRqToP);
+        if (verbose)
+            $display("%t L1 %m sendPrefetchRqToP: ", $time,
+                fshow(cRqToP)
+            );
+    endrule
     rule sendRqToP;
         rqToPIndexQ.deq;
         cRqIdxT n = rqToPIndexQ.first;
@@ -465,7 +523,8 @@ endfunction
             toState: req.toState,
             canUpToE: True,
             id: slot.way,
-            child: ?
+            child: ?,
+            isPrefetchRq: False
         };
         rqToPQ.enq(cRqToP);
        if (verbose)
@@ -521,10 +580,12 @@ endfunction
         LineMemDataOffset dataSel = getLineMemDataOffset(req.addr);
         case(req.op) matches
             Ld: begin
-                if (req.loadTags) begin
-                    procResp.respLd(req.id, getTagsAt(curLine));
-                end else begin
-                    procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel));
+                if (!cRqIsPrefetch[n]) begin
+                    if (req.loadTags) begin
+                        procResp.respLd(req.id, getTagsAt(curLine));
+                    end else begin
+                        procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel));
+                    end
                 end
             end
             Lr: begin
@@ -579,6 +640,10 @@ endfunction
                 },
                 line: newLine // write new data into cache
             }, True); // hit, so update rep info
+            if (!cRqIsPrefetch[n]) begin
+                prefetcher.reportAccess(req.addr, req.pcHash, HIT);
+                llcPrefetcher.reportAccess(req.addr, req.pcHash, HIT);
+            end
            if (verbose)
             $display("%t L1 %m pipelineResp: Hit func: update ram: ", $time,
                 fshow(newLine), " ; ",
@@ -729,6 +794,10 @@ endfunction
                 },
                 line: ram.line
             }, False);
+            if (!cRqIsPrefetch[n]) begin
+                prefetcher.reportAccess(procRq.addr, procRq.pcHash, MISS);
+                llcPrefetcher.reportAccess(procRq.addr, procRq.pcHash, MISS);
+            end
         endaction
         endfunction
 
@@ -754,6 +823,10 @@ endfunction
                 waitP: False // we send req to parent later (when resp to parent is sent)
             });
             cRqMshr.pipelineResp.setData(n, ram.info.cs == M ? Valid (ram.line) : Invalid);
+            if (!cRqIsPrefetch[n]) begin
+                prefetcher.reportAccess(procRq.addr, procRq.pcHash, MISS);
+                llcPrefetcher.reportAccess(procRq.addr, procRq.pcHash, MISS);
+            end
             // send replacement resp to parent
             rsToPIndexQ.enq(CRq (n));
             // reset link addr
@@ -892,7 +965,9 @@ endfunction
             );
             cRqHit(cOwner, procRq);
             // performance counter: miss cRq
-            incrMissCnt(procRq.op, cOwner);
+            if (!cRqIsPrefetch[cOwner]) begin
+                incrMissCnt(procRq.op, cOwner);
+            end
         end
         else begin
             doAssert(False, ("pRs owner must match some cRq"));
@@ -989,7 +1064,7 @@ endfunction
         end
     endrule
 
-`ifdef SECURITY
+`ifdef SECURITY_CACHES
     rule pipelineResp_flush(
         !isValid(processAmo) &&&
         !flushDone &&& !flushRespDone &&&
@@ -1095,7 +1170,7 @@ endfunction
 
     interface pRqStuck = pRqMshr.stuck;
 
-`ifdef SECURITY
+`ifdef SECURITY_CACHES
     method Action flush if(flushDone);
         flushDone <= False;
     endmethod
