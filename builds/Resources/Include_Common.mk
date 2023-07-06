@@ -54,12 +54,8 @@ CORE_DIRS = $(REPO)/src_Core/CPU:$(REPO)/src_Core/ISA:$(REPO)/src_Core/Core:$(RE
 
 TESTBENCH_DIRS = $(REPO)/src_Testbench/Top:$(REPO)/src_Testbench/SoC
 
-BLUESTUFFDIR = $(REPO)/libs/BlueStuff
-BLUEAXI4DIR = $(BLUESTUFFDIR)/BlueAXI4
-BLUEAXI4DIRS = $(BLUEAXI4DIR):$(BLUEAXI4DIR)/AXI4:$(BLUEAXI4DIR)/AXI4Lite:$(BLUEAXI4DIR)/AXI4Stream:$(BLUEAXI4DIR)/BlueUnixBridges
-BLUEBASICSDIR = $(BLUESTUFFDIR)/BlueBasics
-BLUEUTILSDIR = $(BLUESTUFFDIR)/BlueUtils
-BLUESTUFF_DIRS = $(BLUESTUFFDIR):$(BLUEAXI4DIRS):$(BLUEBASICSDIR):$(BLUEUTILSDIR)
+BLUESTUFFDIR ?= $(REPO)/libs/BlueStuff
+include $(BLUESTUFFDIR)/bluestuff.inc.mk # sets the BLUESTUFF_DIRS variable
 
 WINDCOREIFC_DIRS = $(REPO)/libs/WindCoreInterface
 
@@ -96,7 +92,7 @@ BSC_COMPILATION_FLAGS += \
 	-D RISCV \
 	-D PERFORMANCE_MONITORING \
 	-D RAS_HIT_TRACING \
-	-D TSO_MM -D RVFI\
+	-D TSO_MM \
 	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D MELTDOWN_CF \
 	-keep-fires -aggressive-conditions -no-warn-action-shadowing -check-assert \
 	-suppress-warnings G0020 -steps-max-intervals 10000000   \
@@ -104,7 +100,7 @@ BSC_COMPILATION_FLAGS += \
 	-promote-warnings T0054 \
 	+RTS -K128M -RTS  -show-range-conflict
 
-#	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D NO_SPEC_RSB_PUSH -D NO_SPEC_STL
+#	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D NO_SPEC_RSB_PUSH -D NO_SPEC_STL -D RVFI
 
 # ================================================================
 # Runs simulation executable on ELF given by EXAMPLE
