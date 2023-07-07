@@ -53,7 +53,7 @@ typedef 3 NO_OF_PRIVMODES;
 
 typedef 32 XLEN;
 
-`elsif RV64
+`else
 
 typedef 64 XLEN;
 
