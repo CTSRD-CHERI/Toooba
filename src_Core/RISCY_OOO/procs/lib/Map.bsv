@@ -32,6 +32,7 @@
 // SOFTWARE.
 
 import DReg::*;
+import ConfigReg::*;
 import RegFile::*;
 import Vector::*;
 import RWBramCore::*;
@@ -42,6 +43,7 @@ typedef struct {
     ix index;
 } MapKeyIndex#(type ky, type ix) deriving(Bits, Eq, FShow);
 typedef struct {
+    Bool valid;
     ky key;
     vl value;
 } MapKeyValue#(type ky, type vl) deriving(Bits, Eq, FShow);
@@ -70,11 +72,12 @@ Bitwise#(ix), Eq#(ix), Arith#(ix));
     Reg#(Bit#(TLog#(as))) wayNext <- mkReg(0);
     Integer a = valueof(as);
 
-    Reg#(Bool) clearReg <- mkReg(True);
+    Reg#(Bool) clearReg <- mkConfigReg(True);
     Reg#(ix) clearCount <- mkReg(0);
     PulseWire didUpdate <- mkPulseWire;
     rule doClear(clearReg && !didUpdate);
-        for (Integer i = 0; i < a; i = i + 1) mem[i].upd(clearCount, unpack(0));
+        MapKeyValue#(ky,vl) inv = MapKeyValue{valid: False, key: ?, value: ?};
+        for (Integer i = 0; i < a; i = i + 1) mem[i].upd(clearCount, inv);
         clearCount <= clearCount + 1;
         if (clearCount == ~0) clearReg <= False;
     endrule
@@ -87,14 +90,14 @@ Bitwise#(ix), Eq#(ix), Arith#(ix));
         if (a > 1) begin
             for (Integer i = 0; i < a; i = i + 1) begin
                 MapKeyValue#(ky,vl) entry = mem[i].sub(ki.index);
-                if (entry.key == ki.key) begin
+                if (entry.valid && entry.key == ki.key) begin
                     found = True;
                     way = fromInteger(i);
                     old_value = entry.value;
                 end
             end
         end
-        if (found || insert) mem[way].upd(ki.index, MapKeyValue{key: ki.key, value: up(old_value, value)});
+        if (found || insert) mem[way].upd(ki.index, MapKeyValue{valid: True, key: ki.key, value: up(old_value, value)});
         wayNext <= (wayNext == fromInteger(a-1)) ? 0: wayNext + 1;
         didUpdate.send;
     endaction
@@ -109,12 +112,12 @@ Bitwise#(ix), Eq#(ix), Arith#(ix));
         Maybe#(vl) ret = Invalid;
         for (Integer i = 0; i < a; i = i + 1) begin
             let rd = mem[i].sub(lu.index);
-            if (rd.key == lu.key) ret = Valid(rd.value);
+            if (rd.valid && rd.key == lu.key) ret = Valid(rd.value);
         end
         return ret;
     endmethod
     method clear if (!clearReg) = clearReg._write(True);
-    method clearDone = clearReg;
+    method clearDone = !clearReg;
 endmodule
 
 interface MapSplit#(type ky, type ix, type vl, numeric type as);
@@ -132,36 +135,33 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     Vector#(as, RWBramCore#(ix, MapKeyValue#(ky,vl))) mem <- replicateM(mkRWBramCoreUG);
     Vector#(as, RWBramCore#(ix, ky)) updateKeys <- replicateM(mkRWBramCoreUG);
     Reg#(MapKeyIndex#(ky,ix)) lookupReg <- mkRegU;
-    Reg#(MapKeyIndexValue#(ky,ix,vl)) updateReg <- mkRegU;
-    Reg#(Bool) updateFresh <- mkDReg(False);
+    Reg#(Maybe#(MapKeyIndexValue#(ky,ix,vl))) updateReg <- mkDReg(Invalid);
     Reg#(Bit#(TLog#(as))) wayNext <- mkReg(0);
     Integer a = valueof(as);
 
-    Reg#(Bool) clearReg <- mkReg(True);
+    Reg#(Bool) clearReg <- mkConfigReg(True);
     Reg#(ix) clearCount <- mkReg(0);
     (* fire_when_enabled, no_implicit_conditions *)
     rule updateCanon;
         if (clearReg) begin
-            for (Integer i = 0; i < a; i = i + 1) mem[i].wrReq(clearCount, unpack(0));
+            for (Integer i = 0; i < a; i = i + 1) mem[i].wrReq(clearCount, MapKeyValue{valid: False, key: ?, value: ?});
             clearCount <= clearCount + 1;
             if (clearCount == ~0) clearReg <= False;
-        end else if (updateFresh) begin
-            let u = updateReg;
+        end else if (updateReg matches tagged Valid .u) begin
             Bit#(TLog#(as)) way = wayNext;
             for (Integer i = 0; i < a; i = i + 1)
                 if (updateKeys[i].rdResp == u.key) way = fromInteger(i);
             // Always write to both the main memory bank and the copy used for updates.
             /*$display("MapUpdate - index: %x, key: %x, value: %x, way: %x",
                      u.index, u.key, u.value, way);*/
-            mem[way].wrReq(u.index, MapKeyValue{key: u.key, value: u.value});
+            mem[way].wrReq(u.index, MapKeyValue{valid: True, key: u.key, value: u.value});
             updateKeys[way].wrReq(u.index, u.key);
             wayNext <= (wayNext == fromInteger(a-1)) ? 0 : (wayNext + 1);
         end
     endrule
 
     method Action update(MapKeyIndex#(ky,ix) ki, vl value);
-        updateReg <= MapKeyIndexValue{key: ki.key, index: ki.index, value: value};
-        updateFresh <= True;
+        updateReg <= Valid(MapKeyIndexValue{key: ki.key, index: ki.index, value: value});
         for (Integer i = 0; i < a; i = i + 1) updateKeys[i].rdReq(ki.index);
     endmethod
     method Action lookupStart(MapKeyIndex#(ky,ix) ki);
@@ -172,13 +172,13 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
         Maybe#(vl) readVal = Invalid;
         for (Integer i = 0; i < a; i = i + 1) begin
             let resp = mem[i].rdResp;
-            if (lookupReg.key == resp.key) readVal = Valid(resp.value);
+            if (resp.valid && lookupReg.key == resp.key) readVal = Valid(resp.value);
         end
         // If there has been a recent write, take that one.
-        if (updateReg.index == lookupReg.index && updateReg.key == lookupReg.key)
-            readVal = Valid(updateReg.value);
+        if (updateReg matches tagged Valid .u &&& u.index == lookupReg.index && u.key == lookupReg.key)
+            readVal = Valid(u.value);
         return readVal;
     endmethod
     method clear if (!clearReg) = clearReg._write(True);
-    method clearDone = clearReg;
+    method clearDone = !clearReg;
 endmodule

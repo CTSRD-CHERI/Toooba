@@ -53,6 +53,7 @@ import FIFOF     :: *;
 // BSV additional libs
 
 import GetPut_Aux :: *;
+import Map::*;
 
 // ================================================================
 // Project imports
@@ -68,6 +69,8 @@ import MMIOAddrs::*;
 import MMIOCore::*;
 import CacheUtils::*;
 import Amo::*;
+import SoC_Map::*;
+import Routable::*; // For Range
 
 // ----------------
 // From McStriiv
@@ -154,8 +157,18 @@ typedef union tagged {
    void ToHost;
    void FromHost;
    Addr  MMIO_Fabric_Adapter;
+   Addr  Global_Memory;
    void LoadTags;
 } MMIOPlatformReq deriving(Bits, Eq, FShow);
+
+// ================================================================
+// Types for buffer of global memory Accesses
+typedef 2 GloBuffAssociativity;
+typedef 8 BuffIdxSz;
+typedef struct {
+  MemDataByteEn byteEn;
+  MemTaggedData data;
+} BuffRecord deriving(Bits, Eq, FShow);
 
 module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
                         Server #(MMIOCRq, MMIODataPRs) mmio_fabric_adapter_core_side)
@@ -174,6 +187,7 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
    Fifo#(1, Data) fromHostQ <- mkCFFifo;
    Reg#(DataAlignedAddr) toHostAddr <- mkReg(0);
    Reg#(DataAlignedAddr) fromHostAddr <- mkReg(0);
+   SoC_Map_IFC socMap <- mkSoC_Map;
 
    // state machine
    Reg#(MMIOPlatformState) state <- mkReg (SelectReq);
@@ -221,6 +235,12 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
    // change MTIP is through here.
    // We initialize to True to avoid an timer interrupt at start of time.
    Vector#(CoreNum, Reg#(Bool)) mtip <- replicateM(mkReg(True));
+
+   // The buffer for Global Accesses.
+   MapSplit#(Bit#(TSub#(SizeOf#(DataAlignedAddr),BuffIdxSz)),
+             Bit#(BuffIdxSz),
+             BuffRecord,
+             GloBuffAssociativity) gloBuff <- mkMapLossyBRAM;
 
    // pass mtime to each core
    rule propagateTime(state != Init);
@@ -298,6 +318,7 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
             fetchingWay <= 0;
             // find out which MMIO reg/device is being requested
             DataAlignedAddr addr = getDataAlignedAddr(req.addr);
+            gloBuff.lookupStart(unpack(pack(addr)));
             MMIOPlatformReq newReq = Invalid;
 
             if(req.loadTags) begin
@@ -323,7 +344,9 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
                // assume fromhost is of size Data
                newReq = FromHost;
             end
-            else begin    // Send all remaining reqs to the fabric adapter, as is
+            else if(inRange(socMap.m_global_bgas_addr_range, {addr,0})) begin
+               newReq = Global_Memory (req.addr);
+            end else begin    // Send all remaining reqs to the fabric adapter, as is
                newReq = MMIO_Fabric_Adapter (req.addr);
             end
             curReq <= newReq;
@@ -822,6 +845,138 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
         end
     endrule
 
+    // ================================================================
+    // Global Memory to Fabric: Load/Store (not Instruction Fetch)
+
+    function BuffRecord mergeBuffRecord(BuffRecord buff);
+       //mergeDataBE(data_t0 oldData, data_t1 newData, be_t be)
+       return BuffRecord{byteEn: zipWith( \&& , buff.byteEn, reqBE), data:mergeMemTaggedDataBE(buff.data, reqData, reqBE)};
+    endfunction
+
+    //Reg#(Maybe#(Tuple2#(MMIOCRq,MMIODataPRs))) globalCache <- mkRegU;
+    rule rl_global_memory_to_fabric_req (curReq matches tagged Global_Memory .addr
+                                &&& (state == ProcessReq)
+                                &&& (isLd || isSt));
+       let req = MMIOCRq {addr:addr, func:reqFunc, byteEn:reqBE, data:reqData, loadTags:False};
+       if (gloBuff.lookupRead() matches tagged Valid .buff &&& isLd && zipWith( \&& , buff.byteEn, reqBE) == reqBE) begin
+          cores[reqCore].pRs.enq (tagged DataAccess MMIODataPRs{valid: True, data: buff.data});
+          if (verbosity > 0) begin
+             $display ("GlobalMemory.rl_global_memory_to_fabric_req used cached response ", fshow (req), ". Response: ", fshow (buff));
+          end
+          state <= SelectReq;
+       end else begin
+          if (gloBuff.lookupRead() matches tagged Valid .buff)
+             gloBuff.update(unpack(pack(getDataAlignedAddr(addr))), mergeBuffRecord(buff));
+
+          mmio_fabric_adapter_core_side.request.put (req);
+          state <= WaitResp;
+
+          if (verbosity > 0) begin
+             $display ("GlobalMemory.rl_global_memory_to_fabric_req ", fshow (req));
+             $display ("    ", fshow (req));
+          end
+       end
+    endrule
+
+    rule rl_global_memory_from_fabric_rsp (curReq matches tagged Global_Memory .addr
+                                  &&& (state == WaitResp)
+                                  &&& (isLd || isSt));
+       MMIODataPRs dprs <- mmio_fabric_adapter_core_side.response.get;
+       let prs = tagged DataAccess dprs;
+       cores[reqCore].pRs.enq (prs);
+       state <= SelectReq;
+       MMIOCRq req = MMIOCRq {addr:addr, func:reqFunc, byteEn:reqBE, data:reqData, loadTags:False};
+       gloBuff.update(unpack(pack(getDataAlignedAddr(addr))), BuffRecord{byteEn: reqBE, data:reqData});
+
+       if (verbosity > 0) begin
+          $display ("GlobalMemory.rl_global_memory_from_fabric_rsp");
+          $display ("    ", fshow (prs));
+       end
+    endrule
+
+    rule rl_global_memory_to_fabric_amo_req (curReq matches tagged Global_Memory .addr
+                                    &&& (state == ProcessReq)
+                                    &&& isAmo);
+       // Send a load-request to the fabric adapter.
+       // Align addr to 8-byte boundary (FabricData-aligned)
+       Addr addr1 = { addr [63:3], 3'b_000 };
+       // Byte enables are used in the AXI adapter to determine the size of the req. Set 8 bits (it
+       // doesn't matter which) to preserve the behaviour of requesting 8 bytes).
+       // TODO: instead specify access size in interface
+       let req = MMIOCRq {addr:addr, func:tagged Lr, byteEn:unpack(16'b0000_0000_1111_1111), data:?, loadTags:False};
+       mmio_fabric_adapter_core_side.request.put (req);
+       state <= WaitResp;
+       amoWaitWriteResp <= False;
+       gloBuff.clear;
+
+       if (verbosity > 0) begin
+          $display ("MMIOPlatform.rl_mmio_to_fabric_amo_req: addr 0x%0h", addr);
+          $display ("    ", fshow (req));
+       end
+    endrule
+
+    function Bool pred(Bool b) = b;
+    let set_bes = countIf(pred, reqBE);
+    Bool reqDWord = (set_bes > 4);
+
+    // Get the Load-response; do the AMO op; send final write back to fabric, and respond to core
+    rule rl_global_memory_from_fabric_amo_rsp (curReq matches tagged Global_Memory .addr
+                                      &&& (state == WaitResp)
+                                      &&& isAmo);
+       MMIODataPRs dprs <- mmio_fabric_adapter_core_side.response.get;
+
+       if (!amoWaitWriteResp) begin
+          if (dprs.valid) begin
+             MemTaggedData ld_val = dprs.data;
+             // Do the AMO op on the loaded value and the store value
+             let amoInst = AmoInst {
+                func: reqAmofunc,
+                width: (reqDWord) ? DWord : Word,
+                aq: False,
+                rl: False
+             };
+             let new_st_val = amoExec(amoInst, addr[3:2],
+                                      ld_val, reqData);
+
+             // Write back new st_val to fabric
+             let req = MMIOCRq {addr:addr, func:tagged Sc, byteEn:reqBE, data: new_st_val, loadTags: False};
+             mmio_fabric_adapter_core_side.request.put (req);
+
+             rspData <= MMIODataPRs { valid: True, data: ld_val };
+             // Stay in WaitResp but wait to discard the write response
+             amoWaitWriteResp <= True;
+
+             if (verbosity > 1) begin
+                $display ("MMIO_Platform.rl_mmio_from_fabric_amo_rsp: addr 0x%0h, size %0d, amofunc %0d",
+                          addr, reqSz, reqAmofunc);
+                $display ("    ld_val 0x%0h  op  st_val 0x%0h => new_st_val 0x%0h", ld_val, reqData, new_st_val);
+             end
+          end else begin
+             // Access fault
+             let prs = tagged DataAccess dprs;
+             cores[reqCore].pRs.enq (prs);
+             state <= SelectReq;
+          end
+       end else begin
+          if (dprs.valid) begin // Discard the write response; we're now ready for another request
+            if (verbosity > 1) begin
+               $display ("MMIO_Platform.rl_mmio_from_fabric_amo_rsp: addr 0x%0h, size %0d, amofunc %0d",
+                         addr, reqSz, reqAmofunc);
+               $display ("    rspData.valid %b  rspData.data 0x%0h", rspData.valid, rspData.data);
+            end
+            //cores[reqCore].pRs.enq (tagged DataAccess rspData);
+            let rsp = rspData;
+            if (reqDWord) rsp.data.data[0] = rspData.data.data[addr[3]];
+            else begin
+               Vector#(4, Bit#(32)) words = unpack(pack(rspData.data.data));
+               rsp.data.data[0] = zeroExtend(words[addr[3:2]]);
+            end
+            cores[reqCore].pRs.enq (tagged DataAccess rsp);
+            state <= SelectReq;
+          end else state <= ProcessReq; // If SC failed, try again!  Atomics cannot fail from an ISA perspective, so retry in hardware.
+       end
+    endrule
+
    // ================================================================
    // ================================================================
    // ================================================================
@@ -882,10 +1037,6 @@ module mkMMIOPlatform #(Vector#(CoreNum, MMIOCoreToPlatform) cores,
          $display ("    ", fshow (req));
       end
    endrule
-
-   function Bool pred(Bool b) = b;
-   let set_bes = countIf(pred, reqBE);
-   Bool reqDWord = (set_bes > 4);
 
    // Get the Load-response; do the AMO op; send final write back to fabric, and respond to core
    rule rl_mmio_from_fabric_amo_rsp (curReq matches tagged MMIO_Fabric_Adapter .addr
