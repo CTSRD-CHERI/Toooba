@@ -101,6 +101,7 @@ BSC_COMPILATION_FLAGS += \
 	+RTS -K128M -RTS  -show-range-conflict
 
 #	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D NO_SPEC_RSB_PUSH -D NO_SPEC_STL -D RVFI
+#       -D NO_COMPRESSED_BTB
 
 # ================================================================
 # Runs simulation executable on ELF given by EXAMPLE
