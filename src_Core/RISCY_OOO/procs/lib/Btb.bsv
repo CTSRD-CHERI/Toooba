@@ -58,8 +58,15 @@ endinterface
 
 // Local BTB Typedefs
 typedef 1 PcLsbsIgnore;
-typedef 1024 BtbEntries;
-typedef Bit#(16) CompressedTarget;
+typedef 4096 BtbEntries;
+`ifdef NO_COMPRESSED_BTB
+typedef CapMem CompressedTarget;
+typedef 1 FullBtbIndices;
+`else
+typedef Bit#(22) CompressedTarget;
+typedef 16 ShortToFullFactor;
+typedef TDiv#(TDiv#(BtbEntries,SupSizeX2),ShortToFullFactor) FullBtbIndices;
+`endif
 typedef 2 BtbAssociativity;
 typedef Bit#(TLog#(SupSizeX2)) BtbBank;
 // Total entries/lanes of superscalar lookup/associativity
@@ -67,6 +74,8 @@ typedef TDiv#(TDiv#(BtbEntries,SupSizeX2),BtbAssociativity) BtbIndices;
 typedef Bit#(TLog#(BtbIndices)) BtbIndex;
 typedef Bit#(TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)) BtbTag;
 typedef Bit#(hashSz) HashedTag#(numeric type hashSz);
+// Types for "full" or uncompressed BTB entries
+typedef Bit#(TLog#(FullBtbIndices)) FullBtbIndex;
 
 typedef struct {
     BtbTag tag;
@@ -97,18 +106,23 @@ module mkBtbCore(NextAddrPred#(hashSz))
     Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
     // Read and Write ordering doesn't matter since this is a predictor
     Reg#(CapMem) addr_reg <- mkRegU;
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CapMem), 1))
+`ifndef NO_COMPRESSED_BTB
+    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), FullBtbIndex, VnD#(CapTrim), 1))
         fullRecords <- replicateM(mkMapLossyBRAM);
+`endif
     Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CompressedTarget), BtbAssociativity))
         compressedRecords <- replicateM(mkMapLossyBRAM);
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
 
     function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
     function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
-    function BtbIndex getIndex(CapMem pc) = getBtbAddr(pc).index;
     function BtbTag getTag(CapMem pc) = getBtbAddr(pc).tag;
+    function BtbIndex getIndex(CapMem pc) = getBtbAddr(pc).index;
     function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(CapMem pc) =
         MapKeyIndex{key: hash(getTag(pc)), index: getIndex(pc)};
+    function FullBtbIndex getFullIndex(CapMem pc) = truncate(getBtbAddr(pc).index);
+    function MapKeyIndex#(HashedTag#(hashSz),FullBtbIndex) lookupFullKey(CapMem pc) =
+        MapKeyIndex{key: hash(getTag(pc)), index: getFullIndex(pc)};
 
     // no flush, accept update
     (* fire_when_enabled, no_implicit_conditions *)
@@ -122,8 +136,10 @@ module mkBtbCore(NextAddrPred#(hashSz))
         CapMem mask = ~zeroExtend(shortMask);
         if ((pc&mask) == (nextPc&mask))
             compressedRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:truncate(nextPc)});
+`ifndef NO_COMPRESSED_BTB
         else
-            fullRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:nextPc});
+            fullRecords[getBank(pc)].update(lookupFullKey(pc), VnD{v:taken, d:trimCap(nextPc)});
+`endif
     endrule
 
     method Action put_pc(CapMem pc);
@@ -135,7 +151,9 @@ module mkBtbCore(NextAddrPred#(hashSz))
             BtbAddr a = getBtbAddr(pc);
             a = unpack({a.tag, {a.index,a.bank} + fromInteger(i)});
             //BtbAddr a = unpack(pack(getBtbAddr(pc)) + fromInteger(i));
-            fullRecords[a.bank].lookupStart(MapKeyIndex{key: hash(a.tag), index: a.index});
+`ifndef NO_COMPRESSED_BTB
+            fullRecords[a.bank].lookupStart(MapKeyIndex{key: hash(a.tag), index: truncate(a.index)});
+`endif
             compressedRecords[a.bank].lookupStart(MapKeyIndex{key: hash(a.tag), index: a.index});
         end
     endmethod
@@ -143,8 +161,10 @@ module mkBtbCore(NextAddrPred#(hashSz))
     method Vector#(SupSizeX2, Maybe#(CapMem)) pred;
         Vector#(SupSizeX2, Maybe#(CapMem)) ppcs = replicate(Invalid);
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
+`ifndef NO_COMPRESSED_BTB
             if (fullRecords[i].lookupRead matches tagged Valid .r)
-                ppcs[i] = r.v ? Valid(r.d):Invalid;
+                ppcs[i] = r.v ? Valid(untrimCap(r.d)):Invalid;
+`endif
             if (compressedRecords[i].lookupRead matches tagged Valid .r)
                 ppcs[i] = r.v ? Valid({truncateLSB(addr_reg),r.d}):Invalid;
         end
@@ -159,11 +179,17 @@ module mkBtbCore(NextAddrPred#(hashSz))
 `ifdef SECURITY
     method Action flush method Action flush;
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
+`ifndef NO_COMPRESSED_BTB
             fullRecords[i].clear;
+`endif
             compressedRecords[i].clear;
         end
     endmethod
+`ifndef NO_COMPRESSED_BTB
     method flush_done = fullRecords[0].clearDone;
+`else
+    method flush_done = compressedRecords[0].clearDone;
+`endif
 `else
     method flush = noAction;
     method flush_done = True;
