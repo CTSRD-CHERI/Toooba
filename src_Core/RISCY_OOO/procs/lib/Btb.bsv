@@ -64,7 +64,7 @@ typedef CapMem CompressedTarget;
 typedef 1 FullBtbIndices;
 `else
 typedef Bit#(22) CompressedTarget;
-typedef 16 ShortToFullFactor;
+typedef 32 ShortToFullFactor;
 typedef TDiv#(TDiv#(BtbEntries,SupSizeX2),ShortToFullFactor) FullBtbIndices;
 `endif
 typedef 2 BtbAssociativity;
