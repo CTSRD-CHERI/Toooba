@@ -475,6 +475,7 @@ typedef union tagged {
     CapException CapException;
     Exception Exception;
     Interrupt Interrupt;
+    void PccMiss; // Not a real trap, but will flush to the next instruction.
 } Trap deriving(Bits, Eq, FShow);
 
 // privilege modes
@@ -561,12 +562,19 @@ instance DefaultValue#(VMInfo);
 endinstance
 
 typedef struct {
-    Addr  pc;
-    Addr  nextPc;
-    IType iType;
-    Bool  taken;
-    Bool  mispredict;
-} Redirect deriving (Bits, Eq, FShow);
+    Addr pc;
+} PredState deriving (Bits, Eq, FShow);
+PredState nullPredState = PredState{pc: 0};
+
+function Addr getPc(PredState ps) = ps.pc;
+function PredState setPcUnsafe(PredState ps, Addr pc);
+    ps.pc = pc;
+    return ps;
+endfunction
+function PredState addPs(PredState ps, Bit#(8) inc);
+    ps.pc = ps.pc + signExtend(inc);
+    return ps;
+endfunction
 
 typedef struct {
     CapPipe pc;
@@ -683,7 +691,7 @@ typedef struct {
     CapMem      csrData;
     CapPipe     addr;
     ControlFlow controlFlow;
-    Maybe#(CapException) capException;
+    Maybe#(Trap) trap;
     Maybe#(BoundsCheck) boundsCheck;
 } ExecResult deriving(Bits, FShow);
 
@@ -864,10 +872,15 @@ Bit#(7) privSFENCEVMA  = 7'h9;
 
 function Bool isSystem(IType iType) = (
     iType == Unsupported || iType == Interrupt ||
-    iType == Ecall || iType == Ebreak || iType == Csr || iType == Scr ||
+    iType == Ecall || iType == Ebreak || /*iType == Csr || iType == Scr ||*/
     iType == SFence || iType == FenceI ||
     iType == Sret || iType == Mret
+`ifndef AGGRESSIVE_CSR_SCHEDULING
+    || iType == Csr || iType == Scr
+`endif
 );
+
+function Bool isCsr(IType iType) = iType == Csr || iType == Scr;
 
 // instruction requires replaying (i.e. fetch next instruction after current
 // instruction commits)

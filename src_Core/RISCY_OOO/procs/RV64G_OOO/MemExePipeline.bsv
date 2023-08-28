@@ -187,7 +187,7 @@ interface MemExeInput;
     // Special Capability Register file.
     method CapReg scaprf_rd(SCR csr);
     // ROB
-    method CapMem rob_getPC(InstTag t);
+    method PredState rob_getPS(InstTag t);
     method Action rob_setExecuted_doFinishMem(InstTag t,
                                               Addr vaddr,
 `ifdef INCLUDE_TANDEM_VERIF
@@ -701,7 +701,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
 `endif
 `endif
-        let pc = inIfc.rob_getPC(x.tag);
+        let ps = inIfc.rob_getPS(x.tag);
 
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
@@ -724,7 +724,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
-                pcHash: hash(getAddr(pc))
+                pcHash: hash(getPc(ps))
             });
         end
 

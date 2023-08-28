@@ -398,8 +398,9 @@ function ControlFlow getControlFlow(DecodedInst dInst, Data rVal1, Data rVal2, A
     return cf;
 endfunction
 */
+
 (* noinline *)
-function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, CapPipe pcc, CapPipe ppc, Bit #(32) orig_inst);
+function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, CapPipe pcc, PredState pps, Bit #(32) orig_inst);
     // just data, addr, and control flow
     CapPipe data = nullCap;
     CapPipe addr = nullCap;
@@ -416,7 +417,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
     Tuple2#(CapPipe,Bool) cap_alu_result_with_exact = capALU(rVal1, aluVal2, dInst.capFunc);
     CapPipe cap_alu_result = tpl_1(cap_alu_result_with_exact);
     Bool cap_exact = tpl_2(cap_alu_result_with_exact);
-    CapPipe link_pcc = addPc(pcc, ((orig_inst [1:0] == 2'b11) ? 4 : 2));
+    CapPipe link_pcc = addAddrUnsafe(pcc, ((orig_inst [1:0] == 2'b11) ? 4 : 2));
 
     // Default branch function is not taken
     BrFunc br_f = dInst.execFunc matches tagged Br .br_f ? br_f : NT;
@@ -454,8 +455,16 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
     if (isValid(capException)) cap_alu_result = setValidCap(cap_alu_result, False);
 `endif
 
+    Maybe#(Trap) trap = Invalid;
+    if (capException matches tagged Valid .ce) trap = Valid(CapException(ce));
+
     cf.nextPc = setKind(cf.nextPc, UNSEALED);
-    cf.mispredict = cf.nextPc != ppc;
+    cf.mispredict = False;
+    function Bool capBoundsCompare(CapPipe a, CapPipe b) =
+        (setAddrUnsafe(a,0) == setAddrUnsafe(b,0)) && (getBase(a) == getBase(b));
+    if (!capBoundsCompare(cf.nextPc, pcc)) begin // Never flush both here and in commit; either/or.
+        if (!isValid(trap)) trap = Valid(PccMiss);
+    end else cf.mispredict = (getAddr(cf.nextPc) != getPc(pps));
 
     data = (case (dInst.iType)
             St          : rVal2;
@@ -482,7 +491,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
             default             : cf.nextPc; //TODO should this be nullified?
         endcase);
 
-    return ExecResult{data: data, csrData: csr_data, addr: addr, controlFlow: cf, capException: capException, boundsCheck: boundsCheck};
+    return ExecResult{data: data, csrData: csr_data, addr: addr, controlFlow: cf, trap: trap, boundsCheck: boundsCheck};
 endfunction
 
 (* noinline *)
@@ -570,7 +579,7 @@ function Maybe#(Trap) checkForException(
     else if(dInst.scr matches tagged Valid .scr) begin
         Bool scr_has_priv = (prv >= pack(scr)[4:3]);
         Bool unimplemented = (scr == scrAddrNone);
-        Bool writes_scr = regs.src1 == Valid (tagged Gpr 0) ? False : True;
+        Bool writes_scr = (!isValid(regs.src1) || regs.src1 == Valid (tagged Gpr 0)) ? False : True;
         Bool read_only  = (scr == scrAddrPCC);
         Bool write_deny = (writes_scr && read_only);
         Bool asr_allow = getHardPerms(pcc).accessSysRegs ||
@@ -596,21 +605,7 @@ function Maybe#(Trap) checkForException(
         end
     end
 
-    // Check that the end of the instruction is in bounds of PCC.
-    CapPipe pcc_end = cast(addPc(pcc, (fourByteInst?4:2)));
-    CapPipe pcc_start = cast(pcc);
-    Maybe#(CSR_XCapCause) capException = Invalid;
-    if (!isValidCap(pcc_start)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcTagViolation});
-    if (getKind(pcc_start) != UNSEALED) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcSealViolation});
-    if (!getHardPerms(pcc_start).permitExecute) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcPermitXViolation});
-    if (!isInBounds(pcc_end, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcLengthViolation});
-    if (!isInBounds(pcc_start, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcLengthViolation});
-
-    Maybe#(Trap) retval = Invalid;
-    if (capException matches tagged Valid .ce) retval = Valid(CapException(ce));
-    else retval = exception;
-
-    return retval;
+    return exception;
 endfunction
 
 // check mem access misaligned: byteEn is unshifted (just from Decode)

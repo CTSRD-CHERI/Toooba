@@ -900,8 +900,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
             end
             else begin // fnCSRRWI, fnCSRRW, fnCSRRSI, fnCSRRS, fnCSRRCI, fnCSRRC
                 if (truncate(immI) == pack(csrAddrMTVEC) || truncate(immI) == pack(csrAddrMEPC) || truncate(immI) == pack(csrAddrSTVEC) || truncate(immI) == pack(csrAddrSEPC)) begin
-                    Bool shouldWrite = (funct3 == fnCSRRWI || funct3 == fnCSRRW) || rs1 != 0;
-                    dInst.iType = shouldWrite ? Scr : Cap;
+                    dInst.iType = Scr;
                     regs.dst = Valid(tagged Gpr rd);
                     regs.src1 = (funct3[2] == 0 ? Valid(tagged Gpr rs1) : Invalid);
                     dInst.imm = (funct3[2] == 0 ? Invalid : Valid(zeroExtend(rs1)));
@@ -981,9 +980,9 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                 f3_cap_ThreeOp: begin
                     case (funct7)
                         f7_cap_CSpecialRW: begin
-                            dInst.iType = rs1 == 0 ? Cap : Scr;
-                            regs.dst = Valid(tagged Gpr rd);
-                            regs.src1 = Valid(tagged Gpr rs1);
+                            dInst.iType = Scr;
+                            regs.dst =  (rd  != 0) ? Valid(tagged Gpr rd) :Invalid;
+                            regs.src1 = (rs1 != 0) ? Valid(tagged Gpr rs1):Invalid;
 
                             let scr = unpackSCR(rs2);
 

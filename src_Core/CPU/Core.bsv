@@ -408,12 +408,13 @@ module mkCore#(CoreId coreId)(Core);
             end
             let aluExeInput = (interface AluExeInput;
                 method sbCons_lazyLookup = sbCons.lazyLookup[aluRdPort(i)].get;
+                method pcc = fetchStage.pcc;
                 method rf_rd1 = cast(rf.read[aluRdPort(i)].rd1);
                 method rf_rd2 = cast(rf.read[aluRdPort(i)].rd2);
                 method csrf_rd = csrf.rd;
                 method scaprf_rd = csrf.scrRd;
-                method rob_getPC = rob.getOrigPC[i].get;
-                method rob_getPredPC = rob.getOrigPredPC[i].get;
+                method rob_getPS = rob.getOrigPS[i].get;
+                method rob_getPredPS = rob.getOrigPredPS[i].get;
                 method rob_getOrig_Inst = rob.getOrig_Inst[i].get;
                 method rob_setExecuted = rob.setExecuted_doFinishAlu[i].set;
                 method fetch_train_predictors = trainBPQ[i].enq;
@@ -466,7 +467,7 @@ module mkCore#(CoreId coreId)(Core);
                 let train = trainBPQ[i].first.data;
                 trainBPQ[i].deq;
                 fetchStage.train_predictors(
-                    train.pc, train.nextPc, train.iType, train.taken, train.link,
+                    train.ps, train.nextPs, train.iType, train.taken,
                     train.trainInfo, train.mispred, train.isCompressed
                 );
             endrule
@@ -498,7 +499,7 @@ module mkCore#(CoreId coreId)(Core);
             method rf_rd2 = cast(rf.read[memRdPort].rd2);
             method csrf_rd = csrf.rd;
             method scaprf_rd = csrf.scrRd;
-            method rob_getPC = rob.getOrigPC[valueof(AluExeNum)].get; // last getPC port
+            method rob_getPS = rob.getOrigPS[valueof(AluExeNum)].get; // last getPC port
             method rob_setExecuted_doFinishMem = rob.setExecuted_doFinishMem;
 `ifdef INCLUDE_TANDEM_VERIF
             method rob_setExecuted_doFinishMem_RegData = rob.setExecuted_doFinishMem_RegData;
@@ -705,7 +706,8 @@ module mkCore#(CoreId coreId)(Core);
         method setReconcileI = reconcile_i._write(True);
         method setReconcileD = reconcile_d._write(True);
         method killAll = coreFix.killAll;
-        method redirectPc = fetchStage.redirect;
+        method redirectPcc = fetchStage.redirect;
+        method pcc = fetchStage.pcc;
         method setFetchWaitRedirect = fetchStage.setWaitRedirect;
 `ifdef INCLUDE_GDB_CONTROL
         method setFetchWaitFlush    = fetchStage.setWaitFlush;

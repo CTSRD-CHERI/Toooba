@@ -74,7 +74,7 @@ typedef struct {
 `endif
 
 typedef struct {
-    CapMem             pc;
+    PredState          ps;
     Bit #(32)          orig_inst;    // original 16b or 32b instruction ([1:0] will distinguish 16b or 32b)
     IType              iType;
     Maybe#(ArchRIndx)  dst;          // Invalid, GPR or FPR destination ("Rd")
@@ -130,7 +130,7 @@ interface Row_setExecuted_doFinishAlu;
         CapPipe dst_data,
 `endif
         PPCVAddrCSRData csrData,
-        Maybe#(CSR_XCapCause) cause
+        Maybe#(Trap) cause
 `ifdef RVFI
         , ExtraTraceBundle tb
 `endif
@@ -187,13 +187,15 @@ interface ReorderBufferRowEhr#(numeric type aluExeNum, numeric type fpuMulDivExe
     // in-order core sets LSQ tag after getting out of issue queue
     method Action setLSQTag(LdStQTag t, Bool isFence);
 `endif
-    // get original PC/PPC before execution, EHR port 0 will suffice
-    method CapMem getOrigPC;
-    method CapMem getOrigPredPC;
+    // get original PS/PPC before execution, EHR port 0 will suffice
+    method PredState getOrigPS;
+    method PredState getOrigPredPS;
     method Bit #(32) getOrig_Inst;
     // speculation
     method Bool dependsOn_wrongSpec(SpecTag tag);
     method Action correctSpeculation(SpecBits mask);
+    method Bool csrRead;
+    method Bool csrWrite;
 endinterface
 
 module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) provisos(
@@ -252,7 +254,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Integer traceBundle_deqLSQ_port = valueof(fpuMulDivExeNum) + valueof(aluExeNum);
     Integer traceBundle_enq_port = 1 + traceBundle_deqLSQ_port;
 
-    Reg#(CapMem)                                                    pc                   <- mkRegU;
+    Reg#(PredState)                                                 ps                   <- mkRegU;
     Reg #(Bit #(32))                                                orig_inst            <- mkRegU;
     Reg#(IType)                                                     iType                <- mkRegU;
     Reg #(Maybe #(ArchRIndx))                                       rg_dst_reg           <- mkRegU;
@@ -287,7 +289,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Wire#(CapMem) predPcWire <- mkBypassWire;
     (* fire_when_enabled, no_implicit_conditions *)
     rule setPcWires;
-        predPcWire <= ppc_vaddr_csrData[0] matches tagged PPC .a ? cast(a) : nullCap;
+        predPcWire <= ppc_vaddr_csrData[0] matches tagged PPC .a ? a : nullCap;
     endrule
 
     Vector#(aluExeNum, Row_setExecuted_doFinishAlu) aluSetExe;
@@ -298,7 +300,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
                 CapPipe dst_data,
 `endif
                 PPCVAddrCSRData csrDataOrPPC,
-                Maybe#(CSR_XCapCause) cause
+                Maybe#(Trap) cause
 `ifdef RVFI
                 , ExtraTraceBundle tb
 `endif
@@ -312,10 +314,9 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
 
                 // update PPC or csrData (vaddr is always useless for ALU results)
                 ppc_vaddr_csrData[pvc_finishAlu_port(i)] <= csrDataOrPPC;
-                if (cause matches tagged Valid .exp)
-                    trap[trap_finishAlu_port(i)] <= Valid (CapException (exp));
+                if (isValid(cause)) trap[trap_finishAlu_port(i)] <= cause;
 `ifdef RVFI
-                //$display("%t : traceBundle = ", $time(), fshow(tb), " in Row_setExecuted_doFinishAlu for %x", pc);
+                //$display("%t : traceBundle = ", $time(), fshow(tb), " in Row_setExecuted_doFinishAlu for %x", ps);
                 traceBundle[traceBundle_finishAlu_port(i)] <= tb;
 `endif
                 if (csrDataOrPPC matches tagged CSRData .unused)
@@ -344,15 +345,15 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
                 // update fflags
                 fflags[fflags_finishFpuMulDiv_port(i)] <= new_fflags;
 `ifdef RVFI
-                //$display("%t : traceBundle = ", $time(), fshow(tb), " in Row_setExecuted_doFinishAlu for %x", pc);
+                //$display("%t : traceBundle = ", $time(), fshow(tb), " in Row_setExecuted_doFinishAlu for %x", ps);
                 traceBundle[traceBundle_finishFpuMulDiv_port(i)] <= tb;
 `endif
             endmethod
         endinterface);
     end
 
-    method CapMem getOrigPC = pc;
-    method CapMem getOrigPredPC = predPcWire;
+    method PredState getOrigPS = ps;
+    method PredState getOrigPredPS = PredState{pc: getAddr(predPcWire)};
     method Bit #(32) getOrig_Inst = orig_inst;
 
     interface setExecuted_doFinishAlu = aluSetExe;
@@ -378,7 +379,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
         // update VAddr
         ppc_vaddr_csrData[pvc_finishMem_port] <= VAddr (vaddr);
 `ifdef RVFI
-        //$display("%t : traceBundle = ", $time(), fshow(tb), " in setExecuted_doFinishMem for %x", pc);
+        //$display("%t : traceBundle = ", $time(), fshow(tb), " in setExecuted_doFinishMem for %x", ps);
         traceBundle[traceBundle_deqLSQ_port] <= tb;
 `endif
 `ifdef INCLUDE_TANDEM_VERIF
@@ -408,7 +409,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
 `endif
 
     method Action write_enq(ToReorderBuffer x);
-        pc <= x.pc;
+        ps <= x.ps;
         orig_inst <= x.orig_inst;
         iType <= x.iType;
         rg_dst_reg <= x.dst;
@@ -440,7 +441,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
         dii_pid <= x.dii_pid;
 `endif
 `ifdef RVFI
-        //$display("%t : traceBundle = ", $time(), fshow(x.traceBundle), " in write_enq for %x", pc);
+        //$display("%t : traceBundle = ", $time(), fshow(x.traceBundle), " in write_enq for %x", ps);
         traceBundle[traceBundle_enq_port] <= x.traceBundle;
 `endif
         // check
@@ -452,7 +453,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
 
     method ToReorderBuffer read_deq;
         return ToReorderBuffer {
-            pc: pc,
+            ps: ps,
             orig_inst: orig_inst,
             iType: iType,
             dst: rg_dst_reg,
@@ -517,6 +518,11 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
         SpecBits sb = spec_bits[sb_correctSpec_port];
         spec_bits[sb_correctSpec_port] <= sb & mask;
     endmethod
+
+    method Bool csrRead  = (isValid(csr) || isValid(scr)) && (orig_inst[11:7]!=0);
+    // This is a CSR write if this is a CSR instruction and there is a non-zero rs1 operand, or if this is a CSR immediate instruction.
+    method Bool csrWrite = (isValid(csr) && (orig_inst[19:15]!=0 || orig_inst[14]==1'b1))
+                        || (isValid(scr) && orig_inst[19:15]!=0);
 endmodule
 
 interface ROB_SpeculationUpdate;
@@ -565,7 +571,7 @@ interface ROB_setExecuted_doFinishAlu;
                       Data dst_data,
 `endif
                       PPCVAddrCSRData csrData,
-                      Maybe#(CSR_XCapCause) cause
+                      Maybe#(Trap) cause
 `ifdef RVFI
                       , ExtraTraceBundle tb
 `endif
@@ -584,12 +590,12 @@ interface ROB_setExecuted_doFinishFpuMulDiv;
                       );
 endinterface
 
-interface ROB_getOrigPC;
-    method CapMem get(InstTag x);
+interface ROB_getOrigPS;
+    method PredState get(InstTag x);
 endinterface
 
-interface ROB_getOrigPredPC;
-    method CapMem get(InstTag x);
+interface ROB_getOrigPredPS;
+    method PredState get(InstTag x);
 endinterface
 
 interface ROB_getOrig_Inst;
@@ -634,21 +640,23 @@ interface SupReorderBuffer#(numeric type aluExeNum, numeric type fpuMulDivExeNum
     // in-order core sets LSQ tag after getting out of issue queue
     method Action setLSQTag(InstTag x, LdStQTag t, Bool isFence);
 `endif
-
-    // get original PC/PPC before execution, EHR port 0 will suffice
-    interface Vector#(TAdd#(1, aluExeNum), ROB_getOrigPC) getOrigPC;
-`ifdef CONTRACTS_VERIFY
-    interface Vector#(TAdd#(1, aluExeNum), ROB_getOrigPredPC) getOrigPredPC;
-    interface Vector#(TAdd#(1, aluExeNum), ROB_getOrig_Inst) getOrig_Inst;
-`else
-    interface Vector#(aluExeNum, ROB_getOrigPredPC) getOrigPredPC;
+    
+    // get original PS/PPC before execution, EHR port 0 will suffice
+    interface Vector#(TAdd#(1, aluExeNum), ROB_getOrigPS) getOrigPS;
     interface Vector#(aluExeNum, ROB_getOrig_Inst) getOrig_Inst;
+`ifdef CONTRACTS_VERIFY
+    interface Vector#(1, aluExeNum, ROB_getOrigPredPS) getOrigPredPS;
+`else
+    interface Vector#(aluExeNum, ROB_getOrigPredPS) getOrigPredPS;
 `endif
     // get enq time for reservation station dispatch
     method InstTime getEnqTime;
 
     method Bool isEmpty_ehrPort0;
     method Bool isFull_ehrPort0;
+
+    method Bool outstandingCsrRead;
+    method Bool outstandingCsrWrite;
 
     interface ROB_SpeculationUpdate specUpdate;
 endinterface
@@ -1125,7 +1133,7 @@ module mkSupReorderBuffer#(
                 Data dst_data,
 `endif
                 PPCVAddrCSRData csrData,
-                Maybe#(CSR_XCapCause) cause
+                Maybe#(Trap) cause
 `ifdef RVFI
                 , ExtraTraceBundle tb
 `endif
@@ -1174,16 +1182,16 @@ module mkSupReorderBuffer#(
         endinterface);
     end
 
-    // get pc/ppc ifc used by alu exe (also one pc for mem exe)
-    Vector#(TAdd#(1, aluExeNum), ROB_getOrigPC) getOrigPCIfc;
+    // get ps/ppc ifc used by alu exe (also one ps for mem exe)
+    Vector#(TAdd#(1, aluExeNum), ROB_getOrigPS) getOrigPSIfc;
 `ifdef CONTRACTS_VERIFY
-    Vector#(TAdd#(1, aluExeNum), ROB_getOrigPredPC) getOrigPredPCIfc;
+    Vector#(TAdd#(1, aluExeNum), ROB_getOrigPredPS) getOrigPredPSIfc;
 `else
-    Vector#(aluExeNum, ROB_getOrigPredPC) getOrigPredPCIfc;
+    Vector#(aluExeNum, ROB_getOrigPredPS) getOrigPredPSIfc;
 `endif
     for(Integer i = 0; i < valueof(aluExeNum) + 1; i = i+1) begin
-        getOrigPCIfc[i] = (interface ROB_getOrigPC;
-            method CapMem get(InstTag x) = row[x.way][x.ptr].getOrigPC;
+        getOrigPSIfc[i] = (interface ROB_getOrigPS;
+            method PredState get(InstTag x) = row[x.way][x.ptr].getOrigPS;
         endinterface);
     end
 `ifdef CONTRACTS_VERIFY
@@ -1194,8 +1202,8 @@ module mkSupReorderBuffer#(
     end
 `else
     for(Integer i = 0; i < valueof(aluExeNum); i = i+1) begin
-        getOrigPredPCIfc[i] = (interface ROB_getOrigPredPC;
-            method CapMem get(InstTag x) = row[x.way][x.ptr].getOrigPredPC;
+        getOrigPredPSIfc[i] = (interface ROB_getOrigPredPS;
+            method PredState get(InstTag x) = row[x.way][x.ptr].getOrigPredPS;
         endinterface);
     end
 `endif
@@ -1240,6 +1248,18 @@ module mkSupReorderBuffer#(
         endfunction
         Vector#(SupSize, Integer) idxVec = genVector;
         return all(isFullFunc, idxVec);
+    endmethod
+
+    method Bool outstandingCsrRead;
+        function isCsrReadFunc(a_valid, a_row) = readReg(a_valid[0]) && a_row.csrRead;
+        // Check if any of the rows hold an active CSR read.
+        return any(id, zipWith (isCsrReadFunc, concat(valid), concat(row)));
+    endmethod
+
+    method Bool outstandingCsrWrite;
+        function isCsrWriteFunc(a_valid, a_row) = readReg(a_valid[0]) && a_row.csrWrite;
+        // Check if any of the rows hold an active CSR write.
+        return any(id, zipWith (isCsrWriteFunc, concat(valid), concat(row)));
     endmethod
 
     method Action setLSQAtCommitNotified(InstTag x) if(
@@ -1303,8 +1323,8 @@ module mkSupReorderBuffer#(
     endmethod
 `endif
 
-    interface getOrigPC = getOrigPCIfc;
-    interface getOrigPredPC = getOrigPredPCIfc;
+    interface getOrigPS = getOrigPSIfc;
+    interface getOrigPredPS = getOrigPredPSIfc;
     interface getOrig_Inst  = getOrig_Inst_Ifc;
 
     method InstTime getEnqTime = enqTime;
