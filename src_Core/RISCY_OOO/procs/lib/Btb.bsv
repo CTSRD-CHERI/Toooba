@@ -63,7 +63,7 @@ typedef struct {
 
 // Local BTB Typedefs
 typedef 1 PcLsbsIgnore;
-typedef 4096 BtbEntries;
+typedef 1024 BtbEntries;
 `ifdef NO_COMPRESSED_BTB
 typedef CapMem ShortTarget;
 typedef 1 MidBtbIndices;
@@ -71,7 +71,7 @@ typedef 1 MidBtbIndices;
 typedef Bit#(11) ShortTarget;
 typedef Bit#(8) RegionHash;
 // If differentRegion it True, regionHash is meaningful
-typedef 24 MidTargetSz;
+typedef 28 MidTargetSz;
 typedef struct {
     Bool differentRegion;
     RegionHash regionHash;
