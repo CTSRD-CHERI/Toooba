@@ -50,6 +50,7 @@ import Cntrs::*;
 import ConfigReg::*;
 import FIFO::*;
 import Fifos::*;
+import DReg::*;
 import Ehr::*;
 import Connectable::*;
 
@@ -337,6 +338,8 @@ module mkCore#(CoreId coreId)(Core);
     endinterface);
     MMIOCore mmio <- mkMMIOCore(mmioInIfc);
 
+    Reg#(Bool) events_btb_misprediction_reg <- mkDReg(False);
+
     // fix point module to instantiate other function units
     module mkCoreFixPoint#(CoreFixPoint fix)(CoreFixPoint);
         // spec update
@@ -420,7 +423,7 @@ module mkCore#(CoreId coreId)(Core);
                 method setRegReadyAggr = writeAggr(aluWrAggrPort(i));
                 interface sendBypass = sendBypassIfc;
                 method writeRegFile = writeCons(aluWrConsPort(i));
-                method Action redirect(CapMem new_pc, SpecTag spec_tag, InstTag inst_tag, SpecBits spec_bits);
+                method Action redirect(CapMem new_pc, SpecTag spec_tag, InstTag inst_tag, SpecBits spec_bits, Bool btb_misspredict);
                     if (verbose) begin
                         $display("[ALU redirect - %d] ", i, fshow(new_pc),
                                  "; ", fshow(spec_tag), "; ", fshow(inst_tag));
@@ -433,6 +436,7 @@ module mkCore#(CoreId coreId)(Core);
 `endif
                     );
                     globalSpecUpdate.incorrectSpec(False, spec_tag, inst_tag, spec_bits);
+                    events_btb_misprediction_reg <= btb_misspredict;
                 endmethod
                 method Bool pauseExecute = globalSpecUpdate.pendingIncorrectSpec;
                 method correctSpec = globalSpecUpdate.correctSpec[finishAluCorrectSpecPort(i)].put;
@@ -1181,7 +1185,7 @@ module mkCore#(CoreId coreId)(Core);
      Reg#(EventsTGC) events_tgc_reg <- mkRegU;
      rule report_events;
          EventsCore events = unpack(pack(commitStage.events));
-         events.evt_REDIRECT = zeroExtend(pack(fetchStage.redirect_evt));
+         events.evt_REDIRECT = zeroExtend(pack(events_btb_misprediction_reg));//zeroExtend(pack(fetchStage.redirect_evt));
          hpm_core_events[1] <= events;
      endrule
 

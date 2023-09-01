@@ -106,6 +106,7 @@ typedef struct {
     PredTrainInfo trainInfo;
     Bool link;
     Bool isCompressed;
+    Bit #(32) orig_inst;
     // result
     CapPipe data; // alu compute result
     PPCVAddrCSRData csrData; // data to write CSR file, or predicted next PC if not. (For reorder buffer)
@@ -196,7 +197,7 @@ interface AluExeInput;
     // write reg file & set conservative sb
     method Action writeRegFile(PhyRIndx dst, CapPipe data);
     // redirect
-    method Action redirect(CapMem new_pc, SpecTag spec_tag, InstTag inst_tag, SpecBits spec_bits);
+    method Action redirect(CapMem new_pc, SpecTag spec_tag, InstTag inst_tag, SpecBits spec_bits, Bool btb_misspredict);
     // pending invalidation could pause execute/redirections.
     method Bool pauseExecute;
     // spec update
@@ -417,6 +418,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
                 trainInfo: x.trainInfo,
                 link: link,
                 isCompressed: x.orig_inst[1:0] != 2'b11,
+                orig_inst: x.orig_inst,
                 data: exec_result.data,
                 csrData: is_scr_or_csr ? CSRData (exec_result.csrData) : PPC (cast(exec_result.controlFlow.nextPc)),
                 capException: exec_result.capException,
@@ -491,7 +493,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
         if (x.controlFlow.mispredict) (* nosplit *) begin
             // wrong branch predictin, we must have spec tag
             doAssert(isValid(x.spec_tag), "mispredicted branch must have spec tag");
-            inIfc.redirect(cast(x.controlFlow.nextPc), validValue(x.spec_tag), x.tag, exeToFin.spec_bits);
+            inIfc.redirect(cast(x.controlFlow.nextPc), validValue(x.spec_tag), x.tag, exeToFin.spec_bits, (x.iType == Jr || x.iType == CJALR) && !(linkedR(Valid(tagged Gpr x.orig_inst[19:15])) && (x.orig_inst[19:15] != x.orig_inst[11:7])));
             // must be a branch, train branch predictor
             doAssert(x.iType == Jr || x.iType == CJALR || x.iType == CCall || x.iType == Br, "only jr, br, cjalr, and ccall can mispredict");
             inIfc.fetch_train_predictors(ToSpecFifo {
