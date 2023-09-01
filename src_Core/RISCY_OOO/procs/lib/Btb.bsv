@@ -68,7 +68,7 @@ typedef 1024 BtbEntries;
 typedef CapMem ShortTarget;
 typedef 1 MidBtbIndices;
 `else
-typedef Bit#(11) ShortTarget;
+typedef Bit#(12) ShortTarget;
 typedef Bit#(8) RegionHash;
 // If differentRegion it True, regionHash is meaningful
 typedef 28 MidTargetSz;
