@@ -63,12 +63,14 @@ typedef struct {
 
 // Local BTB Typedefs
 typedef 1 PcLsbsIgnore;
+Bit#(PcLsbsIgnore) targetLsb = 0;
 typedef 1024 BtbEntries;
 `ifdef NO_COMPRESSED_BTB
 typedef CapMem ShortTarget;
 typedef 1 MidBtbIndices;
 `else
-typedef Bit#(12) ShortTarget;
+typedef 13 ShortTargetSize;
+typedef Bit#(ShortTargetSize) ShortTarget; // Will not store the LSB
 typedef Bit#(8) RegionHash;
 // If differentRegion it True, regionHash is meaningful
 typedef 28 MidTargetSz;
@@ -121,7 +123,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
         midRecords <- replicateM(mkMapLossyBRAM);
     Map#(Bit#(TSub#(SizeOf#(RegionHash),SizeOf#(RegionBtbIndex))), RegionBtbIndex, Region, 2) regionRecords <- mkMapLossy(unpack(0));
 `endif
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(ShortTarget), BtbAssociativity))
+    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(Bit#(TSub#(ShortTargetSize,PcLsbsIgnore))), BtbAssociativity))
         compressedRecords <- replicateM(mkMapLossyBRAM);
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
 
@@ -157,15 +159,14 @@ module mkBtbCore(NextAddrPred#(hashSz))
         ShortTarget shortMask = -1;
         CapMem mask = ~zeroExtend(shortMask);
         if ((pc&mask) == (nextPc&mask))
-            compressedRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:truncate(nextPc>>1)}); // Shift target, as LSB must be zero.
+            compressedRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:truncate(nextPc>>valueOf(PcLsbsIgnore))}); // Shift target, as LSB must be zero.
 `ifndef NO_COMPRESSED_BTB
         else begin
             Bit#(MidTargetSz) midMask = -1;
             mask = ~zeroExtend(midMask);
-            Bool differentRegion = ((pc&mask) == (nextPc&mask));
+            Bool differentRegion = ((pc&mask) != (nextPc&mask));
             MidTarget md = getMidTarget(nextPc, differentRegion);
-            midRecords[getBank(pc)].update(lookupMidKey(pc),
-                                           VnD{v:taken, d:getMidTarget(nextPc, differentRegion)});
+            midRecords[getBank(pc)].update(lookupMidKey(pc), VnD{v:taken, d:md});
             if (differentRegion) regionRecords.update(unpack(md.regionHash), truncateLSB(nextPc));
         end
 `endif
@@ -177,13 +178,12 @@ module mkBtbCore(NextAddrPred#(hashSz))
         // bank for the alignment of each potential branch.
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             // Only add lower bits for timing.
-            BtbAddr a = getBtbAddr(pc);
-            a = unpack({a.tag, {a.index,a.bank} + fromInteger(i)});
-            //BtbAddr a = unpack(pack(getBtbAddr(pc)) + fromInteger(i));
+            Bit#(15) offset = truncate(pack(getBtbAddr(pc))) + fromInteger(i);
+            CapMem lookup_pc = {truncateLSB(pc), offset, targetLsb};
 `ifndef NO_COMPRESSED_BTB
-            midRecords[a.bank].lookupStart(MapKeyIndex{key: hash(a.tag), index: truncate(a.index)});
+            midRecords[getBank(lookup_pc)].lookupStart(lookupMidKey(lookup_pc));
 `endif
-            compressedRecords[a.bank].lookupStart(MapKeyIndex{key: hash(a.tag), index: a.index});
+            compressedRecords[getBank(lookup_pc)].lookupStart(lookupKey(lookup_pc));
         end
     endmethod
 
@@ -195,7 +195,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
                 if (r.v) ppcs[i] = Valid(getFullTarget(r.d, addr_reg));
 `endif
             if (compressedRecords[i].lookupRead matches tagged Valid .r)
-                ppcs[i] = r.v ? Valid({truncateLSB(addr_reg),r.d,1'b0}):Invalid;
+                ppcs[i] = r.v ? Valid({truncateLSB(addr_reg),r.d,targetLsb}):Invalid;
         end
         ppcs = rotateBy(ppcs,unpack(-getBtbAddr(addr_reg).bank)); // Rotate firstBank down to zeroeth element.
         return ppcs;
