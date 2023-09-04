@@ -92,6 +92,7 @@ BSC_COMPILATION_FLAGS += \
 	-D RISCV \
 	-D PERFORMANCE_MONITORING \
 	-D RAS_HIT_TRACING \
+	-D NO_COMPRESSED_BTB \
 	-D TSO_MM \
 	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D MELTDOWN_CF \
 	-keep-fires -aggressive-conditions -no-warn-action-shadowing -check-assert \
