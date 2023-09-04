@@ -67,6 +67,7 @@ Bit#(PcLsbsIgnore) targetLsb = 0;
 typedef 1024 BtbEntries;
 `ifdef NO_COMPRESSED_BTB
 typedef CapMem ShortTarget;
+typedef SizeOf#(ShortTarget) ShortTargetSize;
 typedef 1 MidBtbIndices;
 `else
 typedef 13 ShortTargetSize;
@@ -136,6 +137,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
     function MidBtbIndex getMidIndex(CapMem pc) = truncate(getBtbAddr(pc).index);
     function MapKeyIndex#(HashedTag#(hashSz),MidBtbIndex) lookupMidKey(CapMem pc) =
         MapKeyIndex{key: hash(getTag(pc)), index: getMidIndex(pc)};
+`ifndef NO_COMPRESSED_BTB
     function FullTarget getFullTarget(MidTarget mt, CapMem pc);
         Region region = mt.differentRegion ? fromMaybe(?,regionRecords.lookup(unpack(mt.regionHash))):truncateLSB(pc);
         return unpack({region,mt.target});
@@ -147,6 +149,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
                          target: truncate(ft)
                         };
     endfunction
+`endif
 
     // no flush, accept update
     (* fire_when_enabled, no_implicit_conditions *)
