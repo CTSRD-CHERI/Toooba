@@ -98,7 +98,8 @@ BSC_COMPILATION_FLAGS += \
 	+RTS -K128M -RTS  -show-range-conflict \
 	-unspecified-to X -opt-undetermined-vals \
 	-steps-max-intervals 10000000 \
-	-steps-warn-interval 1000000
+	-steps-warn-interval 1000000 \
+	-D MAX_CAP_PIPES=1
 
 # ================================================================
 # Generate Bluespec CHERI tag controller source file

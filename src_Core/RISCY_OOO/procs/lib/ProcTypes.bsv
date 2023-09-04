@@ -667,6 +667,10 @@ typedef struct {
     Maybe#(ImmData) imm;
 } DecodedInst deriving(Bits, Eq, FShow);
 
+function Bool isCapInst(DecodedInst i);
+    return i.capFunc != Other;
+endfunction
+
 function Bool linkedR(Maybe#(ArchRIndx) register);
    Bool res = False;
    if (register matches tagged Valid .r &&& (r == tagged Gpr 1 || r == tagged Gpr 5)) begin
