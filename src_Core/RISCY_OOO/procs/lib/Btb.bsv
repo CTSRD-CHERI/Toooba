@@ -68,7 +68,6 @@ typedef 1024 BtbEntries;
 `ifdef NO_COMPRESSED_BTB
 typedef CapMem ShortTarget;
 typedef SizeOf#(ShortTarget) ShortTargetSize;
-typedef 1 MidBtbIndices;
 `else
 typedef 13 ShortTargetSize;
 typedef Bit#(ShortTargetSize) ShortTarget; // Will not store the LSB
@@ -81,7 +80,6 @@ typedef struct {
     Bit#(MidTargetSz) target;
 } MidTarget deriving(Bits, Eq, FShow);
 typedef 2 ShortToMidFactor;
-typedef TDiv#(TDiv#(BtbEntries,SupSizeX2),ShortToMidFactor) MidBtbIndices;
 typedef CapMem FullTarget;
 typedef Bit#(TSub#(SizeOf#(FullTarget),MidTargetSz)) Region;
 `endif
@@ -92,7 +90,6 @@ typedef TDiv#(TDiv#(BtbEntries,SupSizeX2),BtbAssociativity) BtbIndices;
 typedef Bit#(TLog#(BtbIndices)) BtbIndex;
 typedef Bit#(TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)) BtbTag;
 typedef Bit#(hashSz) HashedTag#(numeric type hashSz);
-typedef Bit#(TLog#(MidBtbIndices)) MidBtbIndex;
 typedef Bit#(2) RegionBtbIndex;
 
 typedef struct {
@@ -120,7 +117,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
     // Read and Write ordering doesn't matter since this is a predictor
     Reg#(CapMem) addr_reg <- mkRegU;
 `ifndef NO_COMPRESSED_BTB
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), MidBtbIndex, VnD#(MidTarget), 1))
+    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(MidTarget), 1))
         midRecords <- replicateM(mkMapLossyBRAM);
     Map#(Bit#(TSub#(SizeOf#(RegionHash),SizeOf#(RegionBtbIndex))), RegionBtbIndex, Region, 2) regionRecords <- mkMapLossy(unpack(0));
 `endif
@@ -134,9 +131,6 @@ module mkBtbCore(NextAddrPred#(hashSz))
     function BtbIndex getIndex(CapMem pc) = getBtbAddr(pc).index;
     function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(CapMem pc) =
         MapKeyIndex{key: hash(getTag(pc)), index: getIndex(pc)};
-    function MidBtbIndex getMidIndex(CapMem pc) = truncate(getBtbAddr(pc).index);
-    function MapKeyIndex#(HashedTag#(hashSz),MidBtbIndex) lookupMidKey(CapMem pc) =
-        MapKeyIndex{key: hash(getTag(pc)), index: getMidIndex(pc)};
 `ifndef NO_COMPRESSED_BTB
     function FullTarget getFullTarget(MidTarget mt, CapMem pc);
         Region region = mt.differentRegion ? fromMaybe(?,regionRecords.lookup(unpack(mt.regionHash))):truncateLSB(pc);
@@ -159,17 +153,19 @@ module mkBtbCore(NextAddrPred#(hashSz))
         let taken = upd.taken;
         /*$display("MapUpdate in BTB - pc %x, bank: %x, taken: %x, next: %x, time: %t",
                   pc, getBank(pc), taken, nextPc, $time);*/
+`ifdef  NO_COMPRESSED_BTB
+        compressedRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:truncate(nextPc>>valueOf(PcLsbsIgnore))});
+`else
         ShortTarget shortMask = -1;
         CapMem mask = ~zeroExtend(shortMask);
         if ((pc&mask) == (nextPc&mask))
             compressedRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:truncate(nextPc>>valueOf(PcLsbsIgnore))}); // Shift target, as LSB must be zero.
-`ifndef NO_COMPRESSED_BTB
         else begin
             Bit#(MidTargetSz) midMask = -1;
             mask = ~zeroExtend(midMask);
             Bool differentRegion = ((pc&mask) != (nextPc&mask));
             MidTarget md = getMidTarget(nextPc, differentRegion);
-            midRecords[getBank(pc)].update(lookupMidKey(pc), VnD{v:taken, d:md});
+            midRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:md});
             if (differentRegion) regionRecords.update(unpack(md.regionHash), truncateLSB(nextPc));
         end
 `endif
@@ -184,7 +180,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
             Bit#(15) offset = truncate(pack(getBtbAddr(pc))) + fromInteger(i);
             CapMem lookup_pc = {truncateLSB(pc), offset, targetLsb};
 `ifndef NO_COMPRESSED_BTB
-            midRecords[getBank(lookup_pc)].lookupStart(lookupMidKey(lookup_pc));
+            midRecords[getBank(lookup_pc)].lookupStart(lookupKey(lookup_pc));
 `endif
             compressedRecords[getBank(lookup_pc)].lookupStart(lookupKey(lookup_pc));
         end
