@@ -99,7 +99,7 @@ BSC_COMPILATION_FLAGS += \
 	-unspecified-to X -opt-undetermined-vals \
 	-steps-max-intervals 10000000 \
 	-steps-warn-interval 1000000 \
-	-D MAX_CAP_PIPES=1
+	-D MAX_CAP_PIPES=2
 
 # ================================================================
 # Generate Bluespec CHERI tag controller source file
