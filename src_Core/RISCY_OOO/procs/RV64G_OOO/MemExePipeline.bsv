@@ -743,8 +743,22 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // Load/Store Queue Stuff
     //=======================================================
 
+    Reg#(UInt#(5)) l_dec_value <- mkReg(16);
+    rule whyIsThisARule2;
+      Bool boo1 <- $test$plusargs("l1");
+      Bool boo2 <- $test$plusargs("l2");
+      Bool boo4 <- $test$plusargs("l4");
+      Bool boo8 <- $test$plusargs("l8");
+      if (boo1) l_dec_value <= 1;
+      else if (boo2) l_dec_value <= 2;
+      else if (boo4) l_dec_value <= 4;
+      else if (boo8) l_dec_value <= 8;
+    endrule
+    Decrementer#(UInt#(5)) load_decrementer <- mkDecrementer(l_dec_value);
+
     // send Ld to forward or memory
-    function Action doIssueLd(LSQIssueLdInfo info, Bool fromIssueQ);
+    function Action doIssueLd(LSQIssueLdInfo info, Bool fromIssueQ) =
+    when (load_decrementer.read == 0,
     action
         // search SB only in WEAK model
 `ifdef TSO_MM
@@ -783,6 +797,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             reqLdQ.enq(tuple4(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash));
             // perf: load mem latency
             ldMemLatTimer.start(info.tag);
+            if (info.shiftedBE matches tagged DataMemAccess .be)
+              load_decrementer.increment(countOnes(pack(be)));
         end
         else if(issRes matches tagged Stall .stallBy) begin
 `ifdef PERF_COUNT
@@ -803,8 +819,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `ifdef PERFORMANCE_MONITORING
         events_reg[0] <= events;
 `endif
-    endaction
-    endfunction
+    endaction);
 
     rule doIssueLdFromIssueQ;
         // get issue entry from LSQ

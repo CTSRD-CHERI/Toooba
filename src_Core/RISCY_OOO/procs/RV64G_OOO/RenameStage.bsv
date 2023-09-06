@@ -545,6 +545,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
             reservationStationAlu[0].enq(ToReservationStation {
                 data: AluRSData {dInst: dInst, trainInfo: trainInfo},
                 regs: phy_regs,
+                store_bytes: 0,
                 tag: inst_tag,
                 spec_bits: spec_bits,
                 spec_tag: Invalid,
@@ -716,6 +717,10 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
             if (lsqEnqTag matches tagged Valid .lsqTag) begin
                 // can process, send to Mem rs and LSQ
                 lsq_tag = lsqTag; // record LSQ tag
+                UInt#(5) store_bytes = 0;
+                if (mem_inst.byteOrTagEn matches tagged DataMemAccess .be &&& !isLdQ)
+                  store_bytes = (countOnes(pack(be)));
+                $display("store_bytes: %d, isLdQ: %d ", store_bytes, isLdQ, fshow(mem_inst));
                 if (dInst.iType != Fence) begin // Fence does not go to RS
                     reservationStationMem.enq(ToReservationStation {
                         data: MemRSData {
@@ -726,6 +731,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             ddc_offset: !dInst.execFunc.Mem.reg_bounds
                         },
                         regs: phy_regs,
+                        store_bytes: store_bytes,
                         tag: inst_tag,
                         spec_bits: spec_bits,
                         spec_tag: Invalid,
@@ -1006,6 +1012,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             reservationStationAlu[k].enq(ToReservationStation {
                                 data: AluRSData {dInst: dInst, trainInfo: trainInfo},
                                 regs: phy_regs,
+                                store_bytes: 0,
                                 tag: inst_tag,
                                 spec_bits: spec_bits,
                                 spec_tag: spec_tag,
@@ -1026,6 +1033,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             reservationStationFpuMulDiv[k].enq(ToReservationStation {
                                 data: FpuMulDivRSData {execFunc: dInst.execFunc},
                                 regs: phy_regs,
+                                store_bytes: 0,
                                 tag: inst_tag,
                                 spec_bits: spec_bits,
                                 spec_tag: spec_tag,
@@ -1049,6 +1057,10 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 // can process, send to Mem rs and LSQ
                                 memExeUsed = True; // mark resource used
                                 lsq_tag = lsqTag; // record LSQ tag
+                                UInt#(5) store_bytes = 0;
+                                if (mem_inst.byteOrTagEn matches tagged DataMemAccess .be &&& !isLdQ)
+                                  store_bytes = (countOnes(pack(be)));
+                                $display("store_bytes: %d, isLdQ: %d ", store_bytes, isLdQ, fshow(mem_inst));
                                 if (dInst.iType != Fence) begin // fence does not go to RS
                                     reservationStationMem.enq(ToReservationStation {
                                         data: MemRSData {
@@ -1059,6 +1071,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                             ddc_offset: !dInst.execFunc.Mem.reg_bounds
                                         },
                                         regs: phy_regs,
+                                        store_bytes: store_bytes,
                                         tag: inst_tag,
                                         spec_bits: spec_bits,
                                         spec_tag: spec_tag,

@@ -1070,3 +1070,22 @@ function Bit#(outWidth) hash(Bit#(inWidth) in)
     Vector#(TDiv#(inWidth,outWidth), Bit#(outWidth)) vec = unpack(zeroExtend(in));
     return fold( \^ , vec);
 endfunction
+
+interface Decrementer#(type t);
+  method Action increment(t inc);
+  method t read();
+endinterface
+
+module mkDecrementer#(t decrement_per_cycle) (Decrementer#(t))
+  provisos (Bits#(t,n), Arith#(t), Ord#(t));
+  Reg#(t) count[2] <- mkCReg(2, 0);
+  rule do_decrement(count[1] > 0);
+    t newCount = (count[1] < decrement_per_cycle) ? 0:count[1] - decrement_per_cycle;
+    //$display("do_decrement, count: %d, newcount: %d", count[1], newCount);
+    count[1] <= newCount;
+  endrule
+  method Action increment(t inc);
+    count[0] <= count[0] + inc;
+  endmethod
+  method t read() = count[0]._read();
+endmodule

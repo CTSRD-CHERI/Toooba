@@ -1,6 +1,6 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
-// 
+//
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without
@@ -8,10 +8,10 @@
 // modify, merge, publish, distribute, sublicense, and/or sell copies
 // of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be
 // included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -34,6 +34,7 @@ import Assert::*;
 typedef struct{
     a data;
     PhyRegs regs;
+    UInt#(5) store_bytes;
     InstTag tag;
     // speculation
     SpecBits spec_bits;
@@ -95,6 +96,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     Vector#(size, Ehr#(2,Bool))                      valid      <- replicateM(mkEhr(False));
     Vector#(size, Reg#(a))                           data       <- replicateM(mkRegU);
     Vector#(size, Reg#(PhyRegs))                     regs       <- replicateM(mkRegU);
+    Vector#(size, Reg#(UInt#(5)))                    store_bytes <- replicateM(mkRegU);
     Vector#(size, Reg#(InstTag))                     tag        <- replicateM(mkRegU);
     Vector#(size, Reg#(Maybe#(SpecTag)))             spec_tag   <- replicateM(mkRegU);
     Vector#(size, Ehr#(2, SpecBits))                 spec_bits  <- replicateM(mkEhr(?));
@@ -144,13 +146,26 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     // search for row to dispatch, we do it lazily
     // i.e. look at the EHR port 0 of ready bits, so there is no bypassing
     staticAssert(lazySched, "Only support lazy schedule now");
-    
+
+    Reg#(UInt#(5)) s_dec_value <- mkReg(16);
+    rule whyIsThisARule;
+      Bool boo1 <- $test$plusargs("s1");
+      Bool boo2 <- $test$plusargs("s2");
+      Bool boo4 <- $test$plusargs("s4");
+      Bool boo8 <- $test$plusargs("s8");
+      if (boo1) s_dec_value <= 1;
+      else if (boo2) s_dec_value <= 2;
+      else if (boo4) s_dec_value <= 4;
+      else if (boo8) s_dec_value <= 8;
+    endrule
+    Decrementer#(UInt#(5)) store_decrementer <- mkDecrementer(s_dec_value);
+
     Vector#(size, Wire#(Bool)) ready_wire <- replicateM(mkBypassWire);
     (* fire_when_enabled, no_implicit_conditions *)
     rule setReadyWire;
         function Action setReady(Integer i);
         action
-            ready_wire[i] <= allRegsReady(regs_ready[i][0]);
+            ready_wire[i] <= allRegsReady(regs_ready[i][0]) && (store_bytes[i] == 0 || store_decrementer.read == 0);
         endaction
         endfunction
         Vector#(size, Integer) idxVec = genVector;
@@ -161,7 +176,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         return r;
     endfunction
     Vector#(size, Bool) can_schedule = zipWith( \&& , readVEhr(valid_dispatch_port, valid), map(get_ready, ready_wire) );
-    
+
     // oldest index to dispatch
     let can_schedule_index = findOldest(can_schedule);
 
@@ -221,6 +236,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         valid[idx][valid_enq_port] <= True;
         data[idx] <= x.data;
         regs[idx] <= x.regs;
+        store_bytes[idx] <= x.store_bytes;
         tag[idx] <= x.tag;
         spec_tag[idx] <= x.spec_tag;
         spec_bits[idx][sb_enq_port] <= x.spec_bits;
@@ -238,6 +254,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
         return ToReservationStation{
             data: data[i],
             regs: regs[i],
+            store_bytes: store_bytes[i],
             tag: tag[i],
             spec_bits: spec_bits[i][sb_dispatch_port],
             spec_tag: spec_tag[i],
@@ -251,6 +268,7 @@ module mkReservationStation#(Bool lazySched, Bool lazyEnq, Bool countValid)(
     endmethod
 
     method Action doDispatch if (can_schedule_index matches tagged Valid .i);
+        store_decrementer.increment(store_bytes[i]);
         valid[i][valid_dispatch_port] <= False;
         // conflict with wrong spec
         wrongSpec_dispatch_conflict.wset(?);
