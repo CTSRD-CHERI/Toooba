@@ -37,6 +37,7 @@ BSC_COMPILATION_FLAGS += \
 	-D FABRIC64    \
 	-D CAP128 \
 	-D MEM512 \
+	-D MAX_CAP_PIPES=2 \
 	-D RISCV \
 	-D TSO_MM \
 	-D INCLUDE_GDB_CONTROL \
@@ -98,8 +99,7 @@ BSC_COMPILATION_FLAGS += \
 	+RTS -K128M -RTS  -show-range-conflict \
 	-unspecified-to X -opt-undetermined-vals \
 	-steps-max-intervals 10000000 \
-	-steps-warn-interval 1000000 \
-	-D MAX_CAP_PIPES=2
+	-steps-warn-interval 1000000
 
 # ================================================================
 # Generate Bluespec CHERI tag controller source file
