@@ -668,7 +668,7 @@ typedef struct {
 } DecodedInst deriving(Bits, Eq, FShow);
 
 function Bool isCapInst(DecodedInst i);
-    return i.capFunc != Other;
+    return True;
 endfunction
 
 function Bool linkedR(Maybe#(ArchRIndx) register);
