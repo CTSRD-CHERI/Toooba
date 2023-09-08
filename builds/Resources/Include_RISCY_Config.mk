@@ -8,7 +8,7 @@
 PROC := RV64G_OOO
 
 # core size
-CORE_SIZE ?= SMALL
+CORE_SIZE ?= LARGE_WIDE
 # cache size
 CACHE_SIZE ?= LARGE
 # always include perf counter

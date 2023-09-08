@@ -49,7 +49,7 @@ BSC_COMPILATION_FLAGS += \
 .PHONY: simulator
 simulator: build_dir/Top_HW_Side.bo
 	@echo "INFO: linking bsc-compiled objects into Bluesim executable"
-	bsc -sim -parallel-sim-link 8 +RTS -K128M -RTS \
+	bsc -sim -parallel-sim-link 8 +RTS -K1024M -RTS \
 		$(TMP_DIRS) \
 		-e $(TOPMODULE) -o ./$(SIM_EXE_FILE) \
 		$(BSC_C_FLAGS) \
