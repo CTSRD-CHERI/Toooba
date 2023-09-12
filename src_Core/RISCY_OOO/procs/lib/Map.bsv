@@ -182,3 +182,119 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     method clear if (!clearReg) = clearReg._write(True);
     method clearDone = clearReg;
 endmodule
+
+typedef union tagged {
+  t0 T0;
+  t1 T1;
+  t2 T2;
+} Union3#(type t0, type t1, type t2) deriving (Bits, Eq, FShow);
+
+typedef union tagged {
+  t0 T0;
+  t1 T1;
+} Union2#(type t0, type t1) deriving (Bits, Eq, FShow);
+
+interface MapSplitThreeWidth#(type ky, type ix, type vl0, type vl1, type vl2);
+    method Action update(MapKeyIndex#(ky,ix) key, Union3#(vl0, vl1, vl2) value);
+    method Action lookupStart(MapKeyIndex#(ky,ix) lookup_key);
+    method Maybe#(Union3#(vl0, vl1, vl2)) lookupRead;
+    method Action clear;
+    method Bool clearDone;
+endinterface
+
+module mkMapThreeWidthLossyBRAM(MapSplitThreeWidth#(ky,ix,vl0,vl1,vl2)) provisos (
+Bits#(ky,ky_sz), Eq#(ky), Arith#(ky),
+Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
+Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__),
+Bits#(MapKeyIndexValue#(ky, ix, Union3#(vl0, vl1, vl2)), miv_sz),
+FShow#(vl0), FShow#(vl1), FShow#(vl2));
+    RWBramCore#(ix, MapKeyValue#(ky,Union3#(vl0, vl1, vl2))) mem0 <- mkRWBramCoreUG;
+    RWBramCore#(ix, MapKeyValue#(ky,Union2#(vl0, vl1)))      mem1 <- mkRWBramCoreUG;
+    RWBramCore#(ix, MapKeyValue#(ky,vl0))                    mem2 <- mkRWBramCoreUG;
+    Vector#(3, RWBramCore#(ix, ky)) updateKeys <- replicateM(mkRWBramCoreUG);
+    Reg#(MapKeyIndex#(ky,ix)) lookupReg <- mkRegU;
+    Reg#(MapKeyIndexValue#(ky,ix,Union3#(vl0, vl1, vl2))) updateReg <- mkRegU;
+    Reg#(Bool) updateFresh <- mkDReg(False);
+    Reg#(Bit#(TLog#(3))) wayNext <- mkReg(0);
+    Integer a = valueof(3);
+
+    Reg#(Bool) clearReg <- mkReg(True);
+    Reg#(ix) clearCount <- mkReg(0);
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule updateCanon;
+        if (clearReg) begin
+            mem0.wrReq(clearCount, unpack(0));
+            mem1.wrReq(clearCount, unpack(0));
+            mem2.wrReq(clearCount, unpack(0));
+            clearCount <= clearCount + 1;
+            if (clearCount == ~0) clearReg <= False;
+        end else if (updateFresh) begin
+            let u = updateReg;
+            // randomish next way
+            Bit#(TLog#(3)) way = wayNext;
+            // correct for if there is a potential existing match
+            for (Integer i = 0; i < a; i = i + 1)
+                if (updateKeys[i].rdResp == u.key) way = fromInteger(i);
+            // correct for size and prepare values to be written
+            Union3#(vl0, vl1, vl2) up0 = ?;
+            Union2#(vl0, vl1) up1 = ?;
+            vl0 up2 = ?;
+            case (u.value) matches
+                tagged T0 .t0: begin
+                    case (way)
+                        0: up0 = tagged T0 t0;
+                        1: up1 = tagged T0 t0;
+                        2: up2 = t0;
+                    endcase
+                end
+                tagged T1 .t1: begin
+                    if (way>1) way = 1;
+                    case (way)
+                        0: up0 = tagged T1 t1;
+                        1: up1 = tagged T1 t1;
+                    endcase
+                end
+                tagged T2 .t2: begin
+                    way = 0;
+                    up0 = tagged T2 t2;
+                end
+            endcase
+            // Always write to both the main memory bank and the copy used for updates.
+            case (way)
+                0: mem0.wrReq(u.index, MapKeyValue{key: u.key, value: up0});
+                1: mem1.wrReq(u.index, MapKeyValue{key: u.key, value: up1});
+                2: mem2.wrReq(u.index, MapKeyValue{key: u.key, value: up2});
+            endcase
+            updateKeys[way].wrReq(u.index, u.key);
+            wayNext <= (wayNext == fromInteger(a-1)) ? 0 : (wayNext + 1);
+        end
+    endrule
+
+    method Action update(MapKeyIndex#(ky,ix) ki, Union3#(vl0, vl1, vl2) value);
+        updateReg <= MapKeyIndexValue{key: ki.key, index: ki.index, value: value};
+        updateFresh <= True;
+        for (Integer i = 0; i < a; i = i + 1) updateKeys[i].rdReq(ki.index);
+    endmethod
+    method Action lookupStart(MapKeyIndex#(ky,ix) ki);
+        lookupReg <= ki;
+        mem0.rdReq(ki.index);
+        mem1.rdReq(ki.index);
+        mem2.rdReq(ki.index);
+    endmethod
+    method Maybe#(Union3#(vl0, vl1, vl2)) lookupRead;
+        Maybe#(Union3#(vl0, vl1, vl2)) readVal = Invalid;
+        if (lookupReg.key == mem0.rdResp.key) readVal = Valid(mem0.rdResp.value);
+        if (lookupReg.key == mem1.rdResp.key)
+            case (mem1.rdResp.value) matches
+                tagged T0 .t0: readVal = Valid(tagged T0 t0);
+                tagged T1 .t1: readVal = Valid(tagged T1 t1);
+            endcase
+        if (lookupReg.key == mem2.rdResp.key) readVal = Valid(tagged T0 mem2.rdResp.value);
+        // If there has been a recent write, take that one.
+        if (updateReg.index == lookupReg.index && updateReg.key == lookupReg.key)
+            readVal = Valid(updateReg.value);
+        return readVal;
+    endmethod
+    method clear if (!clearReg) = clearReg._write(True);
+    method clearDone = clearReg;
+endmodule
