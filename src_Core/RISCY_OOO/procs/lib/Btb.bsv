@@ -68,20 +68,21 @@ typedef 1024 BtbEntries; // Actually 1536... For reasons...
 `ifdef NO_COMPRESSED_BTB
 typedef SizeOf#(CapMem) ShortTargetSize;
 typedef SizeOf#(CapMem) MidTargetSize;
+typedef SizeOf#(CapMem) CompTargetSize;
 typedef CapMem CompTarget;
 `else
 typedef 14 ShortTargetSize;  // emulates 13 bits (LSB is zero), and equal to 12 bits in BTB-X data
 typedef 26 MidTargetSize;  // emulates 25 bits (LSB is zero), and equal to 24 bits in BTB-X data
 typedef Bit#(8) RegionHash;
 // If differentRegion it True, regionHash is meaningful
-typedef 28 CompTargetSz;
+typedef 28 CompTargetSize;
 typedef struct {
     Bool differentRegion;
     RegionHash regionHash;
-    Bit#(CompTargetSz) target;
+    Bit#(CompTargetSize) target;
 } CompTarget deriving(Bits, Eq, FShow);
 typedef CapMem FullTarget;
-typedef Bit#(TSub#(SizeOf#(FullTarget),CompTargetSz)) Region;
+typedef Bit#(TSub#(SizeOf#(FullTarget),CompTargetSize)) Region;
 `endif
 typedef Bit#(ShortTargetSize) ShortTarget;
 typedef Bit#(MidTargetSize) MidTarget;
@@ -162,7 +163,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
                   pc, getBank(pc), taken, nextPc, $time);*/
         ShortTarget sz = unpack(~0);
         MidTarget mz = unpack(~0);
-        Bit#(CompTargetSz) cz = unpack(~0);
+        Bit#(CompTargetSize) cz = unpack(~0);
         Bool fitShort = ((pc^nextPc)&(~zeroExtend(sz))) == 0;
         Bool fitMid   = ((pc^nextPc)&(~zeroExtend(mz))) == 0;
         Bool fitComp  = ((pc^nextPc)&(~zeroExtend(cz))) == 0;
