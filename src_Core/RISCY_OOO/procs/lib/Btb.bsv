@@ -121,16 +121,18 @@ module mkBtbCore(NextAddrPred#(hashSz))
     // Read and Write ordering doesn't matter since this is a predictor
     Reg#(CapMem) addr_reg <- mkRegU;
 `ifdef NO_COMPRESSED_BTB
+    Bool optimizeScheduling = False;
     Vector#(SupSizeX2, MapSplitThreeWidth#(HashedTag#(hashSz),
                                            BtbIndex,
                                            VnD#(CapMem), VnD#(CapMem), VnD#(CapMem)))
 `else
+    Bool optimizeScheduling = True;
     Map#(Bit#(TSub#(SizeOf#(RegionHash),SizeOf#(RegionBtbIndex))), RegionBtbIndex, Region, 2) regionRecords <- mkMapLossy(unpack(0));
     Vector#(SupSizeX2, MapSplitThreeWidth#(HashedTag#(hashSz),
                                            BtbIndex,
                                            VnD#(ShortTarget), VnD#(MidTarget), VnD#(CompTarget)))
 `endif
-        compressedRecords <- replicateM(mkMapThreeWidthLossyBRAM);
+        compressedRecords <- replicateM(mkMapThreeWidthLossyBRAM(optimizeScheduling));
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
 
     function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));

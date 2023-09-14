@@ -202,7 +202,7 @@ interface MapSplitThreeWidth#(type ky, type ix, type vl0, type vl1, type vl2);
     method Bool clearDone;
 endinterface
 
-module mkMapThreeWidthLossyBRAM(MapSplitThreeWidth#(ky,ix,vl0,vl1,vl2)) provisos (
+module mkMapThreeWidthLossyBRAM#(Bool optimizeScheduling)(MapSplitThreeWidth#(ky,ix,vl0,vl1,vl2)) provisos (
 Bits#(ky,ky_sz), Eq#(ky), Arith#(ky),
 Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
 Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__),
@@ -215,7 +215,7 @@ FShow#(vl0), FShow#(vl1), FShow#(vl2));
     Reg#(MapKeyIndex#(ky,ix)) lookupReg <- mkRegU;
     Reg#(MapKeyIndexValue#(ky,ix,Union3#(vl0, vl1, vl2))) updateReg <- mkRegU;
     Reg#(Bool) updateFresh <- mkDReg(False);
-    Reg#(Bit#(TLog#(3))) wayNext <- mkReg(0);
+    Reg#(Bit#(2)) update_count <- mkReg(0);
     Integer a = valueof(3);
 
     Reg#(Bool) clearReg <- mkReg(True);
@@ -231,7 +231,12 @@ FShow#(vl0), FShow#(vl1), FShow#(vl2));
         end else if (updateFresh) begin
             let u = updateReg;
             // randomish next way
-            Bit#(TLog#(3)) way = wayNext;
+            Bit#(TLog#(3)) way = update_count;
+            if (optimizeScheduling) way = case (u.value) matches
+                                        tagged T0 .u: ((update_count < 2) ? update_count : 2);
+                                        tagged T1 .u: zeroExtend(update_count[0]);
+                                        tagged T2 .u: 0;
+                                    endcase;
             // correct for if there is a potential existing match
             for (Integer i = 0; i < a; i = i + 1)
                 if (updateKeys[i].rdResp == u.key) way = fromInteger(i);
@@ -266,7 +271,7 @@ FShow#(vl0), FShow#(vl1), FShow#(vl2));
                 2: mem2.wrReq(u.index, MapKeyValue{key: u.key, value: up2});
             endcase
             updateKeys[way].wrReq(u.index, u.key);
-            wayNext <= (wayNext == fromInteger(a-1)) ? 0 : (wayNext + 1);
+            update_count <= (optimizeScheduling || update_count < 2) ? update_count + 1 : 0;
         end
     endrule
 
