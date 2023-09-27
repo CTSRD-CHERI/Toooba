@@ -73,9 +73,9 @@ typedef CapMem CompTarget;
 `else
 typedef 12 ShortTargetSize;  // emulates 11 bits (LSB is zero), and equal to 10 bits in BTB-X data
 typedef 16 MidTargetSize;    // emulates 15 bits (LSB is zero), and equal to 14 bits in BTB-X data
-typedef Bit#(8) RegionHash;
+typedef Bit#(7) RegionHash;
 // If differentRegion it True, regionHash is meaningful
-typedef 20 CompTargetSize;   // emulates 19 bits (LSB is zero), and equal to 18 bits in BTB-X data
+typedef 21 CompTargetSize;   // emulates 20 bits (LSB is zero), and equal to 19 bits in BTB-X data
 typedef struct {
     Bool differentRegion;
     RegionHash regionHash;
@@ -94,7 +94,7 @@ typedef Bit#(TLog#(BtbIndices)) BtbIndex;
 typedef Bit#(TSub#(TSub#(TSub#(AddrSz, SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)) BtbTag;
 //typedef Bit#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)),SizeOf#(BtbIndex))) BtbTag;
 typedef Bit#(hashSz) HashedTag#(numeric type hashSz);
-typedef Bit#(3) RegionBtbIndex;
+typedef Bit#(2) RegionBtbIndex;
 
 typedef struct {
     BtbTag tag;
@@ -127,7 +127,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
                                            VnD#(CapMem), VnD#(CapMem), VnD#(CapMem)))
 `else
     Bool optimizeScheduling = True;
-    Map#(Bit#(TSub#(SizeOf#(RegionHash),SizeOf#(RegionBtbIndex))), RegionBtbIndex, Region, 4) regionRecords <- mkMapLossy(unpack(0));
+    Map#(Bit#(TSub#(SizeOf#(RegionHash),SizeOf#(RegionBtbIndex))), RegionBtbIndex, Region, 2) regionRecords <- mkMapLossy(unpack(0));
     Vector#(SupSizeX2, MapSplitThreeWidth#(HashedTag#(hashSz),
                                            BtbIndex,
                                            VnD#(ShortTarget), VnD#(MidTarget), VnD#(CompTarget)))
