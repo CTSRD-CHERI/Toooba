@@ -64,18 +64,18 @@ typedef struct {
 // Local BTB Typedefs
 typedef 1 PcLsbsIgnore;
 Bit#(PcLsbsIgnore) targetLsb = 0;
-typedef 2048 BtbEntries; // Actually 3072... For reasons...
+typedef 1024 BtbEntries; // Actually 1536... For reasons...
 `ifdef NO_COMPRESSED_BTB
 typedef SizeOf#(CapMem) ShortTargetSize;
 typedef SizeOf#(CapMem) MidTargetSize;
 typedef SizeOf#(CapMem) CompTargetSize;
 typedef CapMem CompTarget;
 `else
-typedef 12 ShortTargetSize;  // emulates 11 bits (LSB is zero), and equal to 10 bits in BTB-X data
-typedef 16 MidTargetSize;    // emulates 15 bits (LSB is zero), and equal to 14 bits in BTB-X data
-typedef Bit#(7) RegionHash;
+typedef 14 ShortTargetSize;  // emulates 13 bits (LSB is zero), and equal to 12 bits in BTB-X data
+typedef 26 MidTargetSize;  // emulates 25 bits (LSB is zero), and equal to 24 bits in BTB-X data
+typedef Bit#(8) RegionHash;
 // If differentRegion it True, regionHash is meaningful
-typedef 21 CompTargetSize;   // emulates 20 bits (LSB is zero), and equal to 19 bits in BTB-X data
+typedef 28 CompTargetSize;
 typedef struct {
     Bool differentRegion;
     RegionHash regionHash;
@@ -109,8 +109,8 @@ typedef struct {
 } BtbUpdate deriving(Bits, Eq, FShow);
 
 (* synthesize *)
-module mkBtb(NextAddrPred#(12));
-    NextAddrPred#(12) btb <- mkBtbCore;
+module mkBtb(NextAddrPred#(16));
+    NextAddrPred#(16) btb <- mkBtbCore;
     return btb;
 endmodule
 
