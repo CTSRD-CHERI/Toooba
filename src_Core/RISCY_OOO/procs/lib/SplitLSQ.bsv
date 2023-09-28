@@ -649,7 +649,7 @@ module mkSplitLSQ(SplitLSQ);
     // request faults), we should first copy the MMIO request to a reg, and
     // then kill using the info in reg.
 
-    Bool verbose = False;
+    Bool verbose = True;
 
     // we may simplify things in case of single core
     Bool multicore = valueof(CoreNum) > 1;
@@ -966,8 +966,16 @@ module mkSplitLSQ(SplitLSQ);
         return t == fromInteger(valueOf(LdQSize) - 1) ? 0 : t + 1;
     endfunction
 
-    function StQTag getNextStPtr(StQTag t);
+    function StQTag getNextStPtrCore(StQTag t);
         return t == fromInteger(valueOf(StQSize) - 1) ? 0 : t + 1;
+    endfunction
+
+    function StQTag getNextStPtr(StQTag t, Bool cap); // If it's a capability, consume two entries.
+        return cap ? getNextStPtrCore(getNextStPtrCore(t)) : getNextStPtrCore(t);
+    endfunction
+
+    function Bool isCap(MemDataByteEn be);
+        return countOnes(pack(be))>8;
     endfunction
 
     // Virtual tag
@@ -1240,19 +1248,25 @@ module mkSplitLSQ(SplitLSQ);
 
         // mark as verified and move verify ptr
         st_verified_verify[verP] <= True;
-        st_verifyP_verify <= getNextStPtr(verP);
+        Bool cap = isCap(st_byteEn[verP]);
+        st_verifyP_verify <= getNextStPtr(verP, cap);
 
         // tell LQ entries that this entry is verified; no need to check LQ
         // entry valid
-        function Action setVerified(LdQTag i);
+        function Action setVerified(StQTag p, LdQTag i);
         action
-            if(ld_olderSt_verify[i] == Valid (verP)) begin
+            if(ld_olderSt_verify[i] == Valid (p)) begin
                 ld_olderStVerified_verify[i] <= True;
             end
         endaction
         endfunction
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
-        joinActions(map(setVerified, idxVec));
+        joinActions(map(setVerified(verP), idxVec));
+        if (cap) begin
+            let skippedP = getNextStPtrCore(verP);
+            st_verified_verify[skippedP] <= True;
+            joinActions(map(setVerified(skippedP), idxVec));
+        end
 
         if(verbose) $display("[LSQ - verifySt] st_verifyP %d", verP);
     endrule
@@ -1285,6 +1299,7 @@ module mkSplitLSQ(SplitLSQ);
     (* fire_when_enabled, no_implicit_conditions *)
     rule checkStQValid;
         if(all(\== (False), readVEhr(0, st_valid))) begin
+            $display(" st_deqP: %d, st_enqP: %d", st_deqP, st_enqP);
             doAssert(st_deqP == st_enqP, "empty queue have enqP = deqP");
         end
         else begin
@@ -1298,9 +1313,11 @@ module mkSplitLSQ(SplitLSQ);
                 end
             endfunction
             for(Integer i = 0; i < valueof(StQSize); i = i+1) begin
+                $write("[%2d] %2d %14b ", i, st_valid[i][0], st_specBits[i][0]);
                 doAssert(in_range(fromInteger(i)) == st_valid[i][0],
                          "valid entries must be within [deqP, enqP)");
             end
+            $display(" st_deqP: %2d, st_enqP: %2d", st_deqP, st_enqP);
         end
     endrule
 
@@ -1353,7 +1370,7 @@ module mkSplitLSQ(SplitLSQ);
     (* fire_when_enabled, no_implicit_conditions *)
     rule setForEnq;
         ld_can_enq_wire <= !ld_valid[ld_enqP][0];
-        st_can_enq_wire <= !st_valid[st_enqP][0];
+        st_can_enq_wire <= !st_valid[getNextStPtrCore(st_enqP)][0]; // Leave an extra space for a capability
     endrule
 
     // deqLd guard (see comments at the method declaration)
@@ -1412,6 +1429,7 @@ module mkSplitLSQ(SplitLSQ);
                     end
                     tagged St .tag: begin
                         st_atCommit_setCom[i][tag] <= True;
+                        if (isCap(st_byteEn[tag])) st_atCommit_setCom[i][getNextStPtrCore(tag)] <= True;
                         doAssert(st_valid_setCom[tag], "must be valid");
                     end
                     default: doAssert(False, "unknown lsq tag");
@@ -1536,7 +1554,8 @@ module mkSplitLSQ(SplitLSQ);
                  "must be StQ mem func");
         // set entry valid and move ptr
         st_valid_enq[st_enqP] <= True;
-        st_enqP <= getNextStPtr(st_enqP);
+        Bool cap = isCap(mem_inst.byteOrTagEn.DataMemAccess);
+        st_enqP <= getNextStPtr(st_enqP, cap);
         // set up the entry
         st_instTag[st_enqP] <= inst_tag;
         st_memFunc[st_enqP] <= getStQMemFunc(mem_inst.mem_func);
@@ -1552,6 +1571,24 @@ module mkSplitLSQ(SplitLSQ);
         st_verified_enq[st_enqP] <= False;
         st_specBits_enq[st_enqP] <= spec_bits;
         st_atCommit_enq[st_enqP] <= False;
+        if (cap) begin
+            let st_enqSkipped = getNextStPtrCore(st_enqP);
+            st_valid_enq[st_enqSkipped] <= True;
+            st_instTag[st_enqSkipped] <= inst_tag;
+            st_memFunc[st_enqSkipped] <= getStQMemFunc(mem_inst.mem_func);
+            st_amoFunc[st_enqSkipped] <= mem_inst.amo_func;
+            st_byteEn[st_enqSkipped] <= mem_inst.byteOrTagEn.DataMemAccess;
+            st_acq[st_enqSkipped] <= mem_inst.aq;
+            st_rel[st_enqSkipped] <= mem_inst.rl;
+            st_dst[st_enqSkipped] <= dst;
+            st_fault_enq[st_enqSkipped] <= Invalid;
+            st_pcHash[st_enqSkipped] <= pcHash;
+            st_allowCapAmoLd_enq[st_enqSkipped] <= False;
+            st_computed_enq[st_enqSkipped] <= False;
+            st_verified_enq[st_enqSkipped] <= False;
+            st_specBits_enq[st_enqSkipped] <= spec_bits;
+            st_atCommit_enq[st_enqSkipped] <= False;
+        end
     endmethod
 
     method Action updateData(StQTag t, MemTaggedData d);
@@ -2179,7 +2216,9 @@ module mkSplitLSQ(SplitLSQ);
 
         // remove entry
         st_valid_deqSt[deqP] <= False;
-        let new_st_deqP = getNextStPtr(deqP);
+        Bool cap = isCap(st_byteEn[deqP]);
+        let new_st_deqP = getNextStPtr(deqP, cap);
+        if (getNextStPtrCore(deqP) == st_enqP) new_st_deqP = st_enqP; // Override if we're at the end of the range for some reason.
         st_deqP <= new_st_deqP;
 
         // in case the deq entry is not verified, verifyP must be equal to
@@ -2195,23 +2234,29 @@ module mkSplitLSQ(SplitLSQ);
         // (1) reset olderSt
         // (2) reset readFrom
         // (3) reset depStQDeq
-        function Action resetSt(LdQTag i);
+        function Action resetSt(StQTag dP, LdQTag i);
         action
-            if(ld_olderSt_deqSt[i] == Valid (deqP)) begin
+            if(ld_olderSt_deqSt[i] == Valid (dP)) begin
                 ld_olderSt_deqSt[i] <= Invalid;
                 // no need to change ld_olderStVerified, it is only meaningful
                 // when ld_olderSt is valid
             end
-            if(ld_readFrom_deqSt[i] == Valid (deqP)) begin
+            if(ld_readFrom_deqSt[i] == Valid (dP)) begin
                 ld_readFrom_deqSt[i] <= Invalid;
             end
-            if(ld_depStQDeq_deqSt[i] == Valid (deqP)) begin
+            if(ld_depStQDeq_deqSt[i] == Valid (dP)) begin
                 ld_depStQDeq_deqSt[i] <= Invalid;
             end
         endaction
         endfunction
+
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
-        joinActions(map(resetSt, idxVec));
+        joinActions(map(resetSt(deqP), idxVec));
+        if (cap) begin
+            let deqPSkipped = getNextStPtrCore(deqP);
+            st_valid_deqSt[deqPSkipped] <= False;
+            joinActions(map(resetSt(deqPSkipped), idxVec));
+        end
     endmethod
 
     interface lookupPAddr = replicate(lookupAPAddr);
@@ -2346,6 +2391,7 @@ module mkSplitLSQ(SplitLSQ);
             function Action killStQ(StQTag i);
             action
                 if(stNeedKill[i]) begin
+                    $display("kill %2d", i);
                     st_valid_wrongSpec[i] <= False;
                     doAssert(!st_atCommit_wrongSpec[i], "cannot be at commit");
                 end
