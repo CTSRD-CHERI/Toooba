@@ -954,6 +954,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
         opcOpCHERI: begin
             case (funct3)
                 f3_cap_CIncOffsetImmediate: begin
+                    dInst.capChecks.src1_unsealed = True;
+
                     dInst.iType = Cap;
                     regs.dst = Valid(tagged Gpr rd);
                     regs.src1 = Valid(tagged Gpr rs1);
@@ -961,11 +963,20 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                     dInst.capFunc = CapModify (ModifyOffset (IncOffset));
                 end
                 f3_cap_CSetBoundsImmediate: begin
+                    dInst.capChecks.src1_tag = True;
+                    dInst.capChecks.src1_unsealed = True;
+
+                    dInst.capChecks.check_enable = True;
+                    dInst.capChecks.check_authority_src = Src1;
+                    dInst.capChecks.check_low_src = Src1Addr;
+                    dInst.capChecks.check_high_src = ResultTop;
+                    dInst.capChecks.check_inclusive = True;
+
                     dInst.iType = Cap;
                     regs.dst = Valid(tagged Gpr rd);
                     regs.src1 = Valid(tagged Gpr rs1);
                     dInst.imm = Valid (immIunsigned);
-                    dInst.capFunc = CapModify (SetBounds (SetBoundsRounding));
+                    dInst.capFunc = CapModify (SetBounds (SetBounds));
                 end
                 f3_cap_ThreeOp: begin
                     case (funct7)
@@ -993,20 +1004,41 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capFunc = CapModify (SpecialRW (scrType));
                         end
                         f7_cap_CSetBounds: begin
+                            dInst.capChecks.src1_tag = True;
+                            dInst.capChecks.src1_unsealed = True;
+
+                            dInst.capChecks.check_enable = True;
+                            dInst.capChecks.check_authority_src = Src1;
+                            dInst.capChecks.check_low_src = Src1Addr;
+                            dInst.capChecks.check_high_src = ResultTop;
+                            dInst.capChecks.check_inclusive = True;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs1);
                             regs.src2 = Valid(tagged Gpr rs2);
-                            dInst.capFunc = CapModify (SetBounds (SetBoundsRounding));
+                            dInst.capFunc = CapModify (SetBounds (SetBounds));
                         end
                         f7_cap_CSetBoundsExact: begin
+                            dInst.capChecks.src1_tag = True;
+                            dInst.capChecks.src1_unsealed = True;
+                            dInst.capChecks.cap_exact = True;
+
+                            dInst.capChecks.check_enable = True;
+                            dInst.capChecks.check_authority_src = Src1;
+                            dInst.capChecks.check_low_src = Src1Addr;
+                            dInst.capChecks.check_high_src = ResultTop;
+                            dInst.capChecks.check_inclusive = True;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs1);
                             regs.src2 = Valid(tagged Gpr rs2);
-                            dInst.capFunc = CapModify (SetBounds (SetBoundsExact));
+                            dInst.capFunc = CapModify (SetBounds (SetBounds));
                         end
                         f7_cap_CSetOffset: begin
+                            dInst.capChecks.src1_unsealed = True;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs1);
@@ -1014,6 +1046,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capFunc = CapModify (ModifyOffset (SetOffset));
                         end
                         f7_cap_CSetAddr: begin
+                            dInst.capChecks.src2_unsealed = True;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs2);
@@ -1021,6 +1055,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capFunc = CapModify (SetAddr (Src1Addr));
                         end
                         f7_cap_CIncOffset: begin
+                            dInst.capChecks.src1_unsealed = True;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs1);
@@ -1028,6 +1064,19 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capFunc = CapModify (ModifyOffset (IncOffset));
                         end
                         f7_cap_CSeal: begin
+                            dInst.capChecks.src1_tag = True;
+                            dInst.capChecks.src2_tag = True;
+                            dInst.capChecks.src1_unsealed = True;
+                            dInst.capChecks.src2_unsealed = True;
+                            dInst.capChecks.src2_permit_seal = True;
+                            dInst.capChecks.src2_addr_valid_type = True;
+
+                            dInst.capChecks.check_enable = True;
+                            dInst.capChecks.check_authority_src = Src2;
+                            dInst.capChecks.check_low_src = Src2Addr;
+                            dInst.capChecks.check_high_src = Src2Addr;
+                            dInst.capChecks.check_inclusive = False;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs1);
@@ -1035,6 +1084,20 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capFunc = CapModify (Seal);
                         end
                         f7_cap_CCSeal: begin
+                            dInst.capChecks.src1_tag = True;
+
+                            dInst.capChecks.src1_unsealed = True;
+                            dInst.capChecks.src2_unsealed = True;
+                            dInst.capChecks.src2_addr_valid_type = True;
+                            dInst.capChecks.src2_permit_seal = True;
+                            dInst.capChecks.ccseal_bypass = True;
+
+                            dInst.capChecks.check_enable = True;
+                            dInst.capChecks.check_authority_src = Src2;
+                            dInst.capChecks.check_low_src = Src2Addr;
+                            dInst.capChecks.check_high_src = Src2Addr;
+                            dInst.capChecks.check_inclusive = False;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs1);
@@ -1074,6 +1137,19 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             endcase
                         end
                         f7_cap_CUnseal: begin
+                            dInst.capChecks.src1_tag = True;
+                            dInst.capChecks.src2_tag = True;
+                            dInst.capChecks.src1_sealed_with_type = True;
+                            dInst.capChecks.src2_unsealed = True;
+                            dInst.capChecks.src2_points_to_src1_type = True;
+                            dInst.capChecks.src2_permit_unseal = True;
+
+                            dInst.capChecks.check_enable = True;
+                            dInst.capChecks.check_authority_src = Src2;
+                            dInst.capChecks.check_low_src = Src2Addr;
+                            dInst.capChecks.check_high_src = Src2Addr;
+                            dInst.capChecks.check_inclusive = False;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs1);
@@ -1096,6 +1172,16 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capFunc = CapInspect (SetEqualExact);
                         end
                         f7_cap_CCopyType: begin
+                            dInst.capChecks.src2_tag = True;
+                            dInst.capChecks.src2_unsealed = True;
+
+                            dInst.capChecks.check_enable = True;
+                            dInst.capChecks.check_authority_src = Src2;
+                            dInst.capChecks.check_low_src = Src1Type;
+                            dInst.capChecks.check_high_src = Src1Type;
+                            dInst.capChecks.check_inclusive = False;
+                            dInst.capChecks.ccopytype_bypass = True;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs2);
@@ -1103,6 +1189,9 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capFunc = CapModify (SetAddr (Src1Type));
                         end
                         f7_cap_CAndPerm: begin
+                            dInst.capChecks.src1_tag = True;
+                            dInst.capChecks.src1_unsealed = True;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs1);
@@ -1110,6 +1199,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capFunc = CapModify (AndPerm);
                         end
                         f7_cap_CSetFlags: begin
+                            dInst.capChecks.src1_unsealed = True;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs1);
@@ -1117,6 +1208,9 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capFunc = CapModify (SetFlags);
                         end
                         f7_cap_CToPtr: begin
+                            dInst.capChecks.src1_unsealed = True;
+                            dInst.capChecks.src2_tag = True;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs1);
@@ -1130,6 +1224,10 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.capFunc = CapInspect (ToPtr);
                         end
                         f7_cap_CFromPtr: begin
+                            dInst.capChecks.src2_tag = True;
+                            dInst.capChecks.src2_unsealed = True;
+                            dInst.capChecks.cfromptr_bypass = True;
+
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
                             regs.src1 = Valid(tagged Gpr rs2);
@@ -1146,6 +1244,17 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             dInst.execFunc = Alu (Sub);
                         end
                         f7_cap_CBuildCap: begin
+                            dInst.capChecks.src2_tag = True;
+                            dInst.capChecks.src2_unsealed = True;
+                            dInst.capChecks.src1_perm_subset_src2 = True;
+                            dInst.capChecks.src1_derivable = True;
+
+                            dInst.capChecks.check_enable = True;
+                            dInst.capChecks.check_authority_src = Src2;
+                            dInst.capChecks.check_low_src = Src1Base;
+                            dInst.capChecks.check_high_src = Src1Top;
+                            dInst.capChecks.check_inclusive = True;
+
                             // Swap arguments so SCR possibly goes in RS2
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
@@ -1246,6 +1355,10 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     dInst.capFunc = CapInspect (GetAddr);
                                 end
                                 f5rs2_cap_CSealEntry: begin
+                                    dInst.capChecks.src1_tag = True;
+                                    dInst.capChecks.src1_unsealed = True;
+                                    dInst.capChecks.src1_permit_x = True;
+
                                     dInst.iType = Cap;
                                     regs.dst = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
