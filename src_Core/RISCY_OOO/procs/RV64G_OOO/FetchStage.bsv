@@ -71,6 +71,7 @@ import L1CoCache::*;
 import MMIOInst::*;
 import CHERICap::*;
 import CHERICC_Fat::*;
+import ISA_Decls_CHERI::*;
 `ifdef RVFI_DII
 import RVFI_DII_Types::*;
 import Types::*;
@@ -114,6 +115,7 @@ endmodule
 interface FetchStage;
     // pipeline
     interface Vector#(SupSize, SupFifoDeq#(FromFetchStage)) pipelines;
+    method CapMem pcc;
 
     // tlb and mem connections
     interface ITlb iTlbIfc;
@@ -124,7 +126,7 @@ interface FetchStage;
 `endif
 
     // starting and stopping
-    method Action start(CapMem pc
+    method Action start(CapPipe start_pcc
 `ifdef RVFI_DII
         , Dii_Parcel_Id parcel_id
 `endif
@@ -145,7 +147,7 @@ interface FetchStage;
 `endif
     method Action done_flushing();
     method Action train_predictors(
-        CapMem pc, CapMem next_pc, IType iType, Bool taken, Bool link,
+        PredState ps, PredState next_ps, IType iType, Bool taken,
         PredTrainInfo trainInfo, Bool mispred, Bool isCompressed
     );
     interface SpeculationUpdate specUpdate;
@@ -223,6 +225,7 @@ typedef struct {
 } Fetch3ToDecode deriving(Bits, Eq, FShow);
 
 // Used purely internally in doDecode.
+// TODO: look at that
 typedef struct {
   PcCompressed pc;
 `ifdef RVFI_DII
@@ -301,11 +304,11 @@ function InstrFromFetch3 fetch3s_2_inst(Fetch3ToDecode inHi, Fetch3ToDecode inLo
 endfunction
 
 typedef struct {
-  CapMem pc;
+  PredState ps;
 `ifdef RVFI_DII
   Dii_Parcel_Id dii_pid;
 `endif
-  CapMem ppc;
+  PredState pps;
   Epoch main_epoch;
   PredTrainInfo trainInfo;
   Instruction inst;
@@ -313,13 +316,13 @@ typedef struct {
   Bit #(32) orig_inst;    // original 16b or 32b instruction ([1:0] will distinguish 16b or 32b)
   ArchRegs regs;
   Maybe#(Exception) cause;
-  Addr              tval;    // in case of exception
+  Addr tval;    // in case of exception
 } FromFetchStage deriving (Bits, Eq, FShow);
 
 // train next addr pred (BTB)
 typedef struct {
-    CapMem pc;
-    CapMem nextPc;
+    PredState ps;
+    PredState nextPs;
 } TrainNAP deriving(Bits, Eq, FShow);
 
 // ================================================================
@@ -381,19 +384,27 @@ module mkFetchStage(FetchStage);
     // We stall until the flush is done
     Ehr#(3, Bool) waitForFlush <- mkEhr(False);
 
-    Ehr#(5, CapMem) pc_reg <- mkEhr(nullCap);
 `ifdef RVFI_DII
     Ehr#(4, Dii_Parcel_Id) dii_pid_reg <- mkEhr(0);
 `endif
-    Integer pc_fetch1_port = 0;
-    Integer pc_decode_port = 1;
-    Integer pc_fetch3_port = 2;
-    Integer pc_redirect_port = 3;
+    Integer ps_fetch1_port = 0;
+    Integer ps_decode_port = 1;
+    Integer ps_fetch3_port = 2;
+    Integer ps_redirect_port = 3;
     Integer pc_final_port = 4;
     // To track the next expected PC in Decode for early lookups for prediction.
     Ehr#(TAdd#(SupSize, 2), Addr) decode_pc_reg <- mkEhr(?);
     Integer decode_pc_redirect_port = valueOf(SupSize);
     Integer decode_pc_final_port = valueOf(SupSize) + 1;
+
+    Ehr#(5, PredState) ps_reg <- mkEhr(nullPredState);
+    Ehr#(4, CapMem) pcc_reg <- mkEhr(nullCap);
+    CapPipe pcc_reg_pipe = cast(pcc_reg[0]);
+    let pcc_reg_top = getTop(pcc_reg_pipe);
+    let pcc_reg_base = getBase(pcc_reg_pipe);
+    Bool cap_mode = getFlags(pcc_reg[0])==1;
+
+
 
     // PC compression structure holding an indexed set of PC blocks so that only indexes need be tracked.
     IndexedMultiset#(PcIdx, PcMSB, SupSizeX2) pcBlocks <- mkIndexedMultisetQueue;
@@ -472,7 +483,7 @@ module mkFetchStage(FetchStage);
 `endif
 
     rule updatePcInBtb;
-        nextAddrPred.put_pc(pc_reg[pc_final_port]);
+        nextAddrPred.put_pc(ps_reg[pc_final_port]);
     endrule
 
     // We don't send req to TLB when waiting for redirect or TLB flush. Since
@@ -480,45 +491,54 @@ module mkFetchStage(FetchStage);
     // TLB idle to change VM CSR / signal flush TLB, there is no wrong path
     // request afterwards to race with the system code that manage paget table.
     rule doFetch1(started && !waitForRedirect[0] && !waitForFlush[0]);
-        let pc = pc_reg[pc_fetch1_port];
+        let ps = ps_reg[ps_fetch1_port];
 
         // Grab a chain of predictions from the BTB, which predicts targets for the next
         // set of addresses based on the current PC.
-        Vector#(SupSizeX2, Maybe#(CapMem)) pred_future_pc = nextAddrPred.pred;
+        Vector#(SupSizeX2, Maybe#(PredState)) pred_future_pc = nextAddrPred.pred;
+        /*Vector#(SupSizeX2, Maybe#(PredState)) pred_future_ps;
+        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
+            if(pred_future_pc[i] matches tagged Valid .p) begin
+                pred_future_ps[i] = Valid(PredState{pc: getAddr(p)});
+            end
+            else begin
+                pred_future_ps[i] = Invalid;
+            end
+        end*/
 
         // Next pc is the first nextPc that breaks the chain of pc+4 or
         // that is at the end of a cacheline.
         Vector#(SupSizeX2,Integer) indexes = genVector;
-        function Bool findNextPc(CapMem in_pc, Integer i);
-            Bool notLastInst = getLineInstOffset(getAddr(in_pc) + fromInteger(2*i)) != maxBound;
+        function Bool findNextPc(PredState p, Integer i);
+            Bool notLastInst = getLineInstOffset(getPc(p) + fromInteger(2*i)) != maxBound;
             Bool noJump = !isValid(pred_future_pc[i]);
             return (!(notLastInst && noJump));
         endfunction
-        Bit#(TLog#(SupSizeX2)) posLastSupX2 = fromInteger(fromMaybe(valueof(SupSizeX2) - 1, find(findNextPc(pc), indexes)));
-        Maybe#(CapMem) pred_next_pc = pred_future_pc[posLastSupX2];
+        Bit#(TLog#(SupSizeX2)) posLastSupX2 = fromInteger(fromMaybe(valueof(SupSizeX2) - 1, find(findNextPc(ps), indexes)));
+        Maybe#(PredState) pred_next_ps = pred_future_pc[posLastSupX2];
 
-        let next_fetch_pc = fromMaybe(addPc(pc, 2 * (zeroExtend(posLastSupX2) + 1)), pred_next_pc);
-        pc_reg[pc_fetch1_port] <= next_fetch_pc;
+        let next_fetch_ps = fromMaybe(addPs(ps, 2 * (zeroExtend(posLastSupX2) + 1)), pred_next_ps);
+        ps_reg[ps_fetch1_port] <= next_fetch_ps;
 
 `ifdef RVFI_DII
-        Dii_Parcel_Id dii_pid = dii_pid_reg[pc_fetch1_port];
-        dii_pid_reg[pc_fetch1_port] <= dii_pid + (zeroExtend(posLastSupX2) + 1);
+        Dii_Parcel_Id dii_pid = dii_pid_reg[ps_fetch1_port];
+        dii_pid_reg[ps_fetch1_port] <= dii_pid + (zeroExtend(posLastSupX2) + 1);
 `endif
 
         // Send TLB request.
-        tlb_server.request.put (getAddr(pc));
+        tlb_server.request.put (ps.pc);
 
-        let pc_idxs <- pcBlocks.insertAndReserve(truncateLSB(pc), truncateLSB(next_fetch_pc));
+        let pc_idxs <- pcBlocks.insertAndReserve(zeroExtend(ps.pc), zeroExtend(next_fetch_ps.pc));
         PcIdx pc_idx = pc_idxs.inserted;
         PcIdx ppc_idx = pc_idxs.reserved;
         let out = Fetch1ToFetch2 {
-            pc: compressPc(pc_idx, pc),
+            pc: compressPc(pc_idx, zeroExtend(ps.pc)),
 `ifdef RVFI_DII
             dii_pid: dii_pid,
 `endif
             inst_frags_fetched: posLastSupX2,
-            pred_next_pc: isValid(pred_next_pc) ?
-                Valid(compressPc(ppc_idx, validValue(pred_next_pc))) : Invalid,
+            pred_next_pc: isValid(pred_next_ps) ?
+                Valid(compressPc(ppc_idx, zeroExtend(validValue(pred_next_ps).pc))) : Invalid,
             decode_epoch: decode_epoch[0],
             main_epoch: f_main_epoch};
 
@@ -533,6 +553,9 @@ module mkFetchStage(FetchStage);
         // Get TLB response
         match {.phys_pc, .cause, .allow_cap} <- tlb_server.response.get;
 
+        Maybe#(Trap) trap = Invalid;
+        if (cause matches tagged Valid .c) trap = Valid(Exception(c));
+
         // Access main mem or boot rom if no TLB exception
         Bool access_mmio = False;
 `ifdef RVFI_DII
@@ -542,7 +565,7 @@ module mkFetchStage(FetchStage);
         // extra parcel on the front will be discarded by fav_parse_insts.
         dii.fromDii.request.put(in.dii_pid);
 `else
-        if (!isValid(cause)) begin
+        if (!isValid(trap)) begin
             case(mmio.getFetchTarget(phys_pc))
                 MainMem: begin
                     // Send ICache request
@@ -563,7 +586,6 @@ module mkFetchStage(FetchStage);
             endcase
         end
 `endif
-
         let out = Fetch2ToFetch3 {
             pc: in.pc,
 `ifdef RVFI_DII
@@ -712,7 +734,7 @@ module mkFetchStage(FetchStage);
             $display("Decode: dequed %d instruction fragments", used_frag_count);
       end
 
-      Maybe#(CapMem) redirectPc = Invalid; // next pc redirect by branch predictor
+      Maybe#(PredState) redirectPc = Invalid; // next pc redirect by branch predictor
 `ifdef RVFI_DII
       Maybe#(Dii_Parcel_Id) redirectDiiPid = Invalid;
 `endif
@@ -724,10 +746,10 @@ module mkFetchStage(FetchStage);
       Maybe#(IType) redirectInst = Invalid;
 `endif
       Bool likely_epoch_change = False;
-      Maybe#(CapMem) m_push_addr = Invalid;
+      Maybe#(PredState) m_push_addr = Invalid;
       for (Integer i = 0; i < valueof(SupSize); i=i+1) begin
-         CapMem pc = decompressPc(validValue(decodeIn[i]).pc);
-         CapMem ppc = decompressPc(validValue(decodeIn[i]).ppc);
+         PredState pc = PredState{pc: getAddr(decompressPc(validValue(decodeIn[i]).pc))};
+         PredState ppc = PredState{pc: getAddr(decompressPc(validValue(decodeIn[i]).ppc))};
          let decode_result = decodeResults[i]; // Decode 32b inst, or 32b expansion of 16b inst
          let dInst = decode_result.dInst;
          let regs = decode_result.regs;
@@ -738,7 +760,7 @@ module mkFetchStage(FetchStage);
             trainInfo.dir = pred_res.train;
             likely_epoch_change = (pred_res.taken != validValue(decodeIn[i]).pred_jump);
          end
-         Maybe#(CapMem) dir_ppc = decodeBrPred(pc, decode_result.dInst, pred_res.taken, (validValue(decodeIn[i]).inst_kind == Inst_32b));
+         Maybe#(PredState) dir_ppc = decodeBrPred(pc, decode_result.dInst, pred_res.taken, (validValue(decodeIn[i]).inst_kind == Inst_32b));
          if (decodeIn[i] matches tagged Valid .in)  begin
             let cause = in.cause;
             pcBlocks.rPort[i].remove(in.pc.idx);
@@ -754,7 +776,7 @@ module mkFetchStage(FetchStage);
                if (verbose) $display("mispredicted first half in decode: pc :  %h", pc);
                decode_epoch_local = !decode_epoch_local;
                redirectPc = Valid (pc); // record redirect to the first PC in this bundle.
-               trainNAP = Valid (TrainNAP {pc: pc, nextPc: addPc(pc, 2)});
+               trainNAP = Valid (TrainNAP {ps: pc, nextPs: addPs(pc, 2)});
 `ifdef RVFI_DII
                redirectDiiPid = Valid (in.dii_pid);
 `endif
@@ -769,13 +791,13 @@ module mkFetchStage(FetchStage);
                // update predicted next pc
                if (!isValid(cause)) begin
                   // direction predict
-                  Maybe#(CapMem) nextPc = dir_ppc;
+                  Maybe#(PredState) nextPc = dir_ppc;
                   // return address stack link reg is x1 or x5
                   Bool dst_link = linkedR(regs.dst);
                   Bool src1_link = linkedR(regs.src1);
 
-                  CapMem pop_addr = ras.ras[i].first;
-                  CapMem push_addr = addPc(pc, ((in.inst_kind == Inst_32b) ? 4 : 2));
+                  PredState pop_addr = ras.ras[i].first;
+                  PredState push_addr = addPs(pc, ((in.inst_kind == Inst_32b) ? 4 : 2));
                   Bool doPop = False;
                   if ((dInst.iType == J || dInst.iType == CJAL) && dst_link) begin
                      // rs1 is invalid, i.e., not link: push
@@ -817,7 +839,7 @@ module mkFetchStage(FetchStage);
                   // If we don't have a good guess about where we are going, don't proceed.
                   if ((!isValid(nextPc)) && (!in.pred_jump)) begin
                      // Invalid virtual address to ensure redirection.
-                     ppc = setAddrUnsafe(nullCap, {2'b01,?});
+                     ppc = setPcUnsafe(nullPredState, {2'b01,?});
                      decode_epoch_local = !decode_epoch_local;
                   // check previous mispred
                   end
@@ -831,8 +853,8 @@ module mkFetchStage(FetchStage);
 `endif
                      ppc = decode_pred_next_pc;
                      // train next addr pred when mispredict
-                     let last_x16_pc = addPc(pc, ((in.inst_kind == Inst_32b) ? 2 : 0));
-                     trainNAP = Valid (TrainNAP {pc: last_x16_pc, nextPc: decode_pred_next_pc});
+                     let last_x16_pc = addPs(pc, ((in.inst_kind == Inst_32b) ? 2 : 0));
+                     trainNAP = Valid (TrainNAP {ps: last_x16_pc, nextPs: decode_pred_next_pc});
 `ifdef PERF_COUNT
                      // performance stats: record decode redirect
                      doAssert(redirectInst == Invalid, "at most 1 decode redirect per cycle");
@@ -841,12 +863,12 @@ module mkFetchStage(FetchStage);
                   end
                end // if (!isValid(cause))
                if (isValid(m_push_addr)) trainInfo.ras = trainInfo.ras + 1;
-               decode_pc_reg[i] <= getAddr(ppc);
-               let out = FromFetchStage{pc: pc,
+               decode_pc_reg[i] <= getPc(ppc);
+               let out = FromFetchStage{ps: PredState{pc: getPc(pc)},
 `ifdef RVFI_DII
                                         dii_pid: in.dii_pid,
 `endif
-                                        ppc: ppc,
+                                        pps:PredState{pc: getPc(ppc)},
                                         main_epoch: in.main_epoch,
                                         trainInfo: trainInfo,
                                         inst: in.inst,
@@ -854,12 +876,12 @@ module mkFetchStage(FetchStage);
                                         orig_inst: in.orig_inst,
                                         regs: decode_result.regs,
                                         cause: cause,
-                                        tval: getAddr(pc) + ((in.cause_second_half) ? 2:0)
+                                        tval: getPc(pc) + ((in.cause_second_half) ? 2:0)
                                         };
                out_fifo.enqS[i].enq(out);
                if (verbosity >= 1) begin
                   $write ("%0d: %m.rule doDecode: out_fifo.enqS[%0d].enq", cur_cycle, i);
-                  $display (" pc %0h  inst %08h", out.pc, out.orig_inst);
+                  $display (" pc %0h  inst %08h", out.ps, out.orig_inst);
                end
                if (verbosity >= 2) begin
                   $display ("    ", fshow(out));
@@ -876,13 +898,13 @@ module mkFetchStage(FetchStage);
 
       // update PC and epoch
       if(redirectPc matches tagged Valid .rp) begin
-         pc_reg[pc_decode_port] <= rp;
+         ps_reg[ps_decode_port] <= setPcUnsafe(ps_reg[ps_decode_port], getPc(rp));
          decode_redirect_count <= decode_redirect_count + 1;
       end
 `ifdef RVFI_DII
       doAssert(isValid(redirectPc) == isValid(redirectDiiPid), "PC and DII redirections always happen together");
       if(redirectDiiPid matches tagged Valid .nextDiiPid) begin
-         dii_pid_reg[pc_decode_port] <= nextDiiPid;
+         dii_pid_reg[ps_decode_port] <= nextDiiPid;
       end
 `endif
       decode_epoch[0] <= decode_epoch_local;
@@ -922,7 +944,7 @@ module mkFetchStage(FetchStage);
         // only when misprediction happens, i.e., train by dec is already at
         // wrong path.
         TrainNAP train = fromMaybe(validValue(napTrainByDec.wget), napTrainByExe.wget);
-        nextAddrPred.update(train.pc, train.nextPc, train.nextPc != addPc(train.pc, 2));
+        nextAddrPred.update(train.ps, train.nextPs, getPc(train.nextPs) != getPc(addPs(train.ps, 2)));
     endrule
 
     // Security: we can flush when front end is empty, i.e.
@@ -937,17 +959,19 @@ module mkFetchStage(FetchStage);
     interface iTlbIfc = iTlb;
     interface iMemIfc = iMem;
     interface mmioIfc = mmio.toCore;
+    method CapMem pcc = pcc_reg[0];
 `ifdef RVFI_DII
     interface diiIfc = dii.toCore;
 `endif
 
     method Action start(
-        CapMem start_pc
+        CapPipe start_pcc
 `ifdef RVFI_DII
         , Dii_Parcel_Id dii_pid
 `endif
     );
-        pc_reg[0] <= start_pc;
+        ps_reg[0] <= setPcUnsafe(ps_reg[0], getAddr(start_pcc));
+        pcc_reg[0] <= cast(start_pcc);
 `ifdef RVFI_DII
         dii_pid_reg[0] <= dii_pid;
 `endif
@@ -972,9 +996,10 @@ module mkFetchStage(FetchStage);
     );
         if (verbose)
         $display("Redirect: newpc %h, old f_main_epoch %d, new f_main_epoch %d, specBits %x",new_pc,f_main_epoch,f_main_epoch+1, specBits);
-        pc_reg[pc_redirect_port] <= new_pc;
+        ps_reg[ps_redirect_port] <= setPcUnsafe(ps_reg[ps_redirect_port], getAddr(new_pc));
+        pcc_reg[ps_redirect_port] <= cast(new_pc);
 `ifdef RVFI_DII
-        dii_pid_reg[pc_redirect_port] <= dii_pid;
+        dii_pid_reg[ps_redirect_port] <= dii_pid;
         if (verbose) $display("%t Redirect: dii_pid_reg %d", $time(), dii_pid);
 `endif
         decode_pc_reg[decode_pc_redirect_port] <= getAddr(new_pc);
@@ -1010,13 +1035,13 @@ module mkFetchStage(FetchStage);
     endmethod
 
     method Action train_predictors(
-        CapMem pc, CapMem next_pc, IType iType, Bool taken, Bool link,
+        PredState ps, PredState next_ps, IType iType, Bool taken,
         PredTrainInfo trainInfo, Bool mispred, Bool isCompressed
     );
-        //if (iType == J || iType == CJAL || (iType == Br && next_pc < pc)) begin
+        //if (iType == J || (iType == Br && next_ps < ps)) begin
         //    // Only train the next address predictor for jumps and backward branches
-        //    // next_pc != pc + 4 is a substitute for taken
-        //    nextAddrPred.update(pc, next_pc, taken);
+        //    // next_ps != ps + 4 is a substitute for taken
+        //    nextAddrPred.update(ps, next_ps, taken);
         //end
 `ifdef NO_SPEC_RSB_PUSH
         if (link) ras.write(addPc(pc, isCompressed ? 2 : 4), trainInfo.ras);
@@ -1024,12 +1049,12 @@ module mkFetchStage(FetchStage);
         if (iType == Br) begin
             // Train the direction predictor for all branches
             dirPred.update(taken, trainInfo.dir, mispred);
-            $display("Branch train PC: %x, taken: %x, mispred: %x", getAddr(pc), taken, mispred);
+            $display("Branch train PC: %x, taken: %x, mispred: %x", getPc(ps), taken, mispred);
         end
         // train next addr pred when mispred
         if(mispred) begin
-            let last_x16_pc = addPc(pc, (isCompressed ? 0 : 2));
-            napTrainByExe.wset(TrainNAP {pc: last_x16_pc, nextPc: next_pc});
+            let last_x16_pc = addPs(ps, (isCompressed ? 0 : 2));
+            napTrainByExe.wset(TrainNAP {ps: last_x16_pc, nextPs: next_ps});
 `ifdef SPEC_RSB_FIXUP
             ras.setHead(trainInfo.ras);
 `endif
@@ -1055,7 +1080,7 @@ module mkFetchStage(FetchStage);
 
     method FetchDebugState getFetchState;
         return FetchDebugState {
-            pc: getAddr(pc_reg[0]),
+            pc: getPc(ps_reg[0]),
             waitForRedirect: waitForRedirect[0],
             waitForFlush: waitForFlush[0],
             mainEp: f_main_epoch

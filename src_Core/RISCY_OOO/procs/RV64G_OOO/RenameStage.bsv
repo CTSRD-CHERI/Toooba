@@ -125,8 +125,8 @@ interface RenameStage;
 endinterface
 
 module mkRenameStage#(RenameInput inIfc)(RenameStage);
-    Bool verbose = False;
-    Integer verbosity = 0;
+    Bool verbose = True;
+    Integer verbosity = 2;
 
     // func units
     FetchStage fetchStage = inIfc.fetchIfc;
@@ -233,7 +233,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                     // wrong path, kill it & update prev epoch
                     fetchStage.pipelines[i].deq;
                     epochManager.updatePrevEpoch[i].update(x.main_epoch);
-                    if(verbose) $display("[doRenaming - %d] wrong path: pc = %16x", i, x.pc);
+                    if(verbose) $display("[doRenaming - %d] wrong path: pc = %16x", i, x.ps.pc);
                 end
             end
         end
@@ -255,7 +255,9 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         Maybe#(Trap) trap = tagged Invalid;
         let csr_state = csrf.decodeInfo;
         let pending_interrupt = csrf.pending_interrupt;
-        let new_exception = checkForException(x.dInst, x.regs, csr_state, x.pc, x.orig_inst[1:0]==2'b11);
+        CapPipe pcc = cast(fetchStage.pcc);
+        pcc = setAddr(cast(fetchStage.pcc), x.ps.pc).value;
+        let new_exception = checkForException(x.dInst, x.regs, csr_state, cast(pcc), x.orig_inst[1:0]==2'b11);
 
         // If Fpu regs are accessed, trap if mstatus_fs is "Off" (2'b00)
         Bool fpr_access = (   fn_ArchReg_is_FpuReg (x.regs.src1)
@@ -298,7 +300,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         else if (fs_trap || wfi_trap) begin
             trap = tagged Valid (tagged Exception excIllegalInst);
         end
-        return trap;
+return trap;
     endfunction
 
     // trap for first inst to rename
@@ -338,15 +340,15 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
        end
 `endif
         let x = fetchStage.pipelines[0].first;
-        let pc = x.pc;
+        let ps = x.ps;
         let orig_inst = x.orig_inst;
-        let ppc = x.ppc;
+        let pps = x.pps;
         let main_epoch = x.main_epoch;
         let trainInfo = x.trainInfo;
         let inst = x.inst;
         let dInst = x.dInst;
         let arch_regs = x.regs;
-        let cause = x.cause;
+        let trap = x.cause;
         let tval = x.tval;
 
         if(verbose) $display("[doRenaming] trap: ", fshow(x));
@@ -357,7 +359,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         // This avoids doing incorrect work
         incrEpochStallFetch;
         // just place it in the reorder buffer
-        let y = ToReorderBuffer{pc: cast(pc),
+        let y = ToReorderBuffer{ps: ps,
                                 orig_inst: orig_inst,
                                 iType: dInst.iType,
                                 dst: arch_regs.dst,
@@ -479,16 +481,16 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         fa_step_check;
 `endif
         let x = fetchStage.pipelines[0].first;
-        let pc = x.pc;
+        let ps = x.ps;
         let orig_inst = x.orig_inst;
         let dst = x.regs.dst;
-        let ppc = x.ppc;
+        let pps = x.pps;
         let main_epoch = x.main_epoch;
         let trainInfo = x.trainInfo;
         let inst = x.inst;
         let dInst = x.dInst;
         let arch_regs = x.regs;
-        let cause = x.cause;
+        let trap = x.cause;
         if(verbose) $display("[doRenaming] system inst: ", fshow(x));
 
         // update prev epoch
@@ -571,7 +573,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
            end
 
         RobInstState rob_inst_state = to_exec ? NotDone : Executed;
-        let y = ToReorderBuffer{pc: cast(pc),
+        let y = ToReorderBuffer{ps: ps,
                                 orig_inst: orig_inst,
                                 iType: dInst.iType,
                                 dst: arch_regs.dst,
@@ -585,7 +587,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 claimed_phy_reg: True, // XXX we always claim a free reg in rename
                                 trap: Invalid, // no trap
                                 // default values of FullResult
-                                ppc_vaddr_csrData: PPC (cast(ppc)), // default use PPC
+                                ppc_vaddr_csrData: PPC (setAddrUnsafe(fetchStage.pcc, pps.pc)), // default use PPS
                                 fflags: 0,
                                 ////////
                                 will_dirty_fpu_state: will_dirty_fpu_state,
@@ -664,18 +666,19 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         fa_step_check;
 `endif
         let x = fetchStage.pipelines[0].first;
-        let pc = x.pc;
+        let ps = x.ps;
+        let pc = ps.pc;
         let orig_inst = x.orig_inst;
-        let ppc = x.ppc;
+        let pps = x.pps;
         let main_epoch = x.main_epoch;
         let trainInfo = x.trainInfo;
         let inst = x.inst;
         let dInst = x.dInst;
         let arch_regs = x.regs;
-        let cause = x.cause;
+        let trap = x.trap;
         if(verbose) $display("[doRenaming] mem inst: ", fshow(x));
 
-        Addr fallthrough_pc = ((orig_inst[1:0] == 2'b11) ? pc + 4 : pc + 2);
+        Addr fallthrough_pc = ((orig_inst[1:0] == 2'b11) ? addPc(pc, 4) : addPc(pc, 2));
 
         // update prev epoch
         epochManager.updatePrevEpoch[0].update(main_epoch);
@@ -732,7 +735,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                         regs_ready: regs_ready_aggr // mem currently recv bypass
                     });
                 end
-                doAssert(ppc == fallthrough_pc, "Mem next PC is not PC+4/PC+2");
+                doAssert(pps.pc == fallthrough_pc, "Mem next PC is not PC+4/PC+2");
                 doAssert(!isValid(dInst.csr), "Mem never explicitly read/write CSR");
                 doAssert((dInst.iType != Fence) == isValid(dInst.imm),
                          "Mem (non-Fence) needs imm for virtual addr");
@@ -759,7 +762,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
             will_dirty_fpu_state = True;
         end
         RobInstState rob_inst_state = NotDone; // mem inst always needs execution
-        let y = ToReorderBuffer{pc: pc,
+        let y = ToReorderBuffer{ps: ps,
                                 orig_inst: orig_inst,
                                 iType: dInst.iType,
                                 dst: arch_regs.dst,
@@ -772,7 +775,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 claimed_phy_reg: True, // XXX we always claim a free reg in rename
                                 trap: Invalid, // no trap
                                 // default values of FullResult
-                                ppc_vaddr_csrData: PPC (ppc), // default use PPC
+                                pps_vaddr_csrData: PPS (pps), // default use PPS
                                 fflags: 0,
                                 ////////
                                 will_dirty_fpu_state: will_dirty_fpu_state,
@@ -884,17 +887,17 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
             if(!stop && fetchStage.pipelines[i].canDeq) begin
                 let x = fetchStage.pipelines[i].first; // don't deq now, inst may not have resource
-                let pc = x.pc;
+                let ps = x.ps;
                 let orig_inst = x.orig_inst;
-                let ppc = x.ppc;
+                let pps = x.pps;
                 let main_epoch = x.main_epoch;
                 let trainInfo = x.trainInfo;
                 let inst = x.inst;
                 let dInst = x.dInst;
                 let arch_regs = x.regs;
-                let cause = x.cause;
+                let trap = x.cause;
 
-                CapMem fallthrough_pc = addPc(pc, ((orig_inst[1:0] == 2'b11) ? 4 : 2));
+                PredState fallthrough_pc = addPs(ps, ((orig_inst[1:0] == 2'b11) ? 4 : 2));
 
                 // check for wrong path, if wrong path, don't process it, leave to the other rule in next cycle
                 if(!epochManager.checkEpoch[i].check(main_epoch)) begin
@@ -911,6 +914,22 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 end
                 // for system inst, process in next cycle (in a different rule)
                 if(doReplay(dInst.iType)) begin
+                    stop = True;
+                end
+                // CSR reads and writes must issue at the head of the queue
+                // so that the state of the reorder buffer reflects all outstanding instructions.
+                if((isCsr(dInst.iType) || isValid(dInst.scr)) && i != 0) begin
+                    stop = True;
+                end
+                Bool csrRead  = (isCsr(dInst.iType) && (arch_regs.dst  != Valid(Gpr(0)) || orig_inst[14:12]==fnCSRRSI || orig_inst[14:12]==fnCSRRCI)) ||
+                                (dInst.scr == Valid (scrAddrDDC));
+                if (csrRead && rob.outstandingCsrWrite) begin
+                    stop = True;
+                end
+                // Only CSRRSI and CSRRCI certainly write, but
+                // Leaving the simpler condition makes it a bit conservative.
+                Bool csrWrite = isCsr(dInst.iType) && (arch_regs.src1 != Valid(Gpr(0)) || orig_inst[14:12]==fnCSRRWI);
+                if (csrWrite && rob.outstandingCsrRead) begin
                     stop = True;
                 end
 `ifdef SECURITY
@@ -1031,7 +1050,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 spec_tag: spec_tag,
                                 regs_ready: regs_ready_aggr // fpu mul div recv bypass
                             });
-                            doAssert(ppc == fallthrough_pc, "FpuMulDiv next PC is not PC+4/PC+2");
+                            doAssert(pps == fallthrough_pc, "FpuMulDiv next PC is not PC+4/PC+2");
                             doAssert(!isValid(dInst.csr), "FpuMulDiv never explicitly read/write CSR");
                             doAssert(!isValid(spec_tag), "should not have spec tag");
                         end
@@ -1065,17 +1084,17 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                         regs_ready: regs_ready_aggr // mem currently recv bypass
                                     });
                                 end
-                                doAssert(ppc == fallthrough_pc, "Mem next PC is not PC+4/PC+2");
+                                doAssert(pps == fallthrough_pc, "Mem next PC is not PC+4/PC+2");
                                 doAssert(!isValid(dInst.csr), "Mem never explicitly read/write CSR");
                                 doAssert((dInst.iType != Fence) == isValid(dInst.imm),
                                          "Mem (non-Fence) needs imm for virtual addr");
                                 doAssert(!isValid(spec_tag), "should not have spec tag");
                                 // put in ldstq
                                 if(isLdQ) begin
-                                    lsq.enqLd(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)));
+                                    lsq.enqLd(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getPc(ps)));
                                 end
                                 else begin
-                                    lsq.enqSt(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)));
+                                    lsq.enqSt(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getPc(ps)));
                                 end
                             end
                             else begin
@@ -1122,7 +1141,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                         end
                         RobInstState rob_inst_state = (to_exec || to_mem || to_FpuMulDiv) ? NotDone : Executed;
 
-                        let y = ToReorderBuffer{pc: cast(pc),
+                        let y = ToReorderBuffer{ps: ps,
                                                 orig_inst: orig_inst,
                                                 iType: dInst.iType,
                                                 dst: arch_regs.dst,
@@ -1136,7 +1155,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                                 claimed_phy_reg: True, // XXX we always claim a free reg in rename
                                                 trap: Invalid, // no trap
                                                 // default values of FullResult
-                                                ppc_vaddr_csrData: PPC (cast(ppc)), // default use PPC
+                                                ppc_vaddr_csrData: PPC (setAddrUnsafe(fetchStage.pcc, pps.pc)), // default use PPS
                                                 fflags: 0,
                                                 ////////
                                                 will_dirty_fpu_state: will_dirty_fpu_state,

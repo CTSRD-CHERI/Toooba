@@ -48,9 +48,9 @@ export NextAddrPred(..);
 export mkBtb;
 
 interface NextAddrPred#(numeric type hashSz);
-    method Action put_pc(CapMem pc);
-    interface Vector#(SupSizeX2, Maybe#(CapMem)) pred;
-    method Action update(CapMem pc, CapMem brTarget, Bool taken);
+    method Action put_pc(PredState ps);
+    interface Vector#(SupSizeX2, Maybe#(PredState)) pred;
+    method Action update(PredState ps, PredState nextPs, Bool taken);
     // security
     method Action flush;
     method Bool flush_done;
@@ -75,8 +75,8 @@ typedef struct {
 } BtbAddr deriving(Bits, Eq, FShow);
 
 typedef struct {
-    CapMem pc;
-    CapMem nextPc;
+    PredState ps;
+    PredState nextPs;
     Bool taken;
 } BtbUpdate deriving(Bits, Eq, FShow);
 
@@ -96,43 +96,43 @@ module mkBtbCore(NextAddrPred#(hashSz))
         Add#(1, a__, TDiv#(tagSz, hashSz)),
     Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
     // Read and Write ordering doesn't matter since this is a predictor
-    Reg#(CapMem) addr_reg <- mkRegU;
-    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CapMem), 1))
+    Reg#(Addr) addr_reg <- mkRegU;
+    Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(Addr), 1))
         fullRecords <- replicateM(mkMapLossyBRAM);
     Vector#(SupSizeX2, MapSplit#(HashedTag#(hashSz), BtbIndex, VnD#(CompressedTarget), BtbAssociativity))
         compressedRecords <- replicateM(mkMapLossyBRAM);
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
 
-    function BtbAddr getBtbAddr(CapMem pc) = unpack(truncateLSB(getAddr(pc)));
-    function BtbBank getBank(CapMem pc) = getBtbAddr(pc).bank;
-    function BtbIndex getIndex(CapMem pc) = getBtbAddr(pc).index;
-    function BtbTag getTag(CapMem pc) = getBtbAddr(pc).tag;
-    function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(CapMem pc) =
-        MapKeyIndex{key: hash(getTag(pc)), index: getIndex(pc)};
+    function BtbAddr getBtbAddr(PredState ps) = unpack(truncateLSB(ps.pc));
+    function BtbBank getBank(PredState ps) = getBtbAddr(ps).bank;
+    function BtbIndex getIndex(PredState ps) = getBtbAddr(ps).index;
+    function BtbTag getTag(PredState ps) = getBtbAddr(ps).tag;
+    function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(PredState ps) =
+        MapKeyIndex{key: hash(getTag(ps)), index: getIndex(ps)};
 
     // no flush, accept update
     (* fire_when_enabled, no_implicit_conditions *)
     rule canonUpdate(updateEn matches tagged Valid .upd);
-        let pc = upd.pc;
-        let nextPc = upd.nextPc;
+        let ps = upd.ps;
+        let nextPs = upd.nextPs;
         let taken = upd.taken;
         /*$display("MapUpdate in BTB - pc %x, bank: %x, taken: %x, next: %x, time: %t",
                   pc, getBank(pc), taken, nextPc, $time);*/
         CompressedTarget shortMask = -1;
-        CapMem mask = ~zeroExtend(shortMask);
-        if ((pc&mask) == (nextPc&mask))
-            compressedRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:truncate(nextPc)});
+        Addr mask = ~zeroExtend(shortMask);
+        if ((ps.pc&mask) == (nextPs.pc&mask))
+            compressedRecords[getBank(ps)].update(lookupKey(ps), VnD{v:taken, d:truncate(nextPs.pc)});
         else
-            fullRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:nextPc});
+            fullRecords[getBank(ps)].update(lookupKey(ps), VnD{v:taken, d:nextPs.pc});
     endrule
 
-    method Action put_pc(CapMem pc);
-        addr_reg <= pc;
+    method Action put_pc(PredState ps);
+        addr_reg <= ps.pc;
         // Start SupSizeX2 BTB lookups, but ensure to lookup in the appropriate
         // bank for the alignment of each potential branch.
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             // Only add lower bits for timing.
-            BtbAddr a = getBtbAddr(pc);
+            BtbAddr a = getBtbAddr(ps);
             a = unpack({a.tag, {a.index,a.bank} + fromInteger(i)});
             //BtbAddr a = unpack(pack(getBtbAddr(pc)) + fromInteger(i));
             fullRecords[a.bank].lookupStart(MapKeyIndex{key: hash(a.tag), index: a.index});
@@ -140,20 +140,20 @@ module mkBtbCore(NextAddrPred#(hashSz))
         end
     endmethod
 
-    method Vector#(SupSizeX2, Maybe#(CapMem)) pred;
-        Vector#(SupSizeX2, Maybe#(CapMem)) ppcs = replicate(Invalid);
+    method Vector#(SupSizeX2, Maybe#(PredState)) pred;
+        Vector#(SupSizeX2, Maybe#(PredState)) ppcs = replicate(Invalid);
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             if (fullRecords[i].lookupRead matches tagged Valid .r)
-                ppcs[i] = r.v ? Valid(r.d):Invalid;
+                ppcs[i] = r.v ? Valid(PredState{pc: r.d}):Invalid;
             if (compressedRecords[i].lookupRead matches tagged Valid .r)
-                ppcs[i] = r.v ? Valid({truncateLSB(addr_reg),r.d}):Invalid;
+                ppcs[i] = r.v ? Valid(PredState{pc: {truncateLSB(addr_reg),r.d}}):Invalid;
         end
-        ppcs = rotateBy(ppcs,unpack(-getBtbAddr(addr_reg).bank)); // Rotate firstBank down to zeroeth element.
+        ppcs = rotateBy(ppcs,unpack(-getBtbAddr(PredState{pc : addr_reg}).bank)); // Rotate firstBank down to zeroeth element.
         return ppcs;
     endmethod
 
-    method Action update(CapMem pc, CapMem nextPc, Bool taken);
-        updateEn <= Valid(BtbUpdate {pc: pc, nextPc: nextPc, taken: taken});
+    method Action update(PredState ps, PredState nextPs, Bool taken);
+        updateEn <= Valid(BtbUpdate {ps: ps, nextPs: nextPs, taken: taken});
     endmethod
 
 `ifdef SECURITY

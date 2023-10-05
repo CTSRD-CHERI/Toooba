@@ -44,7 +44,7 @@ import CHERICC_Fat::*;
 import CHERICap::*;
 
 interface RAS;
-    method CapMem first;
+    method PredState first;
     method ActionValue#(RasIndex) pop(Bool doPop);
 endinterface
 
@@ -58,8 +58,8 @@ typedef RasIndex RasPredTrainInfo;
 interface ReturnAddrStack;
     interface Vector#(SupSize, RAS) ras;
     method Bool pendingPush;
-    method Action push(CapMem pushAddr);
-    method Action write(CapMem pushAddr, RasIndex h);
+    method Action push(PredState pushAddr);
+    method Action write(PredState pushAddr, RasIndex h);
     method Action setHead(RasIndex h);
     method Action flush;
     method Bool flush_done;
@@ -67,7 +67,7 @@ endinterface
 
 (* synthesize *)
 module mkRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
-    Vector#(RasEntries, Ehr#(NUM_RAS_STACK_IFCS, CapMem)) stack <- replicateM(mkEhr(nullCap));
+    Vector#(RasEntries, Ehr#(NUM_RAS_STACK_IFCS, PredState)) stack <- replicateM(mkEhr(nullPredState));
     Vector#(RasEntries, Ehr#(NUM_RAS_VALIDS_IFCS, Bool)) valids <- replicateM(mkEhr(False));
     // head points past valid data
     // to gracefully overflow, head is allowed to overflow to 0 and overwrite the oldest data
@@ -95,7 +95,7 @@ module mkRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEn
     Vector#(SupSize, RAS) rasIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         rasIfc[i] = (interface RAS;
-            method CapMem first = stack[head[i]][0];
+            method PredState first = stack[head[i]][0];
             method ActionValue#(RasIndex) pop(Bool doPop);
                 RasIndex h = head[i];
                 if (doPop) begin
@@ -110,7 +110,7 @@ module mkRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEn
 
     method Bool pendingPush = invalidHead;
 
-    method Action push(CapMem pushAddr);
+    method Action push(PredState pushAddr);
         Reg#(RasIndex) h = head[valueof(SupSize) + 2];
         valids[h+1][0] <= False;
 `ifndef NO_SPEC_RSB_PUSH
@@ -121,7 +121,7 @@ module mkRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEn
         //$display("RAS head<-%d", h + 1);
     endmethod
 
-    method Action write(CapMem pushAddr, RasIndex h);
+    method Action write(PredState pushAddr, RasIndex h);
         stack[h][1] <= pushAddr;
         valids[h][1] <= True;
         //$display("RAS write stack[%d] <- %x", h, pushAddr);

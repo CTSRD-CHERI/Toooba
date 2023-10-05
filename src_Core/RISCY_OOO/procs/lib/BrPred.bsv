@@ -42,27 +42,26 @@ import CHERICC_Fat::*;
 import CHERICap::*;
 
 (* noinline *)
-function Maybe#(CapMem) decodeBrPred( CapMem pc, DecodedInst dInst, Bool histTaken, Bool is_32b_inst);
-  CapMem pcPlusN = addPc(pc, (is_32b_inst ? 4 : 2));
+function Maybe#(PredState) decodeBrPred(PredState ps, DecodedInst dInst, Bool histTaken, Bool is_32b_inst);
+  PredState pcPlusN = addPs(ps, (is_32b_inst ? 4 : 2));
   Data imm_val = truncate(fromMaybe(?, getDInstImm(dInst)));
-  Maybe#(CapMem) nextPc = tagged Invalid;
-  CapPipe pcPipe = cast(pc);
-  CapMem jTarget = cast(incOffset(pcPipe, imm_val).value);
+  Maybe#(PredState) nextPs = tagged Invalid;
+  PredState jTarget = setPcUnsafe(ps, getPc(ps) + imm_val);
   if( dInst.iType == J || dInst.iType == CJAL ) begin
-    nextPc = tagged Valid jTarget;
+    nextPs = tagged Valid jTarget;
   end else if( dInst.iType == Br ) begin
     if( histTaken ) begin
-      nextPc = tagged Valid jTarget;
+      nextPs = tagged Valid jTarget;
     end else begin
-      nextPc = tagged Valid pcPlusN;
+      nextPs = tagged Valid pcPlusN;
     end
   end else if( dInst.iType == Jr || dInst.iType == CCall || dInst.iType == CJALR ) begin
     // target is unknown until RegFetch
-    nextPc = tagged Invalid;
+    nextPs = tagged Invalid;
   end else begin
-    nextPc = tagged Valid pcPlusN;
+    nextPs = tagged Valid pcPlusN;
   end
-  return nextPc;
+  return nextPs;
 endfunction
 
 // general types for direction predictor
