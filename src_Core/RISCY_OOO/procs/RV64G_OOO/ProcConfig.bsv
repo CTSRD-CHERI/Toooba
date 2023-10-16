@@ -242,7 +242,7 @@
     // LSQ
     `define LDQ_SIZE 24
     `define STQ_SIZE 6
-    `define SB_SIZE 4
+    `define SB_SIZE 5
 
     // reservation station sizes
     `define RS_ALU_SIZE 16
