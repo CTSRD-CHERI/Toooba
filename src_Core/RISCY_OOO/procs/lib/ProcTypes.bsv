@@ -301,7 +301,7 @@ typedef enum {
 } ModifyOffsetFunc deriving(Bits, Eq, FShow);
 
 typedef enum {
-    SetBounds, CRRL, CRAM
+    SetBoundsExact, SetBoundsRounding, CRRL, CRAM
 } SetBoundsFunc deriving(Bits, Eq, FShow);
 
 typedef enum {
@@ -330,6 +330,7 @@ typedef union tagged {
     SpecialRWFunc SpecialRW;
     AddrSource SetAddr;
     void Seal;
+    void CSeal;
     void SealEntry;
     SrcSelector Unseal;
     void AndPerm;
@@ -665,6 +666,10 @@ typedef struct {
     Maybe#(SCR)     scr; // Special Capability Register.
     Maybe#(ImmData) imm;
 } DecodedInst deriving(Bits, Eq, FShow);
+
+function Bool isCapInst(DecodedInst i);
+    return i.capFunc != Other;
+endfunction
 
 function Bool linkedR(Maybe#(ArchRIndx) register);
    Bool res = False;

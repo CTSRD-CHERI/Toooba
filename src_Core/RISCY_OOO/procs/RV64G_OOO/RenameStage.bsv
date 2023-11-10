@@ -998,7 +998,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 
                     if (to_exec) begin
                         // find an ALU pipeline
-                        function Bool aluValid(Integer k) = !aluExeUsed[k] && reservationStationAlu[k].canEnq;
+                        function Bool aluValid(Integer k) = (!isCapInst(dInst) || k < `MAX_CAP_PIPES) && !aluExeUsed[k] && reservationStationAlu[k].canEnq();
                         Vector#(AluExeNum, Bool) aluReady = map(aluValid, genVector);
                         if(scheduleRS(aluRSCount, aluReady) matches tagged Valid .k) begin
                             // can process, send to ALU rs
