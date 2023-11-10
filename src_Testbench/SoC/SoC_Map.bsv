@@ -111,7 +111,7 @@ interface SoC_Map_IFC;
    (* always_ready *)
    method  Bool  m_is_near_mem_IO_addr (Fabric_Addr addr);
 
-   (* always_ready *)   method  Bit #(64)  m_pc_reset_value;
+   method  Bit #(64)  m_pc_reset_value;
    (* always_ready *)   method  Bit #(64)  m_mtvec_reset_value;
    (* always_ready *)   method  Bit #(64)  m_nmivec_reset_value;
 endinterface
@@ -214,6 +214,15 @@ module mkSoC_Map (SoC_Map_IFC);
    Bit #(64) mtvec_reset_value  = 'h1000;    // TODO
    Bit #(64) nmivec_reset_value = ?;         // TODO
 
+   Reg#(Bit#(64)) pc_reset_value_reg <- mkReg(-1);
+   rule choosePcReset(pc_reset_value_reg == -1);
+     Bool clang <- $test$plusargs("baseline");
+     let new_pc_reset_value_reg = pc_reset_value;
+     if (clang) new_pc_reset_value_reg = mem0_controller_addr_range.base + 64'hBD8;
+     pc_reset_value_reg <= new_pc_reset_value_reg;
+     $display("Setting reset PC to %x", new_pc_reset_value_reg);
+   endrule
+
    // ================================================================
    // INTERFACE
 
@@ -232,7 +241,7 @@ module mkSoC_Map (SoC_Map_IFC);
 
    method  Bool  m_is_near_mem_IO_addr (Fabric_Addr addr) = inRange (near_mem_io_addr_range, addr);
 
-   method  Bit #(64)  m_pc_reset_value     = pc_reset_value;
+   method  Bit #(64)  m_pc_reset_value if (pc_reset_value_reg != -1) = pc_reset_value_reg;
    method  Bit #(64)  m_mtvec_reset_value  = mtvec_reset_value;
    method  Bit #(64)  m_nmivec_reset_value = nmivec_reset_value;
 endmodule

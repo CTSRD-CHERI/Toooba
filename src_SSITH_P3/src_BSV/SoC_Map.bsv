@@ -263,9 +263,16 @@ module mkSoC_Map (SoC_Map_IFC);
    // ----------------------------------------------------------------
    // PC, MTVEC and NMIVEC reset values
 
-   Bit #(64) pc_reset_value     = boot_rom_addr_range.base;
+   Bit #(64) pc_reset_value     = boot_rom_addr_range.base; // Put entry here!?
    Bit #(64) mtvec_reset_value  = 'h1000;    // TODO
    Bit #(64) nmivec_reset_value = ?;         // TODO
+
+   Reg#(Bit#(64)) pc_reset_value_reg <- mkReg(-1);
+   rule choosePcReset(pc_reset_value_reg == -1);
+     Bool clang <- $test$plusargs("baseline");
+     if (clang) pc_reset_value_reg <= ddr4_0_uncached_addr_range.base + 64'hBD8;
+     else pc_reset_value_reg <= pc_reset_value;
+   endrule
 
    // ================================================================
    // INTERFACE
@@ -289,7 +296,9 @@ module mkSoC_Map (SoC_Map_IFC);
 
    method  Bool  m_is_near_mem_IO_addr (Fabric_Addr addr) = inRange (near_mem_io_addr_range, addr);
 
-   method  Bit #(64)  m_pc_reset_value     = pc_reset_value;
+   method  Bit #(64)  m_pc_reset_value if ( pc_reset_value_reg != -1 );
+     return pc_reset_value_reg;
+   endmethod
    method  Bit #(64)  m_mtvec_reset_value  = mtvec_reset_value;
    method  Bit #(64)  m_nmivec_reset_value = nmivec_reset_value;
 endmodule

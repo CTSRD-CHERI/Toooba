@@ -145,7 +145,7 @@ module mkCoreW (CoreW_IFC #(t_n_irq));
 `ifdef RVFI_DII
           , .rvfi
 `endif
-          , .ifc} 
+          , .ifc}
      <- mkCoreW_reset ( rst, reset_by newRst.new_rst);
    (* no_implicit_conditions, fire_when_enabled *)
    rule rl_forward_debug_reset (otherRst);
@@ -285,7 +285,7 @@ module mkCoreW_reset #(Reset porReset)
       plic.set_addr_map (zeroExtend (soc_map.m_plic_addr_range.base),
                          zeroExtend (rangeTop(soc_map.m_plic_addr_range)));
       proc.start ( restartRunning
-                 , soc_map_struct.pc_reset_value
+                 , soc_map.m_pc_reset_value
                  , to_host_addr
                  , 0 );
    endaction;
@@ -323,7 +323,7 @@ module mkCoreW_reset #(Reset porReset)
 
    rule rl_dm_harts_reset_wait (rg_harts_reset_delay != 0);
       if (rg_harts_reset_delay == 1) begin
-         let pc = soc_map_struct.pc_reset_value;
+         let pc = soc_map.m_pc_reset_value;
          proc.start (rg_harts_reset_running, pc, rg_tohost_addr, rg_fromhost_addr);
          // We reset all the harts, so we indicate this to the DM, even though it's possible only one hart was requested to reset
          for (Integer core = 0; core < valueOf(CoreNum); core = core + 1)
