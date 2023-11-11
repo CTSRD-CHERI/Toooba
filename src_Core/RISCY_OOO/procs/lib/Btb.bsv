@@ -46,9 +46,9 @@ export NextAddrPred(..);
 export mkBtb;
 
 interface NextAddrPred#(numeric type hashSz);
-    method Action put_pc(Address pc);
-    interface Vector#(SupSizeX2, Maybe#(Address)) pred;
-    method Action update(Address pc, Address brTarget, Bool taken);
+    method Action put_pc(Addr pc);
+    interface Vector#(SupSizeX2, Maybe#(Addr)) pred;
+    method Action update(Addr pc, Addr brTarget, Bool taken);
     // security
     method Action flush;
     method Bool flush_done;
@@ -64,10 +64,10 @@ typedef 1 PcLsbsIgnore;
 Bit#(PcLsbsIgnore) targetLsb = 0;
 typedef 1024 BtbEntries; // Actually 1536... For reasons...
 `ifdef NO_COMPRESSED_BTB
-typedef SizeOf#(Address) ShortTargetSize;
-typedef SizeOf#(Address) MidTargetSize;
-typedef SizeOf#(Address) CompTargetSize;
-typedef Address CompTarget;
+typedef SizeOf#(Addr) ShortTargetSize;
+typedef SizeOf#(Addr) MidTargetSize;
+typedef SizeOf#(Addr) CompTargetSize;
+typedef Addr CompTarget;
 `else
 typedef 14 ShortTargetSize;  // emulates 13 bits (LSB is zero), and equal to 12 bits in BTB-X data
 typedef 26 MidTargetSize;  // emulates 25 bits (LSB is zero), and equal to 24 bits in BTB-X data
@@ -79,7 +79,7 @@ typedef struct {
     RegionHash regionHash;
     Bit#(CompTargetSize) target;
 } CompTarget deriving(Bits, Eq, FShow);
-typedef Address FullTarget;
+typedef Addr FullTarget;
 typedef Bit#(TSub#(SizeOf#(FullTarget),CompTargetSize)) Region;
 `endif
 typedef Bit#(ShortTargetSize) ShortTarget;
@@ -101,8 +101,8 @@ typedef struct {
 } BtbAddr deriving(Bits, Eq, FShow);
 
 typedef struct {
-    Address pc;
-    Address nextPc;
+    Addr pc;
+    Addr nextPc;
     Bool taken;
 } BtbUpdate deriving(Bits, Eq, FShow);
 
@@ -117,12 +117,12 @@ module mkBtbCore(NextAddrPred#(hashSz))
         Add#(1, a__, TDiv#(tagSz, hashSz)),
     Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
     // Read and Write ordering doesn't matter since this is a predictor
-    Reg#(Address) addr_reg <- mkRegU;
+    Reg#(Addr) addr_reg <- mkRegU;
 `ifdef NO_COMPRESSED_BTB
     Bool optimizeScheduling = False;
     Vector#(SupSizeX2, MapSplitThreeWidth#(HashedTag#(hashSz),
                                            BtbIndex,
-                                           VnD#(Address), VnD#(Address), VnD#(Address)))
+                                           VnD#(Addr), VnD#(Addr), VnD#(Addr)))
 `else
     Bool optimizeScheduling = True;
     Map#(Bit#(TSub#(SizeOf#(RegionHash),SizeOf#(RegionBtbIndex))), RegionBtbIndex, Region, 2) regionRecords <- mkMapLossy(unpack(0));
@@ -133,14 +133,14 @@ module mkBtbCore(NextAddrPred#(hashSz))
         compressedRecords <- replicateM(mkMapThreeWidthLossyBRAM(optimizeScheduling));
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
 
-    function BtbAddr getBtbAddr(Address pc) = unpack(truncateLSB(pc));
-    function BtbBank getBank(Address pc) = getBtbAddr(pc).bank;
-    function BtbTag getTag(Address pc) = getBtbAddr(pc).tag;
-    function BtbIndex getIndex(Address pc) = getBtbAddr(pc).index;
-    function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(Address pc) =
+    function BtbAddr getBtbAddr(Addr pc) = unpack(truncateLSB(pc));
+    function BtbBank getBank(Addr pc) = getBtbAddr(pc).bank;
+    function BtbTag getTag(Addr pc) = getBtbAddr(pc).tag;
+    function BtbIndex getIndex(Addr pc) = getBtbAddr(pc).index;
+    function MapKeyIndex#(HashedTag#(hashSz),BtbIndex) lookupKey(Addr pc) =
         MapKeyIndex{key: hash(getTag(pc)), index: getIndex(pc)};
 `ifndef NO_COMPRESSED_BTB
-    function FullTarget getFullTarget(CompTarget mt, Address pc);
+    function FullTarget getFullTarget(CompTarget mt, Addr pc);
         Region region = mt.differentRegion ? fromMaybe(?,regionRecords.lookup(unpack(mt.regionHash))):truncateLSB(pc);
         return unpack({region,mt.target});
     endfunction
@@ -181,7 +181,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
 `endif
     endrule
 
-    method Action put_pc(Address pc);
+    method Action put_pc(Addr pc);
         addr_reg <= pc;
         // Start SupSizeX2 BTB lookups, but ensure to lookup in the appropriate
         // bank for the alignment of each potential branch.
@@ -189,13 +189,13 @@ module mkBtbCore(NextAddrPred#(hashSz))
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             // Only add lower bits for timing.
             Bit#(15) offset = truncate(pack(getBtbAddr(pc))) + fromInteger(i);
-            Address lookup_pc = {truncateLSB(pc), offset, targetLsb};
+            Addr lookup_pc = {truncateLSB(pc), offset, targetLsb};
             compressedRecords[firstBank+fromInteger(i)].lookupStart(lookupKey(lookup_pc));
         end
     endmethod
 
-    method Vector#(SupSizeX2, Maybe#(Address)) pred;
-        Vector#(SupSizeX2, Maybe#(Address)) ppcs = replicate(Invalid);
+    method Vector#(SupSizeX2, Maybe#(Addr)) pred;
+        Vector#(SupSizeX2, Maybe#(Addr)) ppcs = replicate(Invalid);
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             if (compressedRecords[i].lookupRead matches tagged Valid .u3)
                 case (u3) matches
@@ -210,7 +210,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
         return ppcs;
     endmethod
 
-    method Action update(Address pc, Address nextPc, Bool taken);
+    method Action update(Addr pc, Addr nextPc, Bool taken);
         updateEn <= Valid(BtbUpdate {pc: pc, nextPc: nextPc, taken: taken});
     endmethod
 
