@@ -130,7 +130,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
                                            BtbIndex,
                                            VnD#(ShortTarget), VnD#(MidTarget), VnD#(CompTarget)))
 `endif
-        compressedRecords <- replicateM(mkMapThreeWidthLossyBRAM(optimizeScheduling));
+    compressedRecords <- replicateM(mkMapThreeWidthLossyBRAM(optimizeScheduling));
     Reg#(Maybe#(BtbUpdate)) updateEn <- mkDReg(Invalid);
 
     function BtbAddr getBtbAddr(Addr pc) = unpack(truncateLSB(pc));
