@@ -73,7 +73,7 @@ module mkFullAssocTlb#(
     Reg#(tlbIdxT) randIdx <- mkReg(0);
     if(randRep) begin
         rule incRandIdx;
-            randIdx <= randIdx + 1;
+            randIdx <= (randIdx == fromInteger(valueOf(tlbSz) - 1)) ? 0 : randIdx + 1;
         endrule
     end
 
