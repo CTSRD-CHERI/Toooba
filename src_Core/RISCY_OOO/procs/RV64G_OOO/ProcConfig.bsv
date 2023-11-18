@@ -75,7 +75,7 @@
 `define L1_TLB_SIZE 32 // L1 fully assoc TLB size
 
 `define L2_TLB_HUGE_SIZE 8 // L2 2MB/1GB TLB size
-`define LOG_L2_TLB_4KB_SIZE 14 // L2 4KB TLB log size (16384 entries)
+`define LOG_L2_TLB_4KB_SIZE 10 // L2 4KB TLB log size (1024 entries)
 `define LOG_L2_TLB_4KB_WAYS 2 // L2 4KB TLB log ways (4 ways)
 
 // FMA bookkeeping FIFO: add 1 to allow simultaneous enq/deq
