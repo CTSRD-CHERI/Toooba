@@ -294,7 +294,7 @@ deriving (Eq, FShow, Bits);
 module mkCommitStage#(CommitInput inIfc)(CommitStage);
     Bool verbose = True;
 
-    Integer verbosity = 0;   // Bluespec: for lightweight verbosity trace
+    Integer verbosity = 1;   // Bluespec: for lightweight verbosity trace
 
     // Used to inform tandem-verifier about program order.
     // 0 is used to indicate we've just come out of reset
@@ -811,13 +811,22 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
              if (verbosity >= 2)
                 $display ("%0d: %m.commitStage.doCommitTrap_handle; debugger halt:", cur_cycle);
           end else begin
-          `endif
-          // trap handling & redirect
-          let trap_updates <- csrf.trap(trap.trap, cast(trap.pcc), trap.addr, trap.orig_inst);
-          CapPipe new_pc = cast(trap_updates.new_pcc);
+`endif
+          CapPipe new_pc = cast(trap.next_pcc);
+          if (trap.trap != tagged PccMiss) begin
+             // trap handling & redirect
+             let trap_updates <- csrf.trap(trap.trap, cast(trap.pcc), trap.addr, trap.orig_inst);
+             new_pc = cast(trap_updates.new_pcc);
+             // system consistency
+             // TODO spike flushes TLB here, but perhaps it is because spike's TLB
+             // does not include prv info, and it has to flush when prv changes.
+             // XXX As approximation, Trap may cause context switch, so flush for
+             // security
+             makeSystemConsistent(False, True, False);
+          end
           redirectQ.enq(RedirectInfo{trap_pc: cast(new_pc)
    `ifdef RVFI_DII
-                                     , dii_pid: trap.x.dii_pid + (is_16b_inst(trap.orig_inst) ? 1 : 2)
+                                    , dii_pid: trap.x.dii_pid + (is_16b_inst(trap.orig_inst) ? 1 : 2)
    `endif
           });
    `ifdef RVFI
@@ -826,20 +835,13 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
           rvfiQ.enq(rvfis);
           traceCnt <= traceCnt + 1;
    `endif
-   
+
    `ifdef INCLUDE_TANDEM_VERIF
           fa_to_TV (way0, rg_serial_num,
                     tagged Invalid,
                     x, no_fflags, no_mstatus, tagged Valid trap_updates, no_ret_updates);
    `endif
        rg_serial_num <= rg_serial_num + 1;
-
-       // system consistency
-       // TODO spike flushes TLB here, but perhaps it is because spike's TLB
-       // does not include prv info, and it has to flush when prv changes.
-       // XXX As approximation, Trap may cause context switch, so flush for
-       // security
-       makeSystemConsistent(False, True, False);
 `ifdef INCLUDE_GDB_CONTROL
        end
 `endif
