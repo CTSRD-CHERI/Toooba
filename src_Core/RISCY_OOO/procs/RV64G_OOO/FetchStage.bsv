@@ -172,13 +172,13 @@ endinterface
 typedef 12 PcLsbSz; // Defines PC block size for PCs that will share an index for upper bits.
 typedef TLog#(TMul#(SupSize,4)) PcIdxSz; // Number of distinct PC blocks allowed in-flight in the Fetch pipeline.
 typedef Bit#(PcLsbSz) PcLSB;
-typedef Bit#(TSub#(SizeOf#(CapMem),PcLsbSz)) PcMSB;
+typedef Bit#(TSub#(SizeOf#(Addr),PcLsbSz)) PcMSB;
 typedef Bit#(PcIdxSz) PcIdx;
 typedef struct {
     PcLSB lsb;
     PcIdx idx;
 } PcCompressed deriving(Bits,Eq,FShow);
-function PcCompressed compressPc(PcIdx i, CapMem a) =
+function PcCompressed compressPc(PcIdx i, Addr a) =
     PcCompressed{idx: i, lsb: truncate(a)};
 
 typedef struct {
@@ -365,8 +365,8 @@ module mkFetchStage(FetchStage);
     // rule ordering: Fetch1 (BTB+TLB) < Fetch3 (decode & dir pred) < redirect method
     // Fetch1 < Fetch3 to avoid bypassing path on PC and epochs
 
-    Bool verbose = False;
-    Integer verbosity = 0;
+    Bool verbose = True;
+    Integer verbosity = 2;
 
     // Basic State Elements
     Reg#(Bool) started <- mkConfigReg(False);
@@ -408,7 +408,7 @@ module mkFetchStage(FetchStage);
 
     // PC compression structure holding an indexed set of PC blocks so that only indexes need be tracked.
     IndexedMultiset#(PcIdx, PcMSB, SupSizeX2) pcBlocks <- mkIndexedMultisetQueue;
-    function CapMem decompressPc(PcCompressed p) = {pcBlocks.lookup(p.idx),p.lsb};
+    function Addr decompressPc(PcCompressed p) = {pcBlocks.lookup(p.idx),p.lsb};
     // Epochs
     Ehr#(2, Bool) decode_epoch <- mkEhr(False);
     // fetch estimate of main epoch
@@ -528,17 +528,17 @@ module mkFetchStage(FetchStage);
         // Send TLB request.
         tlb_server.request.put (ps.pc);
 
-        let pc_idxs <- pcBlocks.insertAndReserve(zeroExtend(ps.pc), zeroExtend(next_fetch_ps.pc));
+        let pc_idxs <- pcBlocks.insertAndReserve(truncateLSB(ps.pc), truncateLSB(next_fetch_ps.pc));
         PcIdx pc_idx = pc_idxs.inserted;
         PcIdx ppc_idx = pc_idxs.reserved;
         let out = Fetch1ToFetch2 {
-            pc: compressPc(pc_idx, zeroExtend(ps.pc)),
+            pc: compressPc(pc_idx, ps.pc),
 `ifdef RVFI_DII
             dii_pid: dii_pid,
 `endif
             inst_frags_fetched: posLastSupX2,
             pred_next_pc: isValid(pred_next_ps) ?
-                Valid(compressPc(ppc_idx, zeroExtend(validValue(pred_next_ps).pc))) : Invalid,
+                Valid(compressPc(ppc_idx, validValue(pred_next_ps).pc)) : Invalid,
             decode_epoch: decode_epoch[0],
             main_epoch: f_main_epoch};
 
@@ -630,10 +630,10 @@ module mkFetchStage(FetchStage);
         if (!isValid(fetch3In.cause)) begin
            if(fetch3In.access_mmio) begin
               inst_d <- mmio.bootRomResp;
-              if(verbose) $display("get answer from MMIO 0x%0x", getAddr(decompressPc(fetch3In.pc)), " ", fshow(inst_d));
+              if(verbose) $display("get answer from MMIO 0x%0x", decompressPc(fetch3In.pc), " ", fshow(inst_d));
            end
            else begin
-              if(verbose) $display("get answer from memory 0x%0x", getAddr(decompressPc(fetch3In.pc)));
+              if(verbose) $display("get answer from memory 0x%0x", decompressPc(fetch3In.pc));
                  inst_d <- mem_server.response.get;
            end
         end
@@ -685,14 +685,14 @@ module mkFetchStage(FetchStage);
          if (prev_frag_available &&& !is_16b_inst(prev_frag.inst_frag)) begin // 2nd half of 32-bit instruction
             new_pick = tagged Valid fetch3s_2_inst(frag, prev_frag);
             /*if (!validValue(new_pick).mispred_first_half) begin
-               doAssert(getAddr(decompressPc(prev_frag.pc))+2 == getAddr(decompressPc(frag.pc)), "Attached fragments with non-contigious PCs");
+               doAssert(decompressPc(prev_frag.pc)+2 == decompressPc(frag.pc), "Attached fragments with non-contigious PCs");
    `ifdef RVFI_DII
                doAssert(prev_frag.dii_pid+1 == frag.dii_pid, "Attached fragments with non-contigious DII IDs");
    `endif
             end*/
          end else if (is_16b_inst(frag.inst_frag) || isValid(frag.cause)) begin // 16-bit instruction
             new_pick = tagged Valid fetch3_2_instC(frag,
-                                                   fv_decode_C (misa, misa_mxl_64, getFlags(decompressPc(frag.pc))==1, frag.inst_frag),
+                                                   fv_decode_C (misa, misa_mxl_64, cap_mode, frag.inst_frag),
                                                    zeroExtend(frag.inst_frag));
          end
       end
@@ -708,8 +708,8 @@ module mkFetchStage(FetchStage);
    Bool anyReturns = False;
    Vector#(SupSize, DecodeResult) decodeResults = ?;
    for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
-      CapMem pc = decompressPc(validValue(decodeIn[i]).pc);
-      decodeResults[i] = decode(validValue(decodeIn[i]).inst, getFlags(pc)==1); // Decode 32b inst, or 32b expansion of 16b inst
+      Addr pc = decompressPc(validValue(decodeIn[i]).pc);
+      decodeResults[i] = decode(validValue(decodeIn[i]).inst, cap_mode); // Decode 32b inst, or 32b expansion of 16b inst
       if (popInst(decodeResults[i])) anyReturns = True;
    end
 
@@ -748,8 +748,8 @@ module mkFetchStage(FetchStage);
       Bool likely_epoch_change = False;
       Maybe#(PredState) m_push_addr = Invalid;
       for (Integer i = 0; i < valueof(SupSize); i=i+1) begin
-         PredState pc = PredState{pc: getAddr(decompressPc(validValue(decodeIn[i]).pc))};
-         PredState ppc = PredState{pc: getAddr(decompressPc(validValue(decodeIn[i]).ppc))};
+         PredState pc = PredState{pc: decompressPc(validValue(decodeIn[i]).pc)};
+         PredState ppc = PredState{pc: decompressPc(validValue(decodeIn[i]).ppc)};
          let decode_result = decodeResults[i]; // Decode 32b inst, or 32b expansion of 16b inst
          let dInst = decode_result.dInst;
          let regs = decode_result.regs;
