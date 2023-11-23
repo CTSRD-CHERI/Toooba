@@ -862,11 +862,11 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 
         // kill everything, redirect, and increment epoch
         inIfc.killAll;
-        inIfc.redirectPcc(setAddrUnsafe(inIfc.pcc, getPc(x.ps)), 0
+        redirectQ.enq(RedirectInfo{trap_pc: setAddrUnsafe(inIfc.pcc, getPc(x.ps))
 `ifdef RVFI_DII
-            , x.dii_pid
+            , dii_pid: x.dii_pid
 `endif
-        );
+        });
         inIfc.incrementEpoch;
 
         // the killed Ld should have claimed phy reg, we should not commit it;
