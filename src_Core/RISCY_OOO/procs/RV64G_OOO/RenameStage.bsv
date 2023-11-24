@@ -287,9 +287,9 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         end else
 `endif
 
-        if (isValid(x.cause)) begin
+        if (isValid(x.trap)) begin
             // previously found exception
-            trap = tagged Valid (tagged Exception fromMaybe(?, x.cause));
+            trap = x.trap;
         end else if (isValid(pending_interrupt)) begin
             // pending interrupt
             trap = tagged Valid (tagged Interrupt fromMaybe(?, pending_interrupt));
@@ -348,7 +348,7 @@ return trap;
         let inst = x.inst;
         let dInst = x.dInst;
         let arch_regs = x.regs;
-        let trap = x.cause;
+        let trap = x.trap;
         let tval = x.tval;
 
         if(verbose) $display("[doRenaming] trap: ", fshow(x));
@@ -490,7 +490,7 @@ return trap;
         let inst = x.inst;
         let dInst = x.dInst;
         let arch_regs = x.regs;
-        let trap = x.cause;
+        let trap = x.trap;
         if(verbose) $display("[doRenaming] system inst: ", fshow(x));
 
         // update prev epoch
@@ -895,7 +895,7 @@ return trap;
                 let inst = x.inst;
                 let dInst = x.dInst;
                 let arch_regs = x.regs;
-                let trap = x.cause;
+                let trap = x.trap;
 
                 PredState fallthrough_pc = addPs(ps, ((orig_inst[1:0] == 2'b11) ? 4 : 2));
 

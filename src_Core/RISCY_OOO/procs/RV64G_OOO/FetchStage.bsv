@@ -206,7 +206,7 @@ typedef struct {
 `endif
     Bit#(TLog#(SupSizeX2)) inst_frags_fetched;
     Maybe#(PcCompressed) pred_next_pc;
-    Maybe#(Exception) cause;
+    Maybe#(Trap) trap;
     Bool access_mmio; // inst fetch from MMIO
     Bool decode_epoch;
     Epoch main_epoch;
@@ -215,7 +215,7 @@ typedef struct {
 typedef struct {
     PcCompressed pc;
     Maybe#(PcCompressed) ppc;
-    Maybe#(Exception) cause;
+    Maybe#(Trap) trap;
     Bit#(16) inst_frag;
     Bool decode_epoch;
     Epoch main_epoch;
@@ -238,8 +238,8 @@ typedef struct {
   Instruction inst;
   Bit#(32) orig_inst;
   Inst_Kind inst_kind;
-  Maybe#(Exception) cause;
-  Bool cause_second_half;
+  Maybe#(Trap) trap;
+  Bool trap_second_half;
   Bool mispred_first_half;
 } InstrFromFetch3 deriving(Bits, Eq, FShow);
 
@@ -284,16 +284,16 @@ function InstrFromFetch3 fetch3_2_instC(Fetch3ToDecode in, Instruction inst, Bit
       inst: inst,
       orig_inst: orig_inst,
       inst_kind: Inst_16b,
-      cause: in.cause,
-      cause_second_half: False,
+      trap: in.trap,
+      trap_second_half: False,
       mispred_first_half: False
    };
 
 function InstrFromFetch3 fetch3s_2_inst(Fetch3ToDecode inHi, Fetch3ToDecode inLo);
    Instruction inst = {inHi.inst_frag, inLo.inst_frag};
    InstrFromFetch3 ret = fetch3_2_instC(inHi, inst, inst);
-   if (isValid(inLo.cause)) ret.cause = inLo.cause;
-   else if (isValid(inHi.cause)) ret.cause_second_half = True;
+   if (isValid(inLo.trap)) ret.trap = inLo.trap;
+   else if (isValid(inHi.trap)) ret.trap_second_half = True;
    ret.inst_kind = Inst_32b;
    ret.pc = inLo.pc; // The PC comes from the 1st fragment.
 `ifdef RVFI_DII
@@ -315,7 +315,7 @@ typedef struct {
   DecodedInst dInst;
   Bit #(32) orig_inst;    // original 16b or 32b instruction ([1:0] will distinguish 16b or 32b)
   ArchRegs regs;
-  Maybe#(Exception) cause;
+  Maybe#(Trap) trap;
   Addr tval;    // in case of exception
 } FromFetchStage deriving (Bits, Eq, FShow);
 
@@ -581,7 +581,7 @@ module mkFetchStage(FetchStage);
                 end
                 default: begin
                     // Access fault
-                    cause = Valid (excInstAccessFault);
+                    trap = Valid (Exception(excInstAccessFault));
                 end
             endcase
         end
@@ -593,7 +593,7 @@ module mkFetchStage(FetchStage);
 `endif
             inst_frags_fetched: in.inst_frags_fetched,
             pred_next_pc: in.pred_next_pc,
-            cause: cause,
+            trap: trap,
             access_mmio: access_mmio,
             decode_epoch: in.decode_epoch,
             main_epoch: in.main_epoch };
@@ -601,7 +601,7 @@ module mkFetchStage(FetchStage);
 
        if (verbosity >= 2) begin
 	          $display ("----------------");
-	          $display ("Fetch2: TLB response pyhs_pc 0x%0h  cause ", phys_pc, fshow (cause));
+	          $display ("Fetch2: TLB response pyhs_pc 0x%0h  trap ", phys_pc, fshow (trap));
 	          $display ("Fetch2: f2_tof3.enq: out ", fshow (out));
        end
     endrule
@@ -627,7 +627,7 @@ module mkFetchStage(FetchStage);
 `ifdef RVFI_DII
         inst_d <- dii.fromDii.response.get;
 `else
-        if (!isValid(fetch3In.cause)) begin
+        if (!isValid(fetch3In.trap)) begin
            if(fetch3In.access_mmio) begin
               inst_d <- mmio.bootRomResp;
               if(verbose) $display("get answer from MMIO 0x%0x", decompressPc(fetch3In.pc), " ", fshow(inst_d));
@@ -649,7 +649,7 @@ module mkFetchStage(FetchStage);
 `endif
                ppc: (fromInteger(i)==fetch3In.inst_frags_fetched) ? fetch3In.pred_next_pc : Invalid,
                inst_frag: validValue(inst_d[i]),
-               cause: fetch3In.cause,
+               trap: fetch3In.trap,
                decode_epoch: fetch3In.decode_epoch,
                main_epoch: fetch3In.main_epoch
            });
@@ -690,7 +690,7 @@ module mkFetchStage(FetchStage);
                doAssert(prev_frag.dii_pid+1 == frag.dii_pid, "Attached fragments with non-contigious DII IDs");
    `endif
             end*/
-         end else if (is_16b_inst(frag.inst_frag) || isValid(frag.cause)) begin // 16-bit instruction
+         end else if (is_16b_inst(frag.inst_frag) || isValid(frag.trap)) begin // 16-bit instruction
             new_pick = tagged Valid fetch3_2_instC(frag,
                                                    fv_decode_C (misa, misa_mxl_64, cap_mode, frag.inst_frag),
                                                    zeroExtend(frag.inst_frag));
@@ -731,7 +731,7 @@ module mkFetchStage(FetchStage);
       if (m_used_frag_count matches tagged Valid .used_frag_count) begin
          for (Integer i = 0; i < valueOf(SupSizeX2) && fromInteger(i) <= used_frag_count; i = i + 1) f32d.deqS[i].deq;
          if (verbose)
-            $display("Decode: dequed %d instruction fragments", used_frag_count);
+            $display("Decode: dequed %d instruction fragments ", used_frag_count, fshow(pcc_reg_pipe));
       end
 
       Maybe#(PredState) redirectPc = Invalid; // next pc redirect by branch predictor
@@ -751,6 +751,7 @@ module mkFetchStage(FetchStage);
          PredState pc = PredState{pc: decompressPc(validValue(decodeIn[i]).pc)};
          PredState ppc = PredState{pc: decompressPc(validValue(decodeIn[i]).ppc)};
          let decode_result = decodeResults[i]; // Decode 32b inst, or 32b expansion of 16b inst
+
          let dInst = decode_result.dInst;
          let regs = decode_result.regs;
          PredTrainInfo trainInfo = ?; // dir pred training bookkeeping
@@ -762,7 +763,7 @@ module mkFetchStage(FetchStage);
          end
          Maybe#(PredState) dir_ppc = decodeBrPred(pc, decode_result.dInst, pred_res.taken, (validValue(decodeIn[i]).inst_kind == Inst_32b));
          if (decodeIn[i] matches tagged Valid .in)  begin
-            let cause = in.cause;
+            let trap = in.trap;
             pcBlocks.rPort[i].remove(in.pc.idx);
             if (verbose)
                $display("Decode: %0d in = ", i, fshow (in));
@@ -784,12 +785,27 @@ module mkFetchStage(FetchStage);
                doAssert(in.main_epoch == f_main_epoch, "main epoch must match");
 
                // update cause if decode exception and no earlier (TLB) exception
-               if (!isValid(cause)) begin
-                  cause = decode_result.illegalInst ? tagged Valid excIllegalInst : tagged Invalid;
+               //if (!isValid(cause)) begin
+               //   cause = decode_result.illegalInst ? tagged Valid excIllegalInst : tagged Invalid;
+               //end
+               if (!isValid(trap)) begin
+                  // update trap if decode exception and no earlier (TLB) exception
+                  if (decode_result.illegalInst)
+                     trap = Valid(Exception(excIllegalInst));
+                  if (zeroExtend(getPc(addPs(pc, ((in.inst_kind == Inst_32b) ? 4 : 2))))  > pcc_reg_top)
+                     trap = Valid(CapException(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcLengthViolation}));
+                  if (zeroExtend(getPc(pc)) < pcc_reg_base)
+                     trap = Valid(CapException(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcLengthViolation}));
+                  if (!isValidCap(pcc_reg[0]))
+                     trap = Valid(CapException(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcTagViolation}));
+                  if (getKind(pcc_reg_pipe) != UNSEALED)
+                     trap = Valid(CapException(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcSealViolation}));
+                  if (!getHardPerms(pcc_reg[0]).permitExecute)
+                     trap = Valid(CapException(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcPermitXViolation}));
                end
 
                // update predicted next pc
-               if (!isValid(cause)) begin
+               if (!isValid(trap)) begin
                   // direction predict
                   Maybe#(PredState) nextPc = dir_ppc;
                   // return address stack link reg is x1 or x5
@@ -861,7 +877,7 @@ module mkFetchStage(FetchStage);
                      redirectInst = Valid (dInst.iType);
 `endif
                   end
-               end // if (!isValid(cause))
+               end // if (!isValid(trap))
                if (isValid(m_push_addr)) trainInfo.ras = trainInfo.ras + 1;
                decode_pc_reg[i] <= getPc(ppc);
                let out = FromFetchStage{ps: PredState{pc: getPc(pc)},
@@ -875,8 +891,8 @@ module mkFetchStage(FetchStage);
                                         dInst: dInst,
                                         orig_inst: in.orig_inst,
                                         regs: decode_result.regs,
-                                        cause: cause,
-                                        tval: getPc(pc) + ((in.cause_second_half) ? 2:0)
+                                        trap: trap,
+                                        tval: getPc(pc) + ((in.trap_second_half) ? 2:0)
                                         };
                out_fifo.enqS[i].enq(out);
                if (verbosity >= 1) begin
