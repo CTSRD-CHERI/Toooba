@@ -980,9 +980,9 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                 f3_cap_ThreeOp: begin
                     case (funct7)
                         f7_cap_CSpecialRW: begin
-                            dInst.iType = Scr;
-                            regs.dst =  (rd  != 0) ? Valid(tagged Gpr rd) :Invalid;
-                            regs.src1 = (rs1 != 0) ? Valid(tagged Gpr rs1):Invalid;
+                            dInst.iType = rs1 == 0 ? Cap : Scr;
+                            regs.dst = Valid(tagged Gpr rd);
+                            regs.src1 = Valid(tagged Gpr rs1);
 
                             let scr = unpackSCR(rs2);
 
