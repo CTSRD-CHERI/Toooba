@@ -900,7 +900,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
             end
             else begin // fnCSRRWI, fnCSRRW, fnCSRRSI, fnCSRRS, fnCSRRCI, fnCSRRC
                 if (truncate(immI) == pack(csrAddrMTVEC) || truncate(immI) == pack(csrAddrMEPC) || truncate(immI) == pack(csrAddrSTVEC) || truncate(immI) == pack(csrAddrSEPC)) begin
-                    dInst.iType = Scr;
+                    Bool shouldWrite = (funct3 == fnCSRRWI || funct3 == fnCSRRW) || rs1 != 0;
+                    dInst.iType = shouldWrite ? Scr : Cap;
                     regs.dst = Valid(tagged Gpr rd);
                     regs.src1 = (funct3[2] == 0 ? Valid(tagged Gpr rs1) : Invalid);
                     dInst.imm = (funct3[2] == 0 ? Invalid : Valid(zeroExtend(rs1)));
