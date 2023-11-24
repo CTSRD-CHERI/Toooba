@@ -1317,16 +1317,6 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         end
         rg_serial_num <= rg_serial_num + instret;
 
-        if (csr_idx matches tagged Valid .idx) begin
-            // notify commit of CSR (so MMIO pRq may be handled)
-            inIfc.commitCsrInstOrInterrupt;
-            csrf.csrInstWr(idx, getAddr(csr_data));
-        end else if (scr_idx matches tagged Valid .idx) csrf.scrInstWr(idx, cast(csr_data));
-        // write FPU csr
-        else if(csrf.fpuInstNeedWr(fflags, will_dirty_fpu_state)) begin
-            csrf.fpuInstWr(fflags);
-        end
-
         // incr inst cnt
         csrf.incInstret(comInstCnt);
 

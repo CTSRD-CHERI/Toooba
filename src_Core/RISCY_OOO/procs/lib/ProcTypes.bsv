@@ -872,12 +872,9 @@ Bit#(7) privSFENCEVMA  = 7'h9;
 
 function Bool isSystem(IType iType) = (
     iType == Unsupported || iType == Interrupt ||
-    iType == Ecall || iType == Ebreak || /*iType == Csr || iType == Scr ||*/
+    iType == Ecall || iType == Ebreak || iType == Csr || iType == Scr ||
     iType == SFence || iType == FenceI ||
     iType == Sret || iType == Mret
-`ifndef AGGRESSIVE_CSR_SCHEDULING
-    || iType == Csr || iType == Scr
-`endif
 );
 
 function Bool isCsr(IType iType) = iType == Csr || iType == Scr;
