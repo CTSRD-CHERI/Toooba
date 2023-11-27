@@ -147,7 +147,7 @@ interface FetchStage;
 `endif
     method Action done_flushing();
     method Action train_predictors(
-        PredState ps, PredState next_ps, IType iType, Bool taken,
+        PredState ps, PredState next_ps, IType iType, Bool taken, Bool link,
         PredTrainInfo trainInfo, Bool mispred, Bool isCompressed
     );
     interface SpeculationUpdate specUpdate;
@@ -496,15 +496,6 @@ module mkFetchStage(FetchStage);
         // Grab a chain of predictions from the BTB, which predicts targets for the next
         // set of addresses based on the current PC.
         Vector#(SupSizeX2, Maybe#(PredState)) pred_future_pc = nextAddrPred.pred;
-        /*Vector#(SupSizeX2, Maybe#(PredState)) pred_future_ps;
-        for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
-            if(pred_future_pc[i] matches tagged Valid .p) begin
-                pred_future_ps[i] = Valid(PredState{pc: getAddr(p)});
-            end
-            else begin
-                pred_future_ps[i] = Invalid;
-            end
-        end*/
 
         // Next pc is the first nextPc that breaks the chain of pc+4 or
         // that is at the end of a cacheline.
@@ -1051,10 +1042,10 @@ module mkFetchStage(FetchStage);
     endmethod
 
     method Action train_predictors(
-        PredState ps, PredState next_ps, IType iType, Bool taken,
+        PredState ps, PredState next_ps, IType iType, Bool taken, Bool link,
         PredTrainInfo trainInfo, Bool mispred, Bool isCompressed
     );
-        //if (iType == J || (iType == Br && next_ps < ps)) begin
+        //if (iType == J || iType == CJAL || (iType == Br && next_pc < pc)) begin
         //    // Only train the next address predictor for jumps and backward branches
         //    // next_ps != ps + 4 is a substitute for taken
         //    nextAddrPred.update(ps, next_ps, taken);

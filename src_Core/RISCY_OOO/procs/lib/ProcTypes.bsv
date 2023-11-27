@@ -877,8 +877,6 @@ function Bool isSystem(IType iType) = (
     iType == Sret || iType == Mret
 );
 
-function Bool isCsr(IType iType) = iType == Csr || iType == Scr;
-
 // instruction requires replaying (i.e. fetch next instruction after current
 // instruction commits)
 function Bool doReplay(IType iType) = isSystem(iType);

@@ -286,13 +286,15 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
            trap = tagged Valid (tagged Interrupt cause);
         end else
 `endif
-
-        if (isValid(x.trap)) begin
-            // previously found exception
-            trap = x.trap;
-        end else if (isValid(pending_interrupt)) begin
+        // Invert priority of the top two, as several new causes were folded into the next case
+        //(which used to be the first) and because we had issues with network connectivity which
+        //might be due to interrupt issues.
+        if (isValid(pending_interrupt)) begin
             // pending interrupt
             trap = tagged Valid (tagged Interrupt fromMaybe(?, pending_interrupt));
+        end else if (isValid(x.trap)) begin
+            // previously found exception
+            trap = x.trap;
         end else if (isValid(new_exception)) begin
             // newly found exception
             trap = new_exception;
@@ -914,22 +916,6 @@ return trap;
                 end
                 // for system inst, process in next cycle (in a different rule)
                 if(doReplay(dInst.iType)) begin
-                    stop = True;
-                end
-                // CSR reads and writes must issue at the head of the queue
-                // so that the state of the reorder buffer reflects all outstanding instructions.
-                if((isCsr(dInst.iType) || isValid(dInst.scr)) && i != 0) begin
-                    stop = True;
-                end
-                Bool csrRead  = (isCsr(dInst.iType) && (arch_regs.dst  != Valid(Gpr(0)) || orig_inst[14:12]==fnCSRRSI || orig_inst[14:12]==fnCSRRCI)) ||
-                                (dInst.scr == Valid (scrAddrDDC));
-                if (csrRead && rob.outstandingCsrWrite) begin
-                    stop = True;
-                end
-                // Only CSRRSI and CSRRCI certainly write, but
-                // Leaving the simpler condition makes it a bit conservative.
-                Bool csrWrite = isCsr(dInst.iType) && (arch_regs.src1 != Valid(Gpr(0)) || orig_inst[14:12]==fnCSRRWI);
-                if (csrWrite && rob.outstandingCsrRead) begin
                     stop = True;
                 end
 `ifdef SECURITY

@@ -194,8 +194,6 @@ interface ReorderBufferRowEhr#(numeric type aluExeNum, numeric type fpuMulDivExe
     // speculation
     method Bool dependsOn_wrongSpec(SpecTag tag);
     method Action correctSpeculation(SpecBits mask);
-    method Bool csrRead;
-    method Bool csrWrite;
 endinterface
 
 module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) provisos(
@@ -518,11 +516,6 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
         SpecBits sb = spec_bits[sb_correctSpec_port];
         spec_bits[sb_correctSpec_port] <= sb & mask;
     endmethod
-
-    method Bool csrRead  = (isValid(csr) || isValid(scr)) && (orig_inst[11:7]!=0);
-    // This is a CSR write if this is a CSR instruction and there is a non-zero rs1 operand, or if this is a CSR immediate instruction.
-    method Bool csrWrite = (isValid(csr) && (orig_inst[19:15]!=0 || orig_inst[14]==1'b1))
-                        || (isValid(scr) && orig_inst[19:15]!=0);
 endmodule
 
 interface ROB_SpeculationUpdate;
@@ -640,7 +633,7 @@ interface SupReorderBuffer#(numeric type aluExeNum, numeric type fpuMulDivExeNum
     // in-order core sets LSQ tag after getting out of issue queue
     method Action setLSQTag(InstTag x, LdStQTag t, Bool isFence);
 `endif
-    
+
     // get original PS/PPC before execution, EHR port 0 will suffice
     interface Vector#(TAdd#(1, aluExeNum), ROB_getOrigPS) getOrigPS;
     interface Vector#(aluExeNum, ROB_getOrig_Inst) getOrig_Inst;
@@ -654,9 +647,6 @@ interface SupReorderBuffer#(numeric type aluExeNum, numeric type fpuMulDivExeNum
 
     method Bool isEmpty_ehrPort0;
     method Bool isFull_ehrPort0;
-
-    method Bool outstandingCsrRead;
-    method Bool outstandingCsrWrite;
 
     interface ROB_SpeculationUpdate specUpdate;
 endinterface
@@ -1248,18 +1238,6 @@ module mkSupReorderBuffer#(
         endfunction
         Vector#(SupSize, Integer) idxVec = genVector;
         return all(isFullFunc, idxVec);
-    endmethod
-
-    method Bool outstandingCsrRead;
-        function isCsrReadFunc(a_valid, a_row) = readReg(a_valid[0]) && a_row.csrRead;
-        // Check if any of the rows hold an active CSR read.
-        return any(id, zipWith (isCsrReadFunc, concat(valid), concat(row)));
-    endmethod
-
-    method Bool outstandingCsrWrite;
-        function isCsrWriteFunc(a_valid, a_row) = readReg(a_valid[0]) && a_row.csrWrite;
-        // Check if any of the rows hold an active CSR write.
-        return any(id, zipWith (isCsrWriteFunc, concat(valid), concat(row)));
     endmethod
 
     method Action setLSQAtCommitNotified(InstTag x) if(

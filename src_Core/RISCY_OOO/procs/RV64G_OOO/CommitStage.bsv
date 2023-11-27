@@ -981,11 +981,11 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
            m_ret_updates = tagged Valid ret_updates;
 `endif
         end
-        inIfc.redirectPcc(next_pc, 0
+        redirectQ.enq(RedirectInfo{trap_pc: next_pc
 `ifdef RVFI_DII
-            , x.dii_pid + (is_16b_inst(x.orig_inst) ? 1 : 2)
+                                   , dii_pid: x.dii_pid + (is_16b_inst(x.orig_inst) ? 1 : 2)
 `endif
-        );
+        });
 
 `ifdef RVFI
         Rvfi_Traces rvfis = replicate(tagged Invalid);
@@ -1133,11 +1133,6 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 
         Bit #(64) instret = 0;
 
-        // Support SCR/CSR writes.
-        CapMem csr_data = ?;
-        Maybe#(SCR) scr_idx = Invalid;
-        Maybe#(CSR) csr_idx = Invalid;
-
 `ifdef INCLUDE_TANDEM_VERIF
        // These variables accumulate fflags and mstatus in sequential Program Order ('po')
        // (whereas the 'fflags' variable does just one update after superscalar retirement).
@@ -1167,7 +1162,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                 let inst_tag = rob.deqPort[i].getDeqInstTag;
 
                 // check can be committed or not
-                if(x.rob_inst_state != Executed || isValid(x.ldKilled) || isValid(x.trap) || isSystem(x.iType) || (isCsr(x.iType) && i != 0)) begin
+                if(x.rob_inst_state != Executed || isValid(x.ldKilled) || isValid(x.trap) || isSystem(x.iType)) begin
                     // inst not ready for commit, or system inst, or trap, or killed, stop here
                     stop = True;
                 end
@@ -1233,9 +1228,6 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                     // every inst here should have been renamed, commit renaming
                     regRenamingTable.commit[i].commit;
                     doAssert(x.claimed_phy_reg, "should have renamed");
-                    if(x.ppc_vaddr_csrData matches tagged PPC .pcc) begin
-                        next_pcc = pcc;
-                    end
 
 `ifdef RENAME_DEBUG
                     // send debug msg for rename error
@@ -1316,6 +1308,11 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 `endif
         end
         rg_serial_num <= rg_serial_num + instret;
+
+        // write FPU csr
+        if(csrf.fpuInstNeedWr(fflags, will_dirty_fpu_state)) begin
+            csrf.fpuInstWr(fflags);
+        end
 
         // incr inst cnt
         csrf.incInstret(comInstCnt);
