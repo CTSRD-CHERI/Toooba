@@ -890,7 +890,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
             if(res.sealOnRespLd == PTPCCSeal) begin
-                dataUnpacked = setKind(dataUnpacked, ISENTRY);
+                dataUnpacked = setKind(dataUnpacked, LD_PTPCCISENTRY);
             end
             inIfc.writeRegFile(dst.indx, dataUnpacked);
 

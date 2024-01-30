@@ -239,4 +239,5 @@ Bit #(3) f3_AMO_CAP = w_SIZE_CAP;
 Bit #(XLEN) otype_unsealed_ext = -1;
 Bit #(XLEN) otype_sentry_ext = -2;
 Bit #(XLEN) otype_res0_ext = -3;
-Bit #(XLEN) otype_isentry_ext = -4;
+Bit #(XLEN) otype_ptpcc_ext = -4;
+Bit #(XLEN) otype_ptpcc_ld_ext = -4;

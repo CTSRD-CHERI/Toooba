@@ -62,7 +62,7 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
         result = e1(cheriExcSealViolation);
     else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
         result = e1(cheriExcSealViolation);
-    else if (toCheck.src2_isentry              && isValidCap(a) && (getKind(a) != ISENTRY))
+    else if (toCheck.src2_isentry              && isValidCap(a) && (getKind(a) != PTPCCISENTRY))
         result = e1(cheriExcSealViolation);
     else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
         result = e2(cheriExcSealViolation);
@@ -224,7 +224,8 @@ function Tuple2#(Data, Bool) extractType(CapPipe a);
     if      (getKind(a) == UNSEALED) return tuple2(otype_unsealed_ext, True);
     else if (getKind(a) == SENTRY  ) return tuple2(otype_sentry_ext, True);
     else if (getKind(a) == RES0    ) return tuple2(otype_res0_ext, True);
-    else if (getKind(a) == ISENTRY ) return tuple2(otype_isentry_ext, True);
+    else if (getKind(a) == PTPCCISENTRY ) return tuple2(otype_ptpcc_ext, True);
+    else if (getKind(a) == LD_PTPCCISENTRY ) return tuple2(otype_ptpcc_ld_ext, True);
     else return tuple2(zeroExtend(getKind(a).SEALED_WITH_TYPE), False);
 endfunction
 
@@ -259,7 +260,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
             tagged SealEntry              :
                 setKind(a_mut, SENTRY);
             tagged ISentry              :
-                setKind(a_mut, ISENTRY);
+                setKind(a_mut, PTPCCISENTRY);
             tagged Seal                   :
                 clearTagIf( setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b))))
                           , sealPassthrough || sealIllegal);
