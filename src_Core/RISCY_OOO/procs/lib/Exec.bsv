@@ -62,6 +62,8 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
         result = e1(cheriExcSealViolation);
     else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
         result = e1(cheriExcSealViolation);
+    else if (toCheck.src2_isentry              && isValidCap(a) && (getKind(a) != ISENTRY))
+        result = e1(cheriExcSealViolation);
     else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
         result = e2(cheriExcSealViolation);
     else if (toCheck.src1_type_not_reserved    && !validAsType(a, zeroExtend(getKind(a).SEALED_WITH_TYPE)))
@@ -222,7 +224,7 @@ function Tuple2#(Data, Bool) extractType(CapPipe a);
     if      (getKind(a) == UNSEALED) return tuple2(otype_unsealed_ext, True);
     else if (getKind(a) == SENTRY  ) return tuple2(otype_sentry_ext, True);
     else if (getKind(a) == RES0    ) return tuple2(otype_res0_ext, True);
-    else if (getKind(a) == RES1    ) return tuple2(otype_res1_ext, True);
+    else if (getKind(a) == ISENTRY ) return tuple2(otype_isentry_ext, True);
     else return tuple2(zeroExtend(getKind(a).SEALED_WITH_TYPE), False);
 endfunction
 
@@ -256,6 +258,8 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 clearTagIf(setAddr(b_mut, (addrSource == Src1Type) ? a_type : getAddr(a) ).value, (addrSource == Src1Type) ? a_res : False);
             tagged SealEntry              :
                 setKind(a_mut, SENTRY);
+            tagged ISentry              :
+                setKind(a_mut, ISENTRY);
             tagged Seal                   :
                 clearTagIf( setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b))))
                           , sealPassthrough || sealIllegal);
@@ -365,9 +369,13 @@ function CapPipe brAddrCalc(CapPipe pc, CapPipe val, IType iType, Data imm, Bool
     // jumpTarget.address[0] = 1'b0;
     targetAddr = setAddrUnsafe(targetAddr, {truncateLSB(getAddr(targetAddr)), 1'b0});
     targetAddr = setKind(targetAddr, UNSEALED); // It is checked elsewhere that we have an unsealed cap already, or sentry if permitted
+    // this is to change a CJAURL that should evaluate to a NOP
+    if(iType == CJAURL) begin
+        targetAddr = pcPlusN; // go to the next instruction
+    end
 
     return (case (iType)
-            J, CJAL, Jr, CCall, CJALR: targetAddr;
+            J, CJAL, Jr, CCall, CJALR, CJAURL: targetAddr;
             Br      : (taken ? targetAddr : pcPlusN);
             default : pcPlusN;
         endcase);
@@ -395,7 +403,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
     CapPipe data = nullCap;
     CapPipe addr = nullCap;
 
-    Bool newPcc = dInst.iType == CJALR || dInst.iType == CCall;
+    Bool newPcc = dInst.iType == CJALR || dInst.iType == CCall || dInst.iType == CJAURL;
     ControlFlow cf = ControlFlow{pc: pcc, nextPc: nullCap, taken: False, newPcc: newPcc, mispredict: False};
 
     Maybe#(CapPipe) capImm = isValid(getDInstImm(dInst)) ? Valid (nullWithAddr(getDInstImm(dInst).Valid)) : Invalid;
@@ -431,6 +439,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
             J           : nullWithAddr(getOffset(link_pcc));
             CJAL        : setKind(link_pcc, SENTRY);
             CCall       : cap_alu_result;
+            CJAURL      : cap_alu_result;
             CJALR       : setKind(link_pcc, SENTRY);
             Jr          : nullWithAddr(getOffset(link_pcc));
             Auipc       : nullWithAddr(getOffset(pcc) + getDInstImm(dInst).Valid);
@@ -448,6 +457,10 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
             Ld, St, Lr, Sc, Amo : nullWithAddr(alu_result);
             default             : cf.nextPc; //TODO should this be nullified?
         endcase);
+    // this is to change a CJAURL that should evaluate to a NOP
+    if(dInst.iType == CJAURL) begin
+        data = rVal1; // write back the code capability
+    end
 
     return ExecResult{data: data, csrData: csr_data, addr: addr, controlFlow: cf, capException: capException, boundsCheck: boundsCheck};
 endfunction

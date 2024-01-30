@@ -302,6 +302,7 @@ typedef struct {
     Bool wrongPath;
     Maybe#(PhyDst) dst;
     Bool allowCap;
+    SealOnRespLd sealOnRespLd;
 `ifdef INCLUDE_TANDEM_VERIF
     InstTag instTag;    // For recording Ld data in ROB
 `endif
@@ -327,6 +328,7 @@ typedef struct {
     ByteOrTagEn        shiftedBE;
     Maybe#(Trap)       fault;
     Bool               allowCap;
+    //SealOnRespLd       sealOnRespLd;
     Maybe#(LdKilledBy) killed;
 } LdQDeqEntry deriving (Bits, Eq, FShow);
 
@@ -356,7 +358,8 @@ interface SplitLSQ;
                         MemInst mem_inst,
                         Maybe#(PhyDst) dst,
                         SpecBits spec_bits,
-                        Bit#(16) pcHash);
+                        Bit#(16) pcHash,
+                        SealOnRespLd sealOnRespLd);
     method Action enqSt(InstTag inst_tag,
                         MemInst mem_inst,
                         Maybe#(PhyDst) dst,
@@ -662,6 +665,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_unsigned        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(ByteOrTagEn))             ld_byteOrTagEn     <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_allowCap        <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Reg#(SealOnRespLd))            ld_sealOnRespLd    <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_acq             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_rel             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Maybe#(PhyDst)))          ld_dst             <- replicateM(mkConfigRegU);
@@ -1408,7 +1412,8 @@ module mkSplitLSQ(SplitLSQ);
                         MemInst mem_inst,
                         Maybe#(PhyDst) dst,
                         SpecBits spec_bits,
-                        Bit#(16) pcHash) if(ld_can_enq_wire && !wrongSpec_conflict);
+                        Bit#(16) pcHash,
+                        SealOnRespLd sealOnRespLd) if(ld_can_enq_wire && !wrongSpec_conflict);
         if(verbose) begin
             $display("[LSQ - enqLd] enqP %d; ", ld_enqP,
                      "; ", fshow(inst_tag),
@@ -1970,6 +1975,7 @@ module mkSplitLSQ(SplitLSQ);
             wrongPath: False,
             dst: Invalid,
             allowCap: False,
+            sealOnRespLd: NoSeal,
 `ifdef INCLUDE_TANDEM_VERIF
             instTag: ld_instTag [t],    // For recording Ld data in ROB
 `endif
@@ -2001,6 +2007,7 @@ module mkSplitLSQ(SplitLSQ);
             let dst = ld_dst[t];
             let is32BitLd = bEn matches tagged DataMemAccess .bEnData &&& (bEnData[3] && !bEnData[7]) ? True : False;
             res.allowCap = allowCap;
+            res.sealOnRespLd = ld_sealOnRespLd[t];
             res.dst = ld_dst[t];
             if (dst.Valid.isFpuReg && is32BitLd)
                res.data = fv_nanbox_MemTaggedData(
@@ -2034,6 +2041,7 @@ module mkSplitLSQ(SplitLSQ);
             shiftedBE: ld_shiftedBE_deqLd[deqP],
             fault: ld_fault_deqLd[deqP],
             allowCap: ld_allowCap[deqP],
+            //sealOnRespLd: ld_sealOnRespLd[deqP],
             killed: ld_killed_deqLd[deqP]
         };
     endmethod

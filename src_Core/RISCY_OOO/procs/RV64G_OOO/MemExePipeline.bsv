@@ -889,6 +889,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(res.dst matches tagged Valid .dst) begin
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
+            if(res.sealOnRespLd == PTPCCSeal) begin
+                dataUnpacked = setKind(dataUnpacked, ISENTRY);
+            end
             inIfc.writeRegFile(dst.indx, dataUnpacked);
 
 `ifdef INCLUDE_TANDEM_VERIF

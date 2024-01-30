@@ -459,6 +459,9 @@ module mkFetchStage(FetchStage);
     RWire#(TrainNAP) napTrainByDec <- mkRWire;
     Fifo#(1, TrainNAP) napTrainByDecQ <- mkPipelineFifo; // cut off critical path
 
+    // linked points-to-pcc isentry load and jump
+    Ehr#(SupSize, Maybe#(ArchRIndx)) iReservation <- mkEhr(Invalid);
+
     // TLB and Cache connections
     ITlb iTlb <- mkITlb;
     ICoCache iMem <- mkICoCache;
@@ -932,6 +935,29 @@ module mkFetchStage(FetchStage);
                            m_push_addr = Valid (push_addr);
                         end
                      end
+                  end
+                  // implementation for reservations
+
+                  // this is a CLIL instruction
+                  if(dInst.sealOnRespLd == PTPCCSeal) begin
+                      iReservation[i] <= regs.src1;
+                  end
+                  else if (dInst.iType == CJAURL) begin
+                      if (!isValid(iReservation[i])) begin
+                          dInst.evaluateToNOP = True;
+                      end
+                      // we now that src2 is Valid for a CJAURL
+                      else if (iReservation[i] matches tagged Valid .ir &&& fromMaybe(?, regs.src2) != ir) begin
+                          // give it no execution function, which will make it a NOP
+                          dInst.evaluateToNOP = True;
+                      end
+                  end
+
+                  // END of implementation for reservations
+
+                  // register matches tagged Valid .r &&& (r == tagged Gpr 1 || r == tagged Gpr 5)
+                  else if(regs.dst matches tagged Valid .r &&& ( r == fromMaybe((tagged Gpr 31), iReservation[i])|| r == (tagged Gpr 31))) begin
+                      iReservation[i] <= Invalid;
                   end
                   trainInfo.ras <- ras.ras[i].pop(doPop);
                   if(verbose) begin

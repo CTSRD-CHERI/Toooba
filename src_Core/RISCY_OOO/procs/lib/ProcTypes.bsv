@@ -270,7 +270,7 @@ typedef enum {
     Alu,
     Ld, St, Lr, Sc,
     J, Jr, Br,
-    CCall, CJAL, CJALR, Cap,
+    CCall, CJAL, CJALR, CJAURL, Cap,
     Auipc,
     Auipcc,
     Fpu,
@@ -295,6 +295,11 @@ typedef enum {
     Slt, Sltu, Sll, Sllw, Sra, Sraw, Srl, Srlw,
     Csrw, Csrs, Csrc
 } AluFunc deriving(Bits, Eq, FShow);
+
+typedef enum {
+    NoSeal,
+    PTPCCSeal
+} SealOnRespLd deriving(Bits, Eq, FShow);
 
 typedef enum {
     SetOffset, IncOffset
@@ -332,6 +337,7 @@ typedef union tagged {
     void Seal;
     void CSeal;
     void SealEntry;
+    void ISentry;
     SrcSelector Unseal;
     void AndPerm;
     void SetFlags;
@@ -665,6 +671,8 @@ typedef struct {
     Maybe#(CSR)     csr;
     Maybe#(SCR)     scr; // Special Capability Register.
     Maybe#(ImmData) imm;
+    SealOnRespLd    sealOnRespLd;
+    Bool            evaluateToNOP;
 } DecodedInst deriving(Bits, Eq, FShow);
 
 function Bool linkedR(Maybe#(ArchRIndx) register);

@@ -1134,7 +1134,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 doAssert(!isValid(spec_tag), "should not have spec tag");
                                 // put in ldstq
                                 if(isLdQ) begin
-                                    lsq.enqLd(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)));
+                                    lsq.enqLd(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)), dInst.sealOnRespLd);
                                 end
                                 else begin
                                     lsq.enqSt(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)));

@@ -157,6 +157,16 @@ Bit #(7) f7_cap_TwoOp           = 7'h7f;
 
 // 5'h00 unused
 Bit #(5) rd_cap_CCall          = 5'h01;
+// 5'h02-5'h1e unused
+Bit #(5) rd_cap_OneSrc         = 5'h1f;
+
+// ================================================================
+// f7_cap_OneSrc opcode subdivision
+
+// rd selects between 1-reg operation
+
+// 5'h00-5'h02 reserved
+Bit #(5) f5_rs1_cap_LIL         = 5'h03;
 // 5'h02-5'h1f unused
 
 // ================================================================
@@ -186,7 +196,12 @@ Bit #(5) f5rs2_cap_CSealEntry  = 5'h11;
 Bit #(5) f5rs2_cap_CLoadTags   = 5'h12;
 // 5'h13 unused
 Bit #(5) f5rs2_cap_JALR_PCC    = 5'h14;
-// 5'h15-5'h1f unused (5'h1f reserved for 1-reg instructions)
+// 5'h15-5'h18 unused
+Bit #(5) f5rs2_cap_CISeal      = 5'h19;
+// 5'h1a-5'h1c unused
+Bit #(5) f5rs2_cap_CJAURLM     = 5'h1d;
+Bit #(5) f5rs2_cap_CJAURL      = 5'h1e;
+// 5'h1f reserved for 1-reg instructions
 
 // ================================================================
 // f7_cap_{Load, Store} opcode subdivision
@@ -224,4 +239,4 @@ Bit #(3) f3_AMO_CAP = w_SIZE_CAP;
 Bit #(XLEN) otype_unsealed_ext = -1;
 Bit #(XLEN) otype_sentry_ext = -2;
 Bit #(XLEN) otype_res0_ext = -3;
-Bit #(XLEN) otype_res1_ext = -4;
+Bit #(XLEN) otype_isentry_ext = -4;

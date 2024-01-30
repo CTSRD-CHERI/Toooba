@@ -279,7 +279,9 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
         csr: tagged Invalid,
         scr: tagged Invalid,
         imm: tagged Invalid,
-        capChecks: unpack(0)
+        capChecks: unpack(0),
+        sealOnRespLd: NoSeal,
+        evaluateToNOP: False
     };
     ArchRegs regs = ArchRegs {
         src1: tagged Invalid,
@@ -1068,6 +1070,30 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     regs.src2 = Valid(tagged Gpr rs2);
                                 end
+                                rd_cap_OneSrc: begin
+                                    case (funct5rs2)
+                                        f5_rs1_cap_LIL: begin
+                                            MemInst mi = MemInst{
+                                                mem_func: Ld,
+                                                amo_func: None,
+                                                unsignedLd: False,
+                                                byteOrTagEn: DataMemAccess(replicate(True)),
+                                                aq: False,
+                                                rl: False,
+                                                reg_bounds: True};
+                                            dInst.iType = Ld;
+                                            dInst.execFunc = tagged Mem mi;
+                                            regs.dst  = Valid(tagged Gpr 31); // this instruction always write to ct6
+                                            regs.src1 = Valid(tagged Gpr rs1);
+                                            dInst.imm = Valid (0);
+                                            dInst.capChecks = memCapChecks(mi.reg_bounds);
+                                            dInst.sealOnRespLd = PTPCCSeal;
+                                        end
+                                        default: begin
+                                            illegalInst = True;
+                                        end
+                                    endcase
+                                end
                                 default: begin
                                     illegalInst = True;
                                 end
@@ -1317,6 +1343,44 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.dst  = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capChecks = memCapChecks(True);
+                                end
+                                f5rs2_cap_CISeal: begin
+                                    dInst.iType = Cap;
+                                    regs.dst  = Valid(tagged Gpr rd);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    dInst.capFunc = CapModify (ISentry);
+                                end
+                                f5rs2_cap_CJAURLM: begin
+                                    dInst.iType = CJAURL;
+                                    dInst.capFunc = CapModify (Unseal (Src2));
+                                    regs.dst  = Valid(tagged Gpr 31);
+                                    regs.src1 = Valid(tagged Gpr 31);
+                                    // src2 remains 0 for the moment
+                                    // this value will be changed later in decode to the actual index of the isentry
+                                    regs.src2 = Valid(tagged Gpr 0);
+                                    dInst.execFunc = tagged Br AT; // always taken
+                                    // TODO complete entry
+                                end
+                                f5rs2_cap_CJAURL: begin
+                                    dInst.capChecks.src1_tag = True;
+                                    dInst.capChecks.src2_tag = True;
+                                    dInst.capChecks.src2_isentry = True;
+                                    dInst.capChecks.src2_sealed_with_type = True;
+                                    dInst.capChecks.src1_permit_x = True;
+                                    dInst.capChecks.src2_no_permit_x = True;
+
+                                    dInst.capChecks.check_enable = True;
+                                    dInst.capChecks.check_low_src = Src1Addr;
+                                    dInst.capChecks.check_high_src = Src1AddrPlus2;
+                                    dInst.capChecks.check_inclusive = True;
+
+                                    dInst.iType = CJAURL;
+                                    dInst.capFunc = CapModify (Unseal (Src2));
+                                    regs.dst  = Valid(tagged Gpr 31);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    regs.src2 = Valid(tagged Gpr 31);
+                                    dInst.execFunc = tagged Br AT; // always taken
+                                    // TODO complete entry
                                 end
                                 default: begin
                                     illegalInst = True;
