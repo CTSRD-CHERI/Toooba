@@ -198,8 +198,7 @@ Bit #(5) f5rs2_cap_CLoadTags   = 5'h12;
 Bit #(5) f5rs2_cap_JALR_PCC    = 5'h14;
 // 5'h15-5'h18 unused
 Bit #(5) f5rs2_cap_CISeal      = 5'h19;
-// 5'h1a-5'h1c unused
-Bit #(5) f5rs2_cap_CJAURLM     = 5'h1d;
+// 5'h1a-5'h1d unused
 Bit #(5) f5rs2_cap_CJAURL      = 5'h1e;
 // 5'h1f reserved for 1-reg instructions
 

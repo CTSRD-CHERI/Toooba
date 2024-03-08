@@ -62,7 +62,7 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
         result = e1(cheriExcSealViolation);
     else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
         result = e1(cheriExcSealViolation);
-    else if (toCheck.src2_isentry              && isValidCap(a) && (getKind(a) != PTPCCISENTRY))
+    else if (toCheck.src1_isentry              && isValidCap(a) && (getKind(a) != PTPCCISENTRY))
         result = e1(cheriExcSealViolation);
     else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
         result = e2(cheriExcSealViolation);
@@ -76,6 +76,10 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
         result = e2(cheriExcPermitCCallViolation);
     else if (toCheck.src1_permit_x             && !getHardPerms(a).permitExecute)
         result = e1(cheriExcPermitXViolation);
+    else if (toCheck.src1_no_permit_x          && getHardPerms(a).permitExecute)
+        result = e1(cheriExcPermitXViolation);
+    else if (toCheck.src2_permit_x             && !getHardPerms(b).permitExecute)
+        result = e2(cheriExcPermitXViolation);
     else if (toCheck.src2_no_permit_x          && getHardPerms(b).permitExecute)
         result = e2(cheriExcPermitXViolation);
     return result;

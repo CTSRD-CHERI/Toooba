@@ -1350,24 +1350,12 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capFunc = CapModify (ISentry);
                                 end
-                                f5rs2_cap_CJAURLM: begin
-                                    dInst.iType = CJAURL;
-                                    dInst.capFunc = CapModify (Unseal (Src2));
-                                    regs.dst  = Valid(tagged Gpr 31);
-                                    regs.src1 = Valid(tagged Gpr 31);
-                                    // src2 remains 0 for the moment
-                                    // this value will be changed later in decode to the actual index of the isentry
-                                    regs.src2 = Valid(tagged Gpr 0);
-                                    dInst.execFunc = tagged Br AT; // always taken
-                                    // TODO complete entry
-                                end
                                 f5rs2_cap_CJAURL: begin
                                     dInst.capChecks.src1_tag = True;
                                     dInst.capChecks.src2_tag = True;
-                                    dInst.capChecks.src2_isentry = True;
-                                    dInst.capChecks.src2_sealed_with_type = True;
-                                    dInst.capChecks.src1_permit_x = True;
-                                    dInst.capChecks.src2_no_permit_x = True;
+                                    dInst.capChecks.src1_isentry = True;
+                                    dInst.capChecks.src1_no_permit_x = True;
+                                    dInst.capChecks.src2_permit_x = True;
 
                                     dInst.capChecks.check_enable = True;
                                     dInst.capChecks.check_low_src = Src1Addr;
