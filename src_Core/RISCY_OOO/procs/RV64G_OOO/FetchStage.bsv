@@ -939,19 +939,25 @@ module mkFetchStage(FetchStage);
                   // implementation for reservations
 
                   // this is a CLIL instruction
+                  //Bool etn = False;
                   if(dInst.sealOnRespLd == PTPCCSeal) begin
                       iReservation[i] <= regs.src1;
                   end
                   else if (dInst.iType == CJAURL) begin
                       if (!isValid(iReservation[i])) begin
                           dInst.evaluateToNOP = True;
+                          dInst.capFunc = CapModify (MoveSrc2);
                       end
                       // we now that src2 is Valid for a CJAURL
                       else if (iReservation[i] matches tagged Valid .ir &&& fromMaybe(?, regs.src2) != ir) begin
                           // give it no execution function, which will make it a NOP
                           dInst.evaluateToNOP = True;
+                          dInst.capFunc = CapModify (MoveSrc2);
                       end
                   end
+                  //if(etn) begin
+                  //    dInst.capFunc = CapModify (MoveSrc2);
+                  //end
 
                   // END of implementation for reservations
 

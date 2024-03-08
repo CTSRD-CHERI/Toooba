@@ -283,6 +283,8 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 setKind(setValidCap(a_mut, !buildCapIllegal), getKind(a)==SENTRY ? SENTRY : UNSEALED);
             tagged Move                   :
                 a;
+            tagged MoveSrc2               :
+                b;
             tagged ClearTag               :
                 setValidCap(a, False);
             default: ?;
@@ -462,10 +464,6 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
             Ld, St, Lr, Sc, Amo : nullWithAddr(alu_result);
             default             : cf.nextPc; //TODO should this be nullified?
         endcase);
-    // this is to change a CJAURL that should evaluate to a NOP
-    if(dInst.iType == CJAURL) begin
-        data = rVal1; // write back the code capability
-    end
 
     return ExecResult{data: data, csrData: csr_data, addr: addr, controlFlow: cf, capException: capException, boundsCheck: boundsCheck};
 endfunction

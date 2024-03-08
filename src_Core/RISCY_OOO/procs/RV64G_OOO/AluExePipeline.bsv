@@ -402,6 +402,10 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
                 J, CJAL, CJALR, Jr: isValid(x.dst);
                 default: False;
             endcase);
+        // TODO: train predictor
+        //if(x.dInst.iType == CJAURL && !x.dInst.evaluateToNOP) begin
+        //    link = isValid(x.src2);
+        //end
 `ifdef RAS_HIT_TRACING
         if (linkedR(Valid(tagged Gpr x.orig_inst[19:15])) && (x.orig_inst[19:15] != x.orig_inst[11:7])) begin
             case (x.dInst.iType)
