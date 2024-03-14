@@ -673,6 +673,9 @@ module mkCsrFile #(Data hartid)(CsrFile);
     Reg#(Bit#(44)) ppn_reg <- mkCsrReg(0);
     Reg#(Data) satp_csr = concatReg3(vm_mode_reg, full_asid_reg, ppn_reg);
 
+    // supervisor thread ID
+    Reg#(Data) stid_csr <- mkCsrReg(0);
+
     // User level CSRs
     // According to spike, any write to fflags/frm/fcsr will set fs_reg as
     // dirty, regardless of whether the write truly changes value or not.
@@ -869,6 +872,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrINSTRET:    instret_csr;
             csrAddrTERMINATE:  terminate_csr;
             csrAddrSTATS:      stats_csr;
+            csrAddrUTID:       stid_csr; // just reads the STID; the framework ensures that it is read-only
             // Supervisor CSRs
             csrAddrSSTATUS:    sstatus_csr;
             csrAddrSIE:        sie_csr;
@@ -881,6 +885,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrSIP:        sip_csr;
             csrAddrSATP:       satp_csr;
             csrAddrSCCSR:      sccsr_csr;
+            csrAddrSTID:       stid_csr;
             // Machine CSRs
             csrAddrMSTATUS:    mstatus_csr;
             csrAddrMISA:       misa_csr;
