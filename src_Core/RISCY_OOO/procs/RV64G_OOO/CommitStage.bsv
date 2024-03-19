@@ -66,6 +66,7 @@ import CHERICap::*;
 import CHERICC_Fat::*;
 import ISA_Decls_CHERI::*;
 import RegFile::*; // Just for the interface
+import RenameStage::*;
 `ifdef PERFORMANCE_MONITORING
 import StatCounters::*;
 `endif
@@ -111,6 +112,7 @@ interface CommitInput;
     interface ReorderBufferSynth robIfc;
     interface RegRenamingTable rtIfc;
     interface CsrFile csrfIfc;
+    interface RenameStage rsIfc;
     // no stores
     method Bool stbEmpty;
     method Bool stqEmpty;
