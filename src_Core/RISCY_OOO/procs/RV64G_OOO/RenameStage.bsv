@@ -73,6 +73,7 @@ import ConfigReg::*;
 import CHERICap::*;
 import CHERICC_Fat::*;
 import ISA_Decls_CHERI::*;
+import Ehr::*;
 `ifdef PERFORMANCE_MONITORING
 import StatCounters::*;
 import DReg::*;
@@ -115,6 +116,7 @@ endinterface
 interface RenameStage;
     // performance count
     method Data getPerf(ExeStagePerfType t);
+    method Action checkCSRWrite(CSR csr);
 
 `ifdef PERFORMANCE_MONITORING
     method EventsTransExe events;
@@ -147,6 +149,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     Vector#(FpuMulDivExeNum, ReservationStationFpuMulDiv) reservationStationFpuMulDiv = inIfc.rsFpuMulDivIfc;
     ReservationStationMem reservationStationMem = inIfc.rsMemIfc;
     SplitLSQ lsq = inIfc.lsqIfc;
+
+    Ehr#(2, PhyRIndx) wcount_stid <- mkEhr(0);
 
     // performance counter
     Count#(Data) supRenameCnt <- mkCount(0);
@@ -484,6 +488,110 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 
     // check for system inst that needs to replay
     Bool firstReplay = doReplay(fetchStage.pipelines[0].first.dInst.iType);
+    Bool pureDataInst = isPureDataCSR(fetchStage.pipelines[0].first.dInst);
+    Bool csrRead = isCSRRead(fetchStage.pipelines[0].first.regs, fetchStage.pipelines[0].first.dInst);
+
+    rule doRenaming_PureDataCSRInst(
+        !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
+        && epochManager.checkEpoch[0].check(fetchStage.pipelines[0].first.main_epoch) // correct path
+        && !isValid(firstTrap) // not trap
+        && firstReplay // system inst needs replay
+        && pureDataInst // is a pure data CSR instruction
+        && csrRead // is a CSR read instruction
+`ifdef INCLUDE_GDB_CONTROL
+        && inIfc.core_is_running
+`endif
+    );
+
+
+        let x = fetchStage.pipelines[0].first;
+        let pc = x.pc;
+        let orig_inst = x.orig_inst;
+        let dst = x.regs.dst;
+        let arch_regs = x.regs;
+        let dInst = x.dInst;
+        let ppc = x.ppc;
+        let trainInfo = x.trainInfo;
+
+        Bool stop = False;
+        if(dInst.csr matches tagged Valid .c) begin
+            stop = (case (c)
+                csrAddrSTID, csrAddrUTID: (wcount_stid[0] > 0);
+                default: False;
+            endcase);
+        end
+
+
+        if(!stop) begin
+        fetchStage.pipelines[0].deq;
+        // get spec bits (should be 0), and no need to checkout spec tag
+        let spec_bits = specTagManager.currentSpecBits;
+        // spec bits can be what they want
+        // doAssert(spec_bits == 0, "cannot have spec bits");
+
+        // do renaming (renaming is non-speculative)
+        let rename_result = regRenamingTable.rename[0].getRename(arch_regs);
+        let phy_regs = rename_result.phy_regs;
+        regRenamingTable.rename[0].claimRename(arch_regs, spec_bits);
+
+        // scoreboard lookup
+        let regs_ready_cons = sbCons.eagerLookup[0].get(phy_regs);
+        let regs_ready_aggr = sbAggr.eagerLookup[0].get(phy_regs);
+        sbCons.setBusy[0].set(phy_regs.dst);
+        sbAggr.setBusy[0].set(phy_regs.dst);
+
+        // get ROB tag
+        let inst_tag = rob.enqPort[0].getEnqInstTag;
+`ifdef RVFI_DII
+        inst_tag.dii_next_pid = x.dii_pid + ((x.orig_inst[1:0] == 2'b11) ? 2 : 1);
+`endif
+
+        // always goes to ALU reservation
+        reservationStationAlu[0].enq(ToReservationStation {
+            data: AluRSData {dInst: dInst, trainInfo: trainInfo},
+            regs: phy_regs,
+            tag: inst_tag,
+            spec_bits: spec_bits,
+            spec_tag: Invalid,
+            regs_ready: regs_ready_aggr // alu will recv bypass
+        });
+
+        let y = ToReorderBuffer{pc: cast(pc),
+                                orig_inst: orig_inst,
+                                iType: dInst.iType,
+                                dst: arch_regs.dst,
+`ifdef INCLUDE_TANDEM_VERIF
+                                dst_data: ?,    // Available only after execution
+                                store_data: ?,
+                                store_data_BE: ?,
+`endif
+                                csr: dInst.csr,
+                                scr: dInst.scr,
+                                claimed_phy_reg: True, // XXX we always claim a free reg in rename
+                                trap: Invalid, // no trap
+                                // default values of FullResult
+                                ppc_vaddr_csrData: PPC (cast(ppc)), // default use PPC
+                                fflags: 0,
+                                ////////
+                                will_dirty_fpu_state: False, // pure data inst does never dirty FPU state
+                                rob_inst_state: NotDone, // pure data inst always need to be executed
+                                lsqTag: ?,
+                                ldKilled: Invalid,
+                                memAccessAtCommit: False,
+                                lsqAtCommitNotified: False,
+                                nonMMIOStDone: False,
+                                epochIncremented: False, // pure data inst does not increment epoch
+                                spec_bits: spec_bits
+`ifdef RVFI_DII
+                                , dii_pid: x.dii_pid
+`endif
+`ifdef RVFI
+                                , traceBundle: unpack(0)
+`endif
+                               };
+        rob.enqPort[0].enq(y);
+        end
+    endrule
 
     // System inst is renamed only when ROB is empty
     rule doRenaming_SystemInst(
@@ -532,6 +640,13 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         let regs_ready_aggr = sbAggr.eagerLookup[0].get(phy_regs);
         sbCons.setBusy[0].set(phy_regs.dst);
         sbAggr.setBusy[0].set(phy_regs.dst);
+
+        // on a CSR Write we increase the counter
+        if(isCSRWrite(arch_regs, dInst) &&& dInst.csr matches tagged Valid .c) begin
+            if (c == csrAddrSTID || c == csrAddrUTID) begin
+                wcount_stid[0] <= wcount_stid[0] + 1;
+            end
+        end
 
         // print rename info
         if (verbose) begin
@@ -1300,6 +1415,13 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 `endif
             default: 0;
         endcase);
+    endmethod
+
+    method Action checkCSRWrite(CSR csr);
+        case (csr)
+            csrAddrSTID: wcount_stid[1] <= wcount_stid[1] - 1;
+            default: noAction;
+        endcase
     endmethod
 
 `ifdef PERFORMANCE_MONITORING
