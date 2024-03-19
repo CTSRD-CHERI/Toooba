@@ -883,6 +883,48 @@ function Bool isSystem(IType iType) = (
 // instruction commits)
 function Bool doReplay(IType iType) = isSystem(iType);
 
+function Bool isPureDataCSR(DecodedInst dInst);
+    if(dInst.csr matches tagged Valid .c) begin
+        case (c)
+            csrAddrSTID, csrAddrUTID: return True;
+            default: return False;
+        endcase
+    end
+    else return False;
+endfunction
+
+function Bool isCSRRead(ArchRegs regs, DecodedInst dInst);
+    Bool ret = False;
+    if(dInst.execFunc matches tagged Alu .alu_func) begin
+        ret = (case (alu_func)
+        Csrw, Csrc, Csrs: True;
+        default: False;
+        endcase);
+    end
+    if(regs.dst matches tagged Valid .d) begin
+        if(d matches tagged Gpr .gpr) ret = ret && (gpr != 0);
+        else ret = False;
+    end
+    else ret = False;
+    return ret;
+endfunction
+
+function Bool isCSRWrite(ArchRegs regs, DecodedInst dInst);
+    Bool ret = False;
+    if(dInst.execFunc matches tagged Alu .alu_func) begin
+        ret = (case (alu_func)
+        Csrw, Csrc, Csrs: True;
+        default: False;
+        endcase);
+    end
+    if(regs.src1 matches tagged Valid .s) begin
+        if(s matches tagged Gpr .gpr) ret = ret && (gpr != 0);
+        else ret = False;
+    end
+    else ret = False;
+    return ret;
+endfunction
+
 function Bool isFpuInst(IType iType) = (iType == Fpu);
 
 function Bool isMemInst(IType iType) = (
