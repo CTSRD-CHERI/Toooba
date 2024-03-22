@@ -299,7 +299,7 @@ deriving (Eq, FShow, Bits);
 `endif
 
 module mkCommitStage#(CommitInput inIfc)(CommitStage);
-    Bool verbose = False;
+    Bool verbose = True;
 
     Integer verbosity = 0;   // Bluespec: for lightweight verbosity trace
 
@@ -901,6 +901,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         !isValid(rob.deqPort[0].deq_data.ldKilled) &&
         rob.deqPort[0].deq_data.rob_inst_state == Executed &&
         isSystem(rob.deqPort[0].deq_data.iType) &&
+        !rob.deqPort[0].deq_data.isPureDataRead &&
         (! send_mip_csr_change_to_tv)
     );
         rob.deqPort[0].deq;
@@ -1102,7 +1103,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         !isValid(rob.deqPort[0].deq_data.trap) &&
         !isValid(rob.deqPort[0].deq_data.ldKilled) &&
         rob.deqPort[0].deq_data.rob_inst_state == Executed &&
-        !isSystem(rob.deqPort[0].deq_data.iType) &&
+        !(isSystem(rob.deqPort[0].deq_data.iType) && !rob.deqPort[0].deq_data.isPureDataRead) &&
         (! send_mip_csr_change_to_tv)
     );
         // stop superscalar commit after we
@@ -1171,7 +1172,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                 let inst_tag = rob.deqPort[i].getDeqInstTag;
 
                 // check can be committed or not
-                if(x.rob_inst_state != Executed || isValid(x.ldKilled) || isValid(x.trap) || isSystem(x.iType)) begin
+                if(x.rob_inst_state != Executed || isValid(x.ldKilled) || isValid(x.trap) || (isSystem(x.iType) && !x.isPureDataRead)) begin
                     // inst not ready for commit, or system inst, or trap, or killed, stop here
                     stop = True;
                 end
