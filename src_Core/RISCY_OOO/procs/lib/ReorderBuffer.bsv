@@ -116,6 +116,7 @@ typedef struct {
 
     // speculation
     SpecBits           spec_bits;
+    Bool               isPureDataRead;
 `ifdef RVFI_DII
     Dii_Parcel_Id      dii_pid;
 `endif
@@ -284,6 +285,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Ehr#(2, Bool)                                                   nonMMIOStDone        <- mkEhr(?);
     Reg#(Bool)                                                      epochIncremented     <- mkRegU;
     Ehr#(3, SpecBits)                                               spec_bits            <- mkEhr(?);
+    Reg#(Bool)                                                      isPureDataRead       <- mkRegU;
 `ifdef RVFI_DII
     Reg#(Dii_Parcel_Id)                                             dii_pid              <- mkRegU;
 `endif
@@ -439,6 +441,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
         rob_inst_state[state_enq_port] <= x.rob_inst_state;
         epochIncremented <= x.epochIncremented;
         spec_bits[sb_enq_port] <= x.spec_bits;
+        isPureDataRead <= x.isPureDataRead;
 `ifdef INORDER_CORE
         // in-order core enqs to LSQ later, so don't set LSQ tag; and other
         // flags should default to false
@@ -495,7 +498,8 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
 `ifdef RVFI
             traceBundle: traceBundle[traceBundle_deq_port],
 `endif
-            spec_bits: spec_bits[sb_deq_port]
+            spec_bits: spec_bits[sb_deq_port],
+            isPureDataRead: isPureDataRead
 `ifdef KONATA 
             , u_id: uid
 `endif
