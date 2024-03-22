@@ -398,7 +398,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: True, // we have incremented epoch
-                                spec_bits: specTagManager.currentSpecBits
+                                spec_bits: specTagManager.currentSpecBits,
+                                isPureDataRead: False // not relevant
 `ifdef RVFI_DII
                                 , dii_pid: x.dii_pid
 `endif
@@ -485,10 +486,13 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     endfunction
 
     // check for system inst that needs to replay
-    Bool firstReplay = doReplay(fetchStage.pipelines[0].first.dInst.iType);
     Bool pureDataInst = isPureDataCSR(fetchStage.pipelines[0].first.dInst);
     Bool csrRead = isCSRRead(fetchStage.pipelines[0].first.regs, fetchStage.pipelines[0].first.dInst);
+    Bool csrWrite = isCSRWrite(fetchStage.pipelines[0].first.regs, fetchStage.pipelines[0].first.dInst);
+    Bool pureDataRead = isPureDataRead(fetchStage.pipelines[0].first.regs, fetchStage.pipelines[0].first.dInst);
+    Bool firstReplay = (doReplay(fetchStage.pipelines[0].first.dInst.iType) && !pureDataRead);
 
+/*
     rule doRenaming_PureDataCSRInst(
         !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
         && epochManager.checkEpoch[0].check(fetchStage.pipelines[0].first.main_epoch) // correct path
@@ -496,6 +500,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         && firstReplay // system inst needs replay
         && pureDataInst // is a pure data CSR instruction
         && csrRead // is a CSR read instruction
+        && !csrWrite
 `ifdef INCLUDE_GDB_CONTROL
         && inIfc.core_is_running
 `endif
@@ -578,7 +583,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 memAccessAtCommit: False,
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
-                                epochIncremented: False, // pure data inst does not increment epoch
+                                epochIncremented: True, // pure data inst still increments epoch
                                 spec_bits: spec_bits
 `ifdef RVFI_DII
                                 , dii_pid: x.dii_pid
@@ -590,6 +595,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         rob.enqPort[0].enq(y);
         end
     endrule
+*/
 
     // System inst is renamed only when ROB is empty
     rule doRenaming_SystemInst(
@@ -734,7 +740,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: True, // system inst has incremented epoch
-                                spec_bits: spec_bits
+                                spec_bits: spec_bits,
+                                isPureDataRead: False
 `ifdef RVFI_DII
                                 , dii_pid: x.dii_pid
 `endif
@@ -928,7 +935,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: False,
-                                spec_bits: spec_bits
+                                spec_bits: spec_bits,
+                                isPureDataRead: False // mem inst are no pure data reads
 `ifdef RVFI_DII
                                 , dii_pid: x.dii_pid
 `endif
@@ -979,7 +987,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
         && epochManager.checkEpoch[0].check(fetchStage.pipelines[0].first.main_epoch) // correct path
         && !isValid(firstTrap) // not trap
-        && !firstReplay // not system inst
+        && !(firstReplay && !pureDataRead) // not system inst
 `ifdef SECURITY
         // stall for ROB empty if we don't allow speculation at all
         && (!specNone || rob.isEmpty)
@@ -1062,8 +1070,15 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 if(isValid(getTrap(x))) begin
                     stop = True;
                 end
+                if(dInst.csr matches tagged Valid .c) begin
+                    stop = (case (c)
+                        csrAddrSTID, csrAddrUTID: (wcount_stid[0] > 0);
+                        // think about updating!
+                        default: True;
+                    endcase);
+                end
                 // for system inst, process in next cycle (in a different rule)
-                if(doReplay(dInst.iType)) begin
+                if(doReplay(dInst.iType) && !isPureDataRead(arch_regs, dInst)) begin
                     stop = True;
                 end
 `ifdef SECURITY
@@ -1324,7 +1339,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                                 lsqAtCommitNotified: False,
                                                 nonMMIOStDone: False,
                                                 epochIncremented: False,
-                                                spec_bits: spec_bits
+                                                spec_bits: spec_bits,
+                                                isPureDataRead: isPureDataRead(arch_regs, dInst)
 `ifdef RVFI_DII
                                                 , dii_pid: x.dii_pid
 `endif
