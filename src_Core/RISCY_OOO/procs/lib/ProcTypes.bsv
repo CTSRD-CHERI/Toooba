@@ -885,6 +885,8 @@ function Bool isSystem(IType iType) = (
 // instruction commits)
 function Bool doReplay(IType iType) = isSystem(iType);
 
+function Bool isPureDataRead(ArchRegs regs, DecodedInst dInst) = (isPureDataCSR(dInst) && isCSRRead(regs, dInst) && !(isCSRWrite(regs, dInst)));
+
 function Bool isPureDataCSR(DecodedInst dInst);
     if(dInst.csr matches tagged Valid .c) begin
         case (c)
