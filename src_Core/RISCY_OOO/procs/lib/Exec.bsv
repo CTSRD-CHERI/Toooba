@@ -546,7 +546,7 @@ function Maybe#(Trap) checkForException(
         Bool scr_has_priv = (prv >= pack(scr)[4:3]);
         Bool unimplemented = (scr == scrAddrNone);
         Bool writes_scr = regs.src1 == Valid (tagged Gpr 0) ? False : True;
-        Bool read_only  = (scr == scrAddrPCC);
+        Bool read_only  = (scr == scrAddrPCC || scr == scrAddrUTIDC);
         Bool write_deny = (writes_scr && read_only);
         Bool asr_allow = getHardPerms(pcc).accessSysRegs ||
           scr == scrAddrDDC || scr == scrAddrPCC;

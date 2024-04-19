@@ -822,8 +822,10 @@ module mkCsrFile #(Data hartid)(CsrFile);
     // Reg#(CapReg) utdc_reg      <- mkCsrReg(nullCap);
     // Reg#(CapReg) uScratchC_reg <- mkCsrReg(nullCap);
     // Reg#(CapReg) uepcc_reg     <- mkCsrReg(defaultValue);
+    Reg#(CapReg) utidc_reg      <- mkCsrReg(nullCap);
 
     // System level SCRs with accessSysRegs
+    Reg#(CapReg) stidc_reg     <- mkCsrReg(nullCap);
     Reg#(CapReg) stcc_reg      <- mkCsrReg(defaultValue);
     Reg#(CapReg) stdc_reg      <- mkCsrReg(nullCap);
     Reg#(CapReg) sScratchC_reg <- mkCsrReg(nullCap);
@@ -950,6 +952,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
             // scrAddrUScratchC: uScratchC_reg;
             // scrAddrUEPCC:     uepcc_reg;
             // System CSRs with accessSysRegs
+            scrAddrUTIDC:     stidc_reg;
+            scrAddrSTIDC:     stidc_reg;
             scrAddrSTCC:      stcc_reg;
             scrAddrSTDC:      stdc_reg;
             scrAddrSScratchC: sScratchC_reg;

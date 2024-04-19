@@ -1,11 +1,14 @@
 `SCR(PCC,       5'd00)
 `SCR(DDC,       5'd01)
 
+`SCR(UTIDC,     5'd01)
+
 //`SCR(UTCC,      5'd0)
 //`SCR(UTDC,      5'd05)
 //`SCR(UScratchC, 5'd06)
 //`SCR(UEPCC,     5'd07)
 
+`SCR(STIDC,     5'd13)
 `SCR(STCC,      5'd12)
 `SCR(STDC,      5'd13)
 `SCR(SScratchC, 5'd14)
