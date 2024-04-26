@@ -5,7 +5,7 @@
 `CSR(CYCLE,      12'hc00)
 `CSR(TIME,       12'hc01)
 `CSR(INSTRET,    12'hc02)
-`CSR(UTID,       12'hc30)
+`CSR(UTID,       12'hc80)
 // user non-standard CSRs (TODO)
 `CSR(TERMINATE,  12'h800) // terminate (used to exit Linux)
 `CSR(STATS,      12'h801) // turn on/off perf counters
@@ -22,7 +22,7 @@
 `CSR(STVAL,      12'h143) // it's still called sbadaddr in spike
 `CSR(SIP,        12'h144)
 `CSR(SATP,       12'h180) // it's still called sptbr in spike
-`CSR(STID,       12'h541)
+`CSR(STID,       12'h580)
 `CSR(SCCSR,      12'h9c0)
 // machine standard CSRs
 `CSR(MSTATUS,    12'h300)
