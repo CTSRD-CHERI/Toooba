@@ -549,7 +549,7 @@ function Maybe#(Trap) checkForException(
         Bool read_only  = (scr == scrAddrPCC || scr == scrAddrUTIDC);
         Bool write_deny = (writes_scr && read_only);
         Bool asr_allow = getHardPerms(pcc).accessSysRegs ||
-          scr == scrAddrDDC || scr == scrAddrPCC;
+          scr == scrAddrDDC || scr == scrAddrPCC || scr == scrAddrUTIDC;
         if(!scr_has_priv || unimplemented || write_deny) begin
             exception = Valid (Exception (excIllegalInst));
         end else if (!asr_allow) begin
