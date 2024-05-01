@@ -526,7 +526,8 @@ function Maybe#(Trap) checkForException(
                       || (csr == pack(csrAddrFCSR))
                       || (csr == pack(csrAddrCYCLE) && !writes_csr)
                       || (csr == pack(csrAddrTIME) && !writes_csr)
-                      || (csr == pack(csrAddrINSTRET) && !writes_csr);
+                      || (csr == pack(csrAddrINSTRET) && !writes_csr)
+                      || (csr == pack(csrAddrUTID) && !writes_csr);
         Bool unimplemented = (csr == pack(csrAddrNone));    // Added by Bluespec
         if (write_deny || !csr_has_priv || unimplemented) begin
             exception = Valid (Exception (excIllegalInst));
