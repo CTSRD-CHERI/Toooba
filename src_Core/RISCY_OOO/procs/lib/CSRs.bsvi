@@ -2,10 +2,10 @@
 `CSR(FFLAGS,     12'h001)
 `CSR(FRM,        12'h002)
 `CSR(FCSR,       12'h003)
+`CSR(UTID,       12'h080)
 `CSR(CYCLE,      12'hc00)
 `CSR(TIME,       12'hc01)
 `CSR(INSTRET,    12'hc02)
-`CSR(UTID,       12'hc80)
 // user non-standard CSRs (TODO)
 `CSR(TERMINATE,  12'h800) // terminate (used to exit Linux)
 `CSR(STATS,      12'h801) // turn on/off perf counters
@@ -37,6 +37,7 @@
 `CSR(MCAUSE,     12'h342)
 `CSR(MTVAL,      12'h343) // it's still called mbadaddr in spike
 `CSR(MIP,        12'h344)
+`CSR(MTID,       12'h380)
 `CSR(MCYCLE,     12'hb00)
 `CSR(MINSTRET,   12'hb02)
 
