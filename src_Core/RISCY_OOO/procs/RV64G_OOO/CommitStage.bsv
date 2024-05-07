@@ -299,7 +299,7 @@ deriving (Eq, FShow, Bits);
 `endif
 
 module mkCommitStage#(CommitInput inIfc)(CommitStage);
-    Bool verbose = False;
+    Bool verbose = True;
 
     Integer verbosity = 0;   // Bluespec: for lightweight verbosity trace
 
