@@ -14,6 +14,7 @@
 `SCR(SScratchC, 5'd14)
 `SCR(SEPCC,     5'd15)
 
+`SCR(MTIDC,     5'd27)
 `SCR(MTCC,      5'd28)
 `SCR(MTDC,      5'd29)
 `SCR(MScratchC, 5'd30)

@@ -584,6 +584,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
     Reg#(Data) mimpid_csr = readOnlyReg(0);
     // mhartid
     Reg#(Data) mhartid_csr = readOnlyReg(hartid);
+    // machine thread ID
+    Reg#(Data) mtid_csr <- mkCsrReg(0);
 
     // Supervisor level CSRs
     // sstatus: restricted view of mstatus
@@ -677,6 +679,9 @@ module mkCsrFile #(Data hartid)(CsrFile);
     Reg#(Data) stid_csr <- mkCsrReg(0);
 
     // User level CSRs
+
+    // user thread ID
+    Reg#(Data) utid_csr <- mkCsrReg(0);
     // According to spike, any write to fflags/frm/fcsr will set fs_reg as
     // dirty, regardless of whether the write truly changes value or not.
     // Besides, any non-zero FP exception flags will also make fs_reg dirty.
@@ -818,6 +823,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
     Reg#(CapReg) ddc_reg          <- mkCsrReg(defaultValue);
 
     // User level SCRs with accessSysRegs
+    Reg#(CapReg) utidc_reg     <- mkCsrReg(nullCap);
     // Reg#(CapReg) utcc_reg      <- mkCsrReg(defaultValue);
     // Reg#(CapReg) utdc_reg      <- mkCsrReg(nullCap);
     // Reg#(CapReg) uScratchC_reg <- mkCsrReg(nullCap);
@@ -831,6 +837,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
     Ehr#(2, CapReg) sepcc_reg  <- mkConfigEhr(defaultValue);
 
     // Machine level SCRs with accessSysRegs
+    Reg#(CapReg) mtidc_reg     <- mkCsrReg(nullCap);
     Reg#(CapReg) mtcc_reg      <- mkCsrReg(defaultValue);
     Reg#(CapReg) mtdc_reg      <- mkCsrReg(nullCap);
     Reg#(CapReg) mScratchC_reg <- mkCsrReg(nullCap);
@@ -873,7 +880,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrINSTRET:    instret_csr;
             csrAddrTERMINATE:  terminate_csr;
             csrAddrSTATS:      stats_csr;
-            csrAddrUTID:       stid_csr; // just reads the STID; the framework ensures that it is read-only
+            csrAddrUTID:       utid_csr;
             // Supervisor CSRs
             csrAddrSSTATUS:    sstatus_csr;
             csrAddrSIE:        sie_csr;
@@ -907,6 +914,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrMIMPID:     mimpid_csr;
             csrAddrMHARTID:    mhartid_csr;
             csrAddrMCCSR:      mccsr_csr;
+            csrAddrMTID:       mtid_csr;
 `ifdef PERFORMANCE_MONITORING
             //csrAddrMCOUNTERINHIBIT: perf_counters.inhibit;
             csrAddrMCOUNTERINHIBIT: mcountinhibit_reg;
@@ -946,18 +954,19 @@ module mkCsrFile #(Data hartid)(CsrFile);
             // User SCRs
             scrAddrDDC:       ddc_reg;
             // User CSRs with accessSysRegs
+            scrAddrUTIDC:     utidc_reg;
             // scrAddrUTCC:      utcc_reg;
             // scrAddrUTDC:      utdc_reg;
             // scrAddrUScratchC: uScratchC_reg;
             // scrAddrUEPCC:     uepcc_reg;
             // System CSRs with accessSysRegs
-            scrAddrUTIDC:     stidc_reg;
             scrAddrSTIDC:     stidc_reg;
             scrAddrSTCC:      stcc_reg;
             scrAddrSTDC:      stdc_reg;
             scrAddrSScratchC: sScratchC_reg;
             scrAddrSEPCC:     sepcc_reg[1];
             // Machine CSRs with accessSysRegs
+            scrAddrMTIDC:     mtidc_reg;
             scrAddrMTCC:      mtcc_reg;
             scrAddrMTDC:      mtdc_reg;
             scrAddrMScratchC: mScratchC_reg;
