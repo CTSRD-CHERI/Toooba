@@ -1310,7 +1310,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                     if (opcode == opcMiscMem && funct3 == fnFENCE) fenceCnt = fenceCnt + 1;
 `ifdef KONATA
                     case(x.iType)
-                        Alu, J, Jr, Br, Auipc, Auipcc, CCall, CJAL, CJALR, Cap: begin
+                        Alu, J, Jr, Br, Auipc, Auipcc, CCall, CJAL, CJALR, Cap, Csr, Scr: begin
                             $display("KONATAE\t%0d\t%0d\t0\tAlu4", cur_cycle, x.u_id);
                             $display("KONATAS\t%0d\t%0d\t0\tC", cur_cycle, x.u_id);
                             $fflush; 
