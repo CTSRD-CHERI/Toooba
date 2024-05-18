@@ -4,6 +4,7 @@
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2024 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -12,6 +13,10 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
 //-
 //
 // Permission is hereby granted, free of charge, to any person
@@ -35,75 +40,36 @@
 // SOFTWARE.
 
 `include "ProcConfig.bsv"
-
-import Assert::*;
 import Types::*;
 import ProcTypes::*;
+import RegFile::*;
 import Vector::*;
-import BrPred::*;
-import Bht::*;
-import GSelectPred::*;
-import GSharePred::*;
-import TourPred::*;
-import TourPredSecure::*;
+import Ehr::*;
+import CHERICC_Fat::*;
+import CHERICap::*;
+
+interface RAS;
+    method CapMem first;
+    method ActionValue#(RasIndex) pop(Bool doPop);
+endinterface
+
+// Local RAS Typedefs SHOULD BE A POWER OF TWO.
+typedef 2 NUM_RAS_STACK_IFCS;
+typedef 3 NUM_RAS_VALIDS_IFCS;
+typedef 16 RasEntries;
+typedef Bit#(TLog#(RasEntries)) RasIndex;
+typedef RasIndex RasPredTrainInfo;
+
+interface ReturnAddrStack;
+    interface Vector#(SupSize, RAS) ras;
 `ifdef ParTag
-import Ras_IFC::*;
-`else
-import Ras::*;
+    method Action setPTID(PTIndex ptid);
+    method Action shootdown(PTIndex ptid);
 `endif
-
-export DirPredTrainInfo(..);
-export PredTrainInfo(..);
-export mkDirPredictor;
-
-`ifdef DIR_PRED_BHT
-typedef BhtTrainInfo DirPredTrainInfo;
-`endif
-`ifdef DIR_PRED_GSELECT
-typedef GSelectTrainInfo DirPredTrainInfo;
-`endif
-`ifdef DIR_PRED_GSHARE
-typedef GShareTrainInfo DirPredTrainInfo;
-`endif
-`ifdef DIR_PRED_TOUR
-typedef TourTrainInfo DirPredTrainInfo;
-`endif
-
-typedef struct {
-    DirPredTrainInfo dir;
-    RasPredTrainInfo ras;
-} PredTrainInfo deriving(Bits, Eq, FShow);
-
-(* synthesize *)
-module mkDirPredictor(DirPredictor#(DirPredTrainInfo));
-`ifdef DIR_PRED_BHT
-`ifdef SECURITY
-    staticAssert(False, "BHT with flush methods is not implemented");
-`endif
-    let m <- mkBht;
-`endif
-
-`ifdef DIR_PRED_GSELECT
-`ifdef SECURITY
-    staticAssert(False, "GSelect with flush methods is not implemented");
-`endif
-    let m <- mkGSelectPred;
-`endif
-
-`ifdef DIR_PRED_GSHARE
-`ifdef SECURITY
-    staticAssert(False, "GShare with flush methods is not implemented");
-`endif
-    let m <- mkGSharePred;
-`endif
-
-`ifdef DIR_PRED_TOUR
-`ifdef SECURITY_BRPRED
-    let m <- mkTourPredSecure;
-`else
-    let m <- mkTourPred;
-`endif
-`endif
-
-    return m;
-endmodule
+    method Bool pendingPush;
+    method Action push(CapMem pushAddr);
+    method Action write(CapMem pushAddr, RasIndex h);
+    method Action setHead(RasIndex h);
+    method Action flush;
+    method Bool flush_done;
+endinterface
