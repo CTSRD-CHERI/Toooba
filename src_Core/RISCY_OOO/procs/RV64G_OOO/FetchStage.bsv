@@ -83,6 +83,10 @@ import Types::*;
 import IndexedMultiset::*;
 import Cur_Cycle :: *;
 import DReg :: *;
+`ifdef ParTag
+import Btb_IFC::*;
+import Ras_IFC::*;
+`endif
 
 // ================================================================
 // For fv_decode_C function and related types and definitions

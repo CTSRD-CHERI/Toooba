@@ -1,9 +1,10 @@
-
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
 //-
 // RVFI_DII + CHERI modifications:
+//     Copyright (c) 2020 Jessica Clarke
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2024 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -12,6 +13,11 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
 //-
 //
 // Permission is hereby granted, free of charge, to any person
@@ -34,76 +40,54 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-`include "ProcConfig.bsv"
-
-import Assert::*;
 import Types::*;
 import ProcTypes::*;
+import ConfigReg::*;
+import DReg::*;
+import Map::*;
 import Vector::*;
-import BrPred::*;
-import Bht::*;
-import GSelectPred::*;
-import GSharePred::*;
-import TourPred::*;
-import TourPredSecure::*;
+import CHERICC_Fat::*;
+import CHERICap::*;
+
+interface NextAddrPred#(numeric type hashSz);
+    method Action put_pc(CapMem pc);
+    interface Vector#(SupSizeX2, Maybe#(CapMem)) pred;
+    method Action update(CapMem pc, CapMem brTarget, Bool taken);
 `ifdef ParTag
-import Ras_IFC::*;
-`else
-import Ras::*;
+    method Action setPTID(PTIndex ptid);
+    method Action shootdown(PTIndex ptid);
 `endif
+    // security
+    method Action flush;
+    method Bool flush_done;
+endinterface
 
-export DirPredTrainInfo(..);
-export PredTrainInfo(..);
-export mkDirPredictor;
-
-`ifdef DIR_PRED_BHT
-typedef BhtTrainInfo DirPredTrainInfo;
-`endif
-`ifdef DIR_PRED_GSELECT
-typedef GSelectTrainInfo DirPredTrainInfo;
-`endif
-`ifdef DIR_PRED_GSHARE
-typedef GShareTrainInfo DirPredTrainInfo;
-`endif
-`ifdef DIR_PRED_TOUR
-typedef TourTrainInfo DirPredTrainInfo;
-`endif
+// Local BTB Typedefs
+typedef 1 PcLsbsIgnore;
+typedef 1024 BtbEntries;
+typedef Bit#(16) CompressedTarget;
+typedef 2 BtbAssociativity;
+typedef 1 BtbAssociativityFullRecords;
+typedef Bit#(TLog#(SupSizeX2)) BtbBank;
+// Total entries/lanes of superscalar lookup/associativity
+typedef TDiv#(TDiv#(BtbEntries,SupSizeX2),BtbAssociativity) BtbIndices;
+typedef Bit#(TLog#(BtbIndices)) BtbIndex;
+typedef Bit#(TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)) BtbTag;
+typedef Bit#(hashSz) HashedTag#(numeric type hashSz);
 
 typedef struct {
-    DirPredTrainInfo dir;
-    RasPredTrainInfo ras;
-} PredTrainInfo deriving(Bits, Eq, FShow);
+    BtbTag tag;
+    BtbIndex index;
+    BtbBank bank;
+} BtbAddr deriving(Bits, Eq, FShow);
 
-(* synthesize *)
-module mkDirPredictor(DirPredictor#(DirPredTrainInfo));
-`ifdef DIR_PRED_BHT
-`ifdef SECURITY
-    staticAssert(False, "BHT with flush methods is not implemented");
-`endif
-    let m <- mkBht;
-`endif
+typedef struct {
+    CapMem pc;
+    CapMem nextPc;
+    Bool taken;
+} BtbUpdate deriving(Bits, Eq, FShow);
 
-`ifdef DIR_PRED_GSELECT
-`ifdef SECURITY
-    staticAssert(False, "GSelect with flush methods is not implemented");
-`endif
-    let m <- mkGSelectPred;
-`endif
-
-`ifdef DIR_PRED_GSHARE
-`ifdef SECURITY
-    staticAssert(False, "GShare with flush methods is not implemented");
-`endif
-    let m <- mkGSharePred;
-`endif
-
-`ifdef DIR_PRED_TOUR
-`ifdef SECURITY_BRPRED
-    let m <- mkTourPredSecure;
-`else
-    let m <- mkTourPred;
-`endif
-`endif
-
-    return m;
-endmodule
+typedef struct {
+    Bool v;
+    data d;
+} VnD#(type data) deriving(Bits, Eq, FShow);

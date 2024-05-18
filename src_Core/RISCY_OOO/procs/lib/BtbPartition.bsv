@@ -1,9 +1,10 @@
-
 // Copyright (c) 2017 Massachusetts Institute of Technology
 //
 //-
 // RVFI_DII + CHERI modifications:
+//     Copyright (c) 2020 Jessica Clarke
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2024 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -12,6 +13,11 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
 //-
 //
 // Permission is hereby granted, free of charge, to any person
@@ -34,76 +40,34 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-`include "ProcConfig.bsv"
-
-import Assert::*;
+`ifdef ParTag
 import Types::*;
 import ProcTypes::*;
+import ConfigReg::*;
+import DReg::*;
+import Map::*;
 import Vector::*;
-import BrPred::*;
-import Bht::*;
-import GSelectPred::*;
-import GSharePred::*;
-import TourPred::*;
-import TourPredSecure::*;
-`ifdef ParTag
-import Ras_IFC::*;
-`else
-import Ras::*;
-`endif
+import CHERICC_Fat::*;
+import CHERICap::*;
+import Btb_IFC::*;
+import BtbCore::*;
 
-export DirPredTrainInfo(..);
-export PredTrainInfo(..);
-export mkDirPredictor;
+module mkBtbPartition(NextAddrPred#(hashSz))
+    provisos (NumAlias#(tagSz, TSub#(TSub#(TSub#(AddrSz,SizeOf#(BtbBank)), SizeOf#(BtbIndex)), PcLsbsIgnore)),
+        Add#(1, a__, TDiv#(tagSz, hashSz)),
+    Add#(b__, tagSz, TMul#(TDiv#(tagSz, hashSz), hashSz)));
 
-`ifdef DIR_PRED_BHT
-typedef BhtTrainInfo DirPredTrainInfo;
-`endif
-`ifdef DIR_PRED_GSELECT
-typedef GSelectTrainInfo DirPredTrainInfo;
-`endif
-`ifdef DIR_PRED_GSHARE
-typedef GShareTrainInfo DirPredTrainInfo;
-`endif
-`ifdef DIR_PRED_TOUR
-typedef TourTrainInfo DirPredTrainInfo;
-`endif
+    Vector#(PTNumber, NextAddrPred#(hashSz)) btbs <- replicateM(mkBtbCore);
+    Reg#(PTIndex) rg_ptid <- mkReg(0); // default zero id
 
-typedef struct {
-    DirPredTrainInfo dir;
-    RasPredTrainInfo ras;
-} PredTrainInfo deriving(Bits, Eq, FShow);
-
-(* synthesize *)
-module mkDirPredictor(DirPredictor#(DirPredTrainInfo));
-`ifdef DIR_PRED_BHT
-`ifdef SECURITY
-    staticAssert(False, "BHT with flush methods is not implemented");
-`endif
-    let m <- mkBht;
-`endif
-
-`ifdef DIR_PRED_GSELECT
-`ifdef SECURITY
-    staticAssert(False, "GSelect with flush methods is not implemented");
-`endif
-    let m <- mkGSelectPred;
-`endif
-
-`ifdef DIR_PRED_GSHARE
-`ifdef SECURITY
-    staticAssert(False, "GShare with flush methods is not implemented");
-`endif
-    let m <- mkGSharePred;
-`endif
-
-`ifdef DIR_PRED_TOUR
-`ifdef SECURITY_BRPRED
-    let m <- mkTourPredSecure;
-`else
-    let m <- mkTourPred;
-`endif
-`endif
-
-    return m;
+    method put_pc = btbs[rg_ptid].put_pc;
+    interface pred = btbs[rg_ptid].pred;
+    method update = btbs[rg_ptid].update;
+    method Action setPTID(PTIndex ptid);
+        rg_ptid <= ptid;
+    endmethod
+    method shootdown = btbs[rg_ptid].shootdown;
+    method flush = btbs[rg_ptid].flush;
+    method flush_done = btbs[rg_ptid].flush_done;
 endmodule
+`endif
