@@ -5,6 +5,7 @@
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Peter Rugg
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2024 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -13,6 +14,11 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
 //-
 //
 // Permission is hereby granted, free of charge, to any person
@@ -40,6 +46,7 @@ import ProcTypes::*;
 import Vector::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
+import GlobalBrHistReg::*;
 
 (* noinline *)
 function Maybe#(CapMem) decodeBrPred( CapMem pc, DecodedInst dInst, Bool histTaken, Bool is_32b_inst);
@@ -83,6 +90,39 @@ interface DirPredictor#(type trainInfoT);
     method Action nextPc(Addr nextPc);
     interface Vector#(SupSize, DirPred#(trainInfoT)) pred;
     method Action update(Bool taken, trainInfoT train, Bool mispred);
+`ifdef ParTag
+    method Action setPTID(PTIndex ptid);
+    method Action shootdown(PTIndex ptid);
+`endif
     method Action flush;
     method Bool flush_done;
 endinterface
+
+// 4KB tournament predictor
+
+typedef 12 TourGlobalHistSz;
+typedef 10 TourLocalHistSz;
+typedef 10 PCIndexSz;
+
+typedef 0 DefValue;
+
+typedef Bit#(TourGlobalHistSz) TourGlobalHist;
+typedef Bit#(TourLocalHistSz) TourLocalHist;
+typedef Bit#(PCIndexSz) PCIndex;
+
+typedef struct {
+    TourGlobalHist globalHist;
+    TourLocalHist localHist;
+    Bool globalTaken;
+    Bool localTaken;
+    PCIndex pcIndex;
+} TourTrainInfo deriving(Bits, Eq, FShow);
+
+// global history reg
+typedef GlobalBrHistReg#(TourGlobalHistSz) TourGHistReg;
+
+(* synthesize *)
+module mkTourGHistReg(TourGHistReg);
+  let m <- mkGlobalBrHistReg;
+  return m;
+endmodule
