@@ -3,7 +3,7 @@
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jonathan Woodruff
-//     Copyright (c) 2024 Franz Fuchs
+//     Copyright (c) 2020 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -39,25 +39,25 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-import Types::*;
-import ProcTypes::*;
-import RegFile::*;
-import Ehr::*;
-import Vector::*;
-import GlobalBrHistReg::*;
 import BrPred::*;
 import TourPredCore::*;
-import TourPredPartition::*;
+import Vector::*;
+import ProcTypes::*;
 
+module mkTourPredPartition(DirPredictor#(TourTrainInfo));
 
+    Vector#(PTNumber, DirPredictor#(TourTrainInfo)) dir_preds <- replicateM(mkTourPredCore);
+    Reg#(PTIndex) rg_ptid <- mkReg(0); // default zero id
 
-
-(* synthesize *)
-module mkTourPred(DirPredictor#(TourTrainInfo));
+    method nextPc = dir_preds[rg_ptid].nextPc;
+    interface pred = dir_preds[rg_ptid].pred;
+    method update = dir_preds[rg_ptid].update;
 `ifdef ParTag
-    let m <- mkTourPredPartition;
-`else
-    let m <- mkTourPredCore;
+    method Action setPTID(PTIndex ptid);
+        rg_ptid <= ptid;
+    endmethod
+    method shootdown = dir_preds[rg_ptid].shootdown;
 `endif
-    return m;
+    method flush = dir_preds[rg_ptid].flush;
+    method flush_done = dir_preds[rg_ptid].flush_done;
 endmodule
