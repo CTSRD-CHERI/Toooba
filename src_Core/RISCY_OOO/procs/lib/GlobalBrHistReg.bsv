@@ -1,6 +1,24 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
 // 
+//-
+// CHERI modifications:
+//     Copyright (c) 2024 Franz Fuchs
+//     All rights reserved.
+//
+//     This software was developed by SRI International and the University of
+//     Cambridge Computer Laboratory (Department of Computer Science and
+//     Technology) under DARPA contract HR0011-18-C-0016 ("ECATS"), as part of the
+//     DARPA SSITH research programme.
+//
+//     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
+//-
+//
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without
@@ -33,6 +51,9 @@ interface GlobalBrHistReg#(numeric type histLen);
     // taken[num-1] is the latest branch
     method Action addHistory(Bit#(SupSize) taken, Bit#(TLog#(TAdd#(SupSize, 1))) num);
     method Action redirect(Bit#(histLen) newHist);
+`ifdef ParTag
+    method Action shootdown();
+`endif
 endinterface
 
 typedef struct {
@@ -47,18 +68,36 @@ module mkGlobalBrHistReg(GlobalBrHistReg#(histLen));
     // wires to change history
     RWire#(AddHistory) addHist <- mkRWire; // used by addHistory
     RWire#(Bit#(histLen)) redirectHist <- mkRWire; // used by redirect
+`ifdef ParTag
+    // wire to delete history
+    RWire#(Bool) sdHist <- mkRWire; // used by shootdown
+`endif
 
     (* fire_when_enabled, no_implicit_conditions *)
+`ifdef ParTag
+    rule canon_redirect(!isValid(sdHist.wget) && isValid(redirectHist.wget));
+`else
     rule canon_redirect(isValid(redirectHist.wget));
+`endif
         hist <= validValue(redirectHist.wget);
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
+`ifdef ParTag
+    rule canon_addHistory(!isValid(sdHist.wget) && !isValid(redirectHist.wget) && isValid(addHist.wget));
+`else
     rule canon_addHistory(!isValid(redirectHist.wget) && isValid(addHist.wget));
+`endif
         let x = validValue(addHist.wget);
         // shift into hist from MSB
         hist <= truncate({x.taken, hist} >> x.num);
     endrule
+
+`ifdef ParTag
+    rule canon_shootdown(isValid(sdHist.wget));
+        hist <= 0;
+    endrule
+`endif
     
     method history = hist;
 
@@ -72,4 +111,10 @@ module mkGlobalBrHistReg(GlobalBrHistReg#(histLen));
     method Action redirect(Bit#(histLen) newHist);
         redirectHist.wset(newHist);
     endmethod
+
+`ifdef ParTag
+    method Action shootdown();
+        sdHist.wset(True);
+    endmethod
+`endif
 endmodule

@@ -4,6 +4,7 @@
 //-
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2024 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -12,6 +13,11 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
 //-
 //
 // Permission is hereby granted, free of charge, to any person
@@ -160,6 +166,11 @@ module mkGSharePred(DirPredictor#(GShareTrainInfo));
         Bit#(2) cnt = tab.sub(train.index);
         tab.upd(train.index, updateCnt(cnt, taken));
     endmethod
+
+`ifdef ParTag
+    method Action setPTID(PTIndex ptid) = noAction;
+    method Action shootdown(PTIndex ptid) = noAction;
+`endif
 
     method flush = noAction;
     method flush_done = True;
