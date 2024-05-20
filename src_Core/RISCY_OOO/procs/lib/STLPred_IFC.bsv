@@ -28,17 +28,18 @@
  */
 
 `include "ProcConfig.bsv"
-import Map::*;
-import STLPred_IFC::*;
-import STLPredPartition::*;
-import STLPredCore::*;
+import ProcTypes::*;
 
+typedef Bit#(10) StlPredKey;
+typedef Bit#(6) StlPredIndex;
+typedef Int#(3) StlPredValue;
+typedef 2 StlPredAssociativity;
 
-module mkSTLPred(STLPred);
+interface STLPred;
+    method Action update(Bit#(16) pc_hash, Bool waited, Bool killedLd);
+    method Bool pred(Bit#(16) pc_hash);
 `ifdef ParTag
-    let m <- mkSTLPredPartition;
-`else
-    let m <- mkSTLPredCore;
+    method Action setPTID(PTIndex ptid);
+    method Action shootdown(PTIndex ptid);
 `endif
-    return m;
-endmodule
+endinterface
