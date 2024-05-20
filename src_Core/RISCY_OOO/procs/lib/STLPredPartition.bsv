@@ -30,15 +30,21 @@
 `include "ProcConfig.bsv"
 import Map::*;
 import STLPred_IFC::*;
-import STLPredPartition::*;
 import STLPredCore::*;
+import ProcTypes::*;
+import Vector::*;
 
 
-module mkSTLPred(STLPred);
+module mkSTLPredPartition(STLPred);
+    Vector#(PTNumber, STLPred) stlpreds <- replicateM(mkSTLPredCore);
+    Reg#(PTIndex) rg_ptid <- mkReg(0); // default zero id
+
+    method update = stlpreds[rg_ptid].update;
+    method pred = stlpreds[rg_ptid].pred;
 `ifdef ParTag
-    let m <- mkSTLPredPartition;
-`else
-    let m <- mkSTLPredCore;
+    method Action setPTID(PTIndex ptid);
+        rg_ptid <= ptid;
+    endmethod
+    method shootdown = stlpreds[rg_ptid].shootdown;
 `endif
-    return m;
 endmodule
