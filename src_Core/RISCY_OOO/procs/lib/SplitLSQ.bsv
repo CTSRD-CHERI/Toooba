@@ -45,6 +45,7 @@ import Assert::*;
 import ConfigReg::*;
 import Ehr::*;
 import Map::*;
+import STLPred_IFC::*;
 import STLPred::*;
 import HasSpecBits::*;
 import SpecFifo::*;
