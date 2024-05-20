@@ -5,6 +5,7 @@
 // RVFI_DII + CHERI modifications:
 //     Copyright (c) 2020 Alexandre Joannou
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2024 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -13,6 +14,11 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
 //-
 //
 // Permission is hereby granted, free of charge, to any person
@@ -467,6 +473,10 @@ interface SplitLSQ;
     // for security: we cannot flush D$ until all wrong-path loads have
     // returned from D$
     method Bool noWrongPathLoads;
+`ifdef ParTag
+    method Action setPTID(PTIndex ptid);
+    method Action shootdown(PTIndex ptid);
+`endif
 endinterface
 
 // --- auxiliary types and functions ---
@@ -2356,4 +2366,9 @@ module mkSplitLSQ(SplitLSQ);
     method Bool noWrongPathLoads;
         return all( \== (False) , readVReg(ld_waitWPResp_noWP) );
     endmethod
+
+`ifdef ParTag
+    method setPTID = stlPred.setPTID;
+    method shootdown = stlPred.shootdown;
+`endif
 endmodule

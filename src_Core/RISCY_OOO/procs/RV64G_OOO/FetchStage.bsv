@@ -164,6 +164,11 @@ interface FetchStage;
     method Action flush_predictors;
     method Bool flush_predictors_done;
 
+`ifdef ParTag
+    method Action setPTID(PTIndex ptid);
+    method Action shootdown(PTIndex ptid);
+`endif
+
     // debug
     method FetchDebugState getFetchState;
 
@@ -1197,6 +1202,20 @@ module mkFetchStage(FetchStage);
     method Bool flush_predictors_done;
         return nextAddrPred.flush_done && dirPred.flush_done && ras.flush_done;
     endmethod
+
+`ifdef ParTag
+    method Action setPTID(PTIndex ptid);
+        ras.setPTID(ptid);
+        nextAddrPred.setPTID(ptid);
+        dirPred.setPTID(ptid);
+    endmethod
+
+    method Action shootdown(PTIndex ptid);
+        ras.shootdown(ptid);
+        nextAddrPred.shootdown(ptid);
+        dirPred.shootdown(ptid);
+    endmethod
+`endif
 
     method FetchDebugState getFetchState;
         return FetchDebugState {

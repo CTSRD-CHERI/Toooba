@@ -706,6 +706,10 @@ module mkCsrFile #(Data hartid)(CsrFile);
     // whether performance stats is collected
     StatsCsr stats_module <- mkStatsCsr;
     Reg#(Data) stats_csr = stats_module.reg_ifc;
+`ifdef ParTag
+    // ParTag ID
+    Reg#(Data) ptid_csr <- mkCsrReg(0);
+`endif
 
    Reg #(Data) rg_tselect <- mkConfigReg (0);
    // Note: ISA test rv64mi-p-breakpoint assumes tdata1's reset value == 0
@@ -869,6 +873,9 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrINSTRET:    instret_csr;
             csrAddrTERMINATE:  terminate_csr;
             csrAddrSTATS:      stats_csr;
+`ifdef ParTag
+            csrAddrPARTAG:     ptid_csr;
+`endif
             // Supervisor CSRs
             csrAddrSSTATUS:    sstatus_csr;
             csrAddrSIE:        sie_csr;
