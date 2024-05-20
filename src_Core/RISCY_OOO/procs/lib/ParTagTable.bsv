@@ -32,7 +32,8 @@
  import FIFOF::*;
  
  interface ParTagTableInput;
-     method Action shootdown(PTIndex ptid);
+    method Action setPTID(PTIndex ptid);
+    method Action shootdown(PTIndex ptid);
  endinterface
  
  interface ParTagTable;
@@ -108,8 +109,10 @@
              end
              ParTagTableEntry e = ParTagTableEntry{aptid: aptid, v: True};
              tab[mptid] <= e;
+             mptid_m = tagged Valid mptid;
              $display("setNewPTID - aptid: ", fshow(aptid), "; mptid: ", fshow(mptid));
          end
+         inIfc.setPTID(fromMaybe(?, mptid_m));
  
          $display("ParTagTable:");
          for(Integer i = 0; i < valueOf(PTNumber); i = i + 1) begin

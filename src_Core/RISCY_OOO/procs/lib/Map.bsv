@@ -78,16 +78,22 @@ interface Map#(type ky, type ix, type vl, numeric type as);
     method Maybe#(vl) lookup(MapKeyIndex#(ky,ix) lookup_key);
     method Action clear;
     method Bool clearDone;
+`ifdef ParTag
+    method Action shootdown;
+`endif
 endinterface
 
 module mkMapLossy#(vl default_value)(Map#(ky,ix,vl,as)) provisos (
 Bits#(ky,ky_sz), Bits#(vl,vl_sz), Eq#(ky), Arith#(ky),
 Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
-Bitwise#(ix), Eq#(ix), Arith#(ix));
+Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     Vector#(as, RegFile#(ix, MapKeyValue#(ky,vl))) mem
         <- replicateM(mkRegFileWCF(0, maxBound));
     Reg#(Bit#(TLog#(as))) wayNext <- mkReg(0);
     Integer a = valueof(as);
+`ifdef ParTag
+    Vector#(as, Vector#(SizeOf#(ix), Ehr#(2, Bool))) valids <- replicateM(replicateM(mkEhr(False)));
+`endif
 
     Reg#(Bool) clearReg <- mkReg(True);
     Reg#(ix) clearCount <- mkReg(0);
@@ -113,7 +119,12 @@ Bitwise#(ix), Eq#(ix), Arith#(ix));
                 end
             end
         end
-        if (found || insert) mem[way].upd(ki.index, MapKeyValue{key: ki.key, value: up(old_value, value)});
+        if (found || insert) begin
+            mem[way].upd(ki.index, MapKeyValue{key: ki.key, value: up(old_value, value)});
+`ifdef ParTag
+            valids[way][ki.index][0] <= True;
+`endif
+        end
         wayNext <= (wayNext == fromInteger(a-1)) ? 0: wayNext + 1;
         didUpdate.send;
     endaction
@@ -129,11 +140,21 @@ Bitwise#(ix), Eq#(ix), Arith#(ix));
         for (Integer i = 0; i < a; i = i + 1) begin
             let rd = mem[i].sub(lu.index);
             if (rd.key == lu.key) ret = Valid(rd.value);
+`ifdef ParTag
+            if (!valids[i][lu.index][0]) ret = Invalid;
+`endif
         end
         return ret;
     endmethod
     method clear if (!clearReg) = clearReg._write(True);
     method clearDone = clearReg;
+`ifdef ParTag
+    method Action shootdown();
+        for(Integer i = 0; i < valueof(as); i = i + 1) begin
+            writeVReg(getVEhrPort(valids[i], 1), replicate(False));
+        end
+    endmethod
+`endif
 endmodule
 
 interface MapSplitCore#(type ky, type ix, type vl, numeric type as, numeric type en);

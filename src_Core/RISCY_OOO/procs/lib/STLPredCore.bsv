@@ -65,8 +65,7 @@ module mkSTLPredCore(STLPred);
         noAction;
     endmethod
     method Action shootdown(PTIndex ptid);
-        $display("TODO shootdown STLPredCore not in one cycle");
-        ldKillMap.clear;
+        ldKillMap.shootdown;
     endmethod
 `endif
 
