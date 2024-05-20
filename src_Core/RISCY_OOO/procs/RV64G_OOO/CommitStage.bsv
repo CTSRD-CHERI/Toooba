@@ -113,6 +113,9 @@ interface CommitInput;
     interface RegRenamingTable rtIfc;
     interface CsrFile csrfIfc;
     interface RenameStage rsIfc;
+`ifdef ParTag
+    method Action setNewPTID(CapMem aptid);
+`endif
     // no stores
     method Bool stbEmpty;
     method Bool stqEmpty;
@@ -930,6 +933,9 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
             Data csr_data = ?;
             if(x.ppc_vaddr_csrData matches tagged CSRData .d) begin
                 csr_data = getAddr(d);
+                if(csr_idx == csrAddrPARTAG) begin
+                    inIfc.setNewPTID(d);
+                end
             end
             else begin
                 doAssert(False, "must have csr data");

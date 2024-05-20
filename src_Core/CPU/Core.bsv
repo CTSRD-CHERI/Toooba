@@ -108,6 +108,10 @@ import CHERICC_Fat::*;
 import Bag::*;
 import VnD::*;
 
+`ifdef ParTag
+import ParTagTable::*;
+`endif
+
 `ifdef RVFI_DII
 import Toooba_RVFI_DII_Bridge::*;
 `endif
@@ -625,6 +629,17 @@ module mkCore#(CoreId coreId)(Core);
     endrule
 `endif
 
+`ifdef ParTag
+    RWire#(PTIndex) ptidWire <- mkRWire;
+    let ptidTableInput = (interface ParTagTableInput;
+        method Action shootdown(PTIndex ptid);
+            $display("shootdown Core");
+            ptidWire.wset(ptid);
+        endmethod
+    endinterface);
+    ParTagTable cidTable <- mkParTagTable(ptidTableInput);
+`endif
+
     // Rename stage
     let renameInput = (interface RenameInput;
         interface fetchIfc = fetchStage;
@@ -661,6 +676,9 @@ module mkCore#(CoreId coreId)(Core);
         interface rtIfc = regRenamingTable;
         interface csrfIfc = csrf;
         interface rsIfc = renameStage;
+`ifdef ParTag
+        method setNewPTID = cidTable.setNewPTID;
+`endif
         method stbEmpty = stb.isEmpty;
         method stqEmpty = lsq.stqEmpty;
         method lsqSetAtCommit = lsq.setAtCommit;
