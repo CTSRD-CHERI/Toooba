@@ -40,7 +40,7 @@ import Ras_IFC::*;
 import RasSingle::*;
 
 module mkRasPartition(ReturnAddrStack);
-    Vector#(PTNumber, ReturnAddrStack) rases <- replicateM(mkRas);
+    Vector#(PTNumber, ReturnAddrStack) rases <- replicateM(mkRasSingle);
     Reg#(PTIndex) rg_ptid <- mkReg(0); // default zero id
 
     interface ras = rases[rg_ptid].ras;
