@@ -46,7 +46,7 @@ import Ras_IFC::*;
 
 
 (* synthesize *)
-module mkRas(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
+module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)), RasEntries));
     Vector#(RasEntries, Ehr#(TAdd#(NUM_RAS_STACK_IFCS, 1), CapMem)) stack <- replicateM(mkEhr(nullCap));
     Vector#(RasEntries, Ehr#(TAdd#(NUM_RAS_VALIDS_IFCS, 1), Bool)) valids <- replicateM(mkEhr(False));
     // head points past valid data
