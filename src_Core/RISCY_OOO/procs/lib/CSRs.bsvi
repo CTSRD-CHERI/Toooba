@@ -6,6 +6,7 @@
 `CSR(CYCLE,      12'hc00)
 `CSR(TIME,       12'hc01)
 `CSR(INSTRET,    12'hc02)
+`CSR(PARTAG,     12'h4a0)
 // user non-standard CSRs (TODO)
 `CSR(TERMINATE,  12'h800) // terminate (used to exit Linux)
 `CSR(STATS,      12'h801) // turn on/off perf counters
