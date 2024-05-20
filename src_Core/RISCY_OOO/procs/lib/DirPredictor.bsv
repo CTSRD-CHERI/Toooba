@@ -46,11 +46,8 @@ import GSelectPred::*;
 import GSharePred::*;
 import TourPred::*;
 import TourPredSecure::*;
-`ifdef ParTag
 import Ras_IFC::*;
-`else
-import Ras::*;
-`endif
+
 
 export DirPredTrainInfo(..);
 export PredTrainInfo(..);

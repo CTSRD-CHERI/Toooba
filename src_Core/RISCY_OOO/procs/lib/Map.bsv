@@ -46,12 +46,10 @@ typedef struct {
     ky key;
     ix index;
 } MapKeyIndex#(type ky, type ix) deriving(Bits, Eq, FShow);
-`ifdef ParTag
 typedef struct {
     tg tag;
     vl value;
 } MapTagValue#(type tg, type vl) deriving(Bits, Eq, FShow);
-`endif
 typedef struct {
     ky key;
     vl value;
@@ -61,14 +59,12 @@ typedef struct {
     ix index;
     vl value;
 } MapKeyIndexValue#(type ky, type ix, type vl) deriving(Bits, Eq, FShow);
-`ifdef ParTag
 typedef struct {
     ky key;
     ix index;
     tg tag;
     vl value;
 } MapKeyIndexTagValue#(type ky, type ix, type tg, type vl) deriving(Bits, Eq, FShow);
-`endif
 
 // Type parameters are for index and key (which together are the "address"),
 // the value stored in the map, and the associativity of the storage.
@@ -170,19 +166,20 @@ interface MapSplitCore#(type ky, type ix, type vl, numeric type as, numeric type
 `endif
 endinterface
 
-`ifdef ParTag
 interface MapSplitCoreTagged#(type ky, type ix, type tg, type vl, numeric type as, numeric type en);
     method Action update(MapKeyIndex#(ky,ix) key, tg tag, vl value);
     method Action lookupStart(MapKeyIndex#(ky,ix) lookup_key);
     method Maybe#(MapTagValue#(tg,vl)) lookupRead;
     method Action clear;
     method Bool clearDone;
+`ifdef ParTag
     method Action changeWays(Vector#(as, Bool) v);
     method Action clearWays(Vector#(as, Bool) v);
     method Action shootdown();
     method Action shootdownTag(tg tag);
-endinterface
 `endif
+endinterface
+
 
 typedef MapSplitCore#(ky, ix, vl, as, as) MapSplit#(type ky, type ix, type vl, numeric type as);
 
@@ -209,11 +206,14 @@ module mkMapLossyBRAMCore(MapSplitCore#(ky,ix,vl,as,en)) provisos (
         if(m.lookupRead matches tagged Valid .tup) return tagged Valid tup.value;
         else return tagged Invalid;
     endmethod
-    method Action changeWays(Vector#(as, Bool) v) = m.changeWays(v);
     method Action clear = m.clear;
-    method Action clearWays(Vector#(as, Bool) v) = m.clearWays(v);
     method Bool clearDone = m.clearDone;
-    method Action shootdown = m.shootdown;
+`ifdef ParTag
+    method changeWays = m.changeWays;
+    method clearWays = m.clearWays;
+    method shootdown = m.shootdown;
+    method shootdownTag = m.shootdownTag;
+`endif
 endmodule
 
 module mkMapLossyBRAMCoreTagged(MapSplitCoreTagged#(ky,ix,tg,vl,as,en)) provisos (
@@ -309,20 +309,25 @@ module mkMapLossyBRAMCoreTagged(MapSplitCoreTagged#(ky,ix,tg,vl,as,en)) provisos
         if(clearReg[0]) return tagged Invalid;
         else return readVal;
     endmethod
+
+    method Action clear if (!clearReg[0]);
+        for(Integer i = 0; i < a; i = i + 1) rg_clearWays[i][1] <= True;
+        clearReg[0] <= True;
+    endmethod
+
+    method clearDone = clearReg[0];
+
+`ifdef ParTag
     method Action changeWays(Vector#(as,Bool) v);
         for(Integer i = 0; i < a; i = i + 1) begin
             avWays[i] <= v[i];
         end
     endmethod
-    method Action clear if (!clearReg[0]);
-        for(Integer i = 0; i < a; i = i + 1) rg_clearWays[i][1] <= True;
-        clearReg[0] <= True;
-    endmethod
+
     method Action clearWays(Vector#(as, Bool) v) if(!clearReg[1]);
         for(Integer i = 0; i < a; i = i + 1) rg_clearWays[i][1] <= v[i];
         clearReg[1] <= True;
     endmethod
-    method clearDone = clearReg[0];
 
     method Action shootdown();
         $display("shootdown");
@@ -340,4 +345,5 @@ module mkMapLossyBRAMCoreTagged(MapSplitCoreTagged#(ky,ix,tg,vl,as,en)) provisos
             end
         end
     endmethod
+`endif
 endmodule

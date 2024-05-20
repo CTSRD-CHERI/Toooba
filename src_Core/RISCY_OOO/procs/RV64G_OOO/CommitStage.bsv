@@ -930,9 +930,11 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
             Data csr_data = ?;
             if(x.ppc_vaddr_csrData matches tagged CSRData .d) begin
                 csr_data = getAddr(d);
+`ifdef ParTag
                 if(csr_idx == csrAddrPARTAG) begin
                     inIfc.setNewPTID(d);
                 end
+`endif
             end
             else begin
                 doAssert(False, "must have csr data");

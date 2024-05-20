@@ -52,6 +52,10 @@ export mkBtb;
 
 (* synthesize *)
 module mkBtb(NextAddrPred#(16));
+`ifdef ParTag
     NextAddrPred#(16) btb <- mkBtbTagged;
+`else
+    NextAddrPred#(16) btb <- mkBtbCore;
+`endif
     return btb;
 endmodule
