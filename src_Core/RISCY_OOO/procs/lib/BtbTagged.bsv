@@ -39,6 +39,7 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+`ifdef ParTag
 import Types::*;
 import ProcTypes::*;
 import ConfigReg::*;
@@ -142,3 +143,4 @@ module mkBtbTagged(NextAddrPred#(hashSz))
     method flush_done = True;
 `endif
 endmodule
+`endif

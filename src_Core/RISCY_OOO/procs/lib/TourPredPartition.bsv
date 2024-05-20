@@ -38,7 +38,7 @@
 // ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
-
+`ifdef ParTag
 import BrPred::*;
 import TourPredCore::*;
 import Vector::*;
@@ -61,3 +61,4 @@ module mkTourPredPartition(DirPredictor#(TourTrainInfo));
     method flush = dir_preds[rg_ptid].flush;
     method flush_done = dir_preds[rg_ptid].flush_done;
 endmodule
+`endif
