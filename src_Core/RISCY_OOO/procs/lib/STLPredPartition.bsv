@@ -27,6 +27,7 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
+`ifdef ParTag
 `include "ProcConfig.bsv"
 import Map::*;
 import STLPred_IFC::*;
@@ -48,3 +49,4 @@ module mkSTLPredPartition(STLPred);
     method shootdown = stlpreds[rg_ptid].shootdown;
 `endif
 endmodule
+`endif

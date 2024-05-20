@@ -839,6 +839,7 @@ module mkCore#(CoreId coreId)(Core);
         end
     endrule
 
+`ifdef ParTag
     rule doSetPTID(ptidSetWire.wget() matches tagged Valid .ptid);
         fetchStage.setPTID(ptid);
         coreFix.memExeIfc.setPTID(ptid);
@@ -848,6 +849,7 @@ module mkCore#(CoreId coreId)(Core);
         fetchStage.shootdown(ptid);
         coreFix.memExeIfc.shootdown(ptid);
     endrule
+`endif
 
 `ifdef SECURITY_OR_INCLUDE_GDB_CONTROL
     // Use wires to capture flush regs and empty signals. This is ok because
