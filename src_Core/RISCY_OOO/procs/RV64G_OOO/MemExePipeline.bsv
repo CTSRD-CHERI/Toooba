@@ -258,6 +258,10 @@ interface MemExePipeline;
     interface StoreBuffer stbIfc;
     interface DCoCache dMemIfc;
     interface SpeculationUpdate specUpdate;
+`ifdef ParTag
+    method Action setPTID(PTIndex ptid);
+    method Action shootdown(PTIndex ptid);
+`endif
 `ifdef SELF_INV_CACHE
     interface Server#(void, void) reconcile;
 `endif
@@ -1624,6 +1628,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         dTlb.specUpdate,
         lsq.specUpdate
     ));
+
+`ifdef ParTag
+    method setPTID = lsq.setPTID;
+    method shootdown = lsq.shootdown;
+`endif
 
 `ifdef SELF_INV_CACHE
     interface Server reconcile;

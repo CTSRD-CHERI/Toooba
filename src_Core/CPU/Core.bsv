@@ -7,6 +7,7 @@
 //     Copyright (c) 2020 Jessica Clarke
 //     Copyright (c) 2020 Peter Rugg
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2024 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -15,6 +16,11 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
 //-
 //
 // Permission is hereby granted, free of charge, to any person
@@ -630,11 +636,15 @@ module mkCore#(CoreId coreId)(Core);
 `endif
 
 `ifdef ParTag
-    RWire#(PTIndex) ptidWire <- mkRWire;
+    RWire#(PTIndex) ptidSetWire <- mkRWire;
+    RWire#(PTIndex) ptidSDWire <- mkRWire;
     let ptidTableInput = (interface ParTagTableInput;
+        method Action setPTID(PTIndex ptid);
+            ptidSetWire.wset(ptid);
+        endmethod
         method Action shootdown(PTIndex ptid);
             $display("shootdown Core");
-            ptidWire.wset(ptid);
+            ptidSDWire.wset(ptid);
         endmethod
     endinterface);
     ParTagTable cidTable <- mkParTagTable(ptidTableInput);
@@ -827,6 +837,16 @@ module mkCore#(CoreId coreId)(Core);
             l2Tlb.updateVMInfo(vmI, vmD);
            // $display ("%0d: %m.rule prepareCachesAndTlbs: updating VMInfo", cur_cycle);
         end
+    endrule
+
+    rule doSetPTID(ptidSetWire.wget() matches tagged Valid .ptid);
+        fetchStage.setPTID(ptid);
+        coreFix.memExeIfc.setPTID(ptid);
+    endrule
+
+    rule doShootdown(ptidSDWire.wget() matches tagged Valid .ptid);
+        fetchStage.shootdown(ptid);
+        coreFix.memExeIfc.shootdown(ptid);
     endrule
 
 `ifdef SECURITY_OR_INCLUDE_GDB_CONTROL
