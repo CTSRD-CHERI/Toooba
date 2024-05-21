@@ -212,7 +212,6 @@ module mkMapLossyBRAMCore(MapSplitCore#(ky,ix,vl,as,en)) provisos (
     method changeWays = m.changeWays;
     method clearWays = m.clearWays;
     method shootdown = m.shootdown;
-    method shootdownTag = m.shootdownTag;
 `endif
 endmodule
 
