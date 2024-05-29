@@ -638,6 +638,9 @@ module mkCore#(CoreId coreId)(Core);
 `ifdef ParTag
     RWire#(PTIndex) ptidSetWire <- mkRWire;
     RWire#(PTIndex) ptidSDWire <- mkRWire;
+`ifdef PERFORMANCE_MONITORING
+    RWire#(Bool) ptidHitWire <- mkRWire;
+`endif
     let ptidTableInput = (interface ParTagTableInput;
         method Action setPTID(PTIndex ptid);
             ptidSetWire.wset(ptid);
@@ -645,6 +648,11 @@ module mkCore#(CoreId coreId)(Core);
         method Action shootdown(PTIndex ptid);
             $display("shootdown Core");
             ptidSDWire.wset(ptid);
+        endmethod
+`ifdef PERFORMANCE_MONITORING
+        method Action reportHit();
+            ptidHitWire.wset(True);
+`endif
         endmethod
     endinterface);
     ParTagTable cidTable <- mkParTagTable(ptidTableInput);
@@ -1231,10 +1239,11 @@ module mkCore#(CoreId coreId)(Core);
      EventsTGC tgc_evts = events_tgc_reg;
      EventsLL llmem_evts = unpack(pack(events_llc_reg) | pack(l2Tlb.events));
      Maybe#(EventsTransExe) mab_trans_exe = tagged Invalid;
+     EventsTransExe texe_evts = unpack(0);
 
 
 `ifdef CONTRACTS_VERIFY
-     EventsTransExe texe_evts = renameStage.events;
+     texe_evts = renameStage.events;
      Bit#(Report_Width) wildJumps = 0;
      Bit#(Report_Width) wildExceptions = texe_evts.evt_WILD_EXCEPTION;
      for(Integer i = 0; i < valueof(AluExeNum); i = i+1) begin
@@ -1245,8 +1254,13 @@ module mkCore#(CoreId coreId)(Core);
 
      texe_evts.evt_WILD_JUMP = wildJumps;
      texe_evts.evt_WILD_EXCEPTION = wildExceptions;
-     mab_trans_exe = tagged Valid texe_evts;
 `endif
+
+`ifdef ParTag
+     texe_evts.evt_UARCH_COMP_EVICTION = isValid(ptidSDWire.wget()) ? 1 : 0;
+     texe_evts.evt_UARCH_COMP_HIT = isValid(ptidHitWire.wget()) ? 1 : 0;
+`endif
+     mab_trans_exe = tagged Valid texe_evts;
 
      let ev_struct = HPMEvents{mab_EventsCore: tagged Valid core_evts, mab_EventsL1I: tagged Valid imem_evts,
                                mab_EventsL1D: tagged Valid dmem_evts, mab_EventsLL: tagged Valid llmem_evts,

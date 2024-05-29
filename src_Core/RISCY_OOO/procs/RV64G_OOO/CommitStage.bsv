@@ -915,6 +915,9 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 
         // we claim a phy reg for every inst, so commit its renaming
         regRenamingTable.commit[0].commit;
+`ifdef PERFORMANCE_MONITORING
+        EventsCore events = unpack(0);
+`endif
 
 `ifdef INCLUDE_TANDEM_VERIF
         Data new_mstatus = no_mstatus;
@@ -933,6 +936,9 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 `ifdef ParTag
                 if(csr_idx == csrAddrPARTAG) begin
                     inIfc.setNewPTID(d);
+`ifdef PERFORMANCE_MONITORING
+                    events.evt_PTID_CHANGE = 1;
+`endif
                 end
 `endif
             end
@@ -1046,7 +1052,6 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         end
 `endif
 `ifdef PERFORMANCE_MONITORING
-        EventsCore events = unpack(0);
         case(x.iType)
             Fence, FenceI, SFence: events.evt_FENCE = 1;
         endcase
