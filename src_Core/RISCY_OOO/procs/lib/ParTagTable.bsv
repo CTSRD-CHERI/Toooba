@@ -26,6 +26,8 @@
  * @BERI_LICENSE_HEADER_END@
  */
 
+`ifdef ParTag
+
  import CHERICC_Fat :: *;
  import ProcTypes :: *;
  import Vector :: *;
@@ -34,6 +36,9 @@
  interface ParTagTableInput;
     method Action setPTID(PTIndex ptid);
     method Action shootdown(PTIndex ptid);
+`ifdef PERFORMANCE_MONITORING
+    method Action reportHit();
+`endif
  endinterface
  
  interface ParTagTable;
@@ -112,6 +117,11 @@
              mptid_m = tagged Valid mptid;
              $display("setNewPTID - aptid: ", fshow(aptid), "; mptid: ", fshow(mptid));
          end
+`ifdef PERFORMANCE_MONITORING
+         else begin
+             inIfc.reportHit();
+         end
+`endif
          inIfc.setPTID(fromMaybe(?, mptid_m));
  
          $display("ParTagTable:");
@@ -124,3 +134,4 @@
          return reduce(rg_cur_ptid);
      endmethod
  endmodule
+`endif
