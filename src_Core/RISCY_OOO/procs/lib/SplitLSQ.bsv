@@ -1448,7 +1448,7 @@ module mkSplitLSQ(SplitLSQ);
         ld_done_enq[ld_enqP] <= False;
         ld_killed_enq[ld_enqP] <= Invalid;
         ld_pcHash[ld_enqP] <= pcHash;
-        ld_waitForOlderSt[ld_enqP] <= stlPred.pred(pcHash);
+        ld_waitForOlderSt[ld_enqP] <= stlPred.pred(truncate(pcHash));
         ld_readFrom_enq[ld_enqP] <= Invalid;
         ld_depLdQDeq_enq[ld_enqP] <= Invalid;
         ld_depStQDeq_enq[ld_enqP] <= Invalid;
@@ -2071,7 +2071,7 @@ module mkSplitLSQ(SplitLSQ);
         end
         Bool waited = ld_waitForOlderSt[deqP]; // Don't negative train if we waited for older stores.
         // Update predictor.
-        stlPred.update(ld_pcHash[deqP], waited, killedLd);
+        stlPred.update(truncate(ld_pcHash[deqP]), waited, killedLd);
 
         // remove the entry
         ld_valid_deqLd[deqP] <= False;

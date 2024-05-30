@@ -100,9 +100,9 @@ endinterface
 
 // 4KB tournament predictor
 
-typedef 12 TourGlobalHistSz;
-typedef 10 TourLocalHistSz;
-typedef 10 PCIndexSz;
+typedef 10 TourGlobalHistSz;
+typedef 8 TourLocalHistSz;
+typedef 8 PCIndexSz;
 
 typedef 0 DefValue;
 

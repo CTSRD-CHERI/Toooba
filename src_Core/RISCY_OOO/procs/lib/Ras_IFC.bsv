@@ -56,7 +56,7 @@ endinterface
 // Local RAS Typedefs SHOULD BE A POWER OF TWO.
 typedef 2 NUM_RAS_STACK_IFCS;
 typedef 3 NUM_RAS_VALIDS_IFCS;
-typedef 16 RasEntries;
+typedef 8 RasEntries;
 typedef Bit#(TLog#(RasEntries)) RasIndex;
 typedef RasIndex RasPredTrainInfo;
 

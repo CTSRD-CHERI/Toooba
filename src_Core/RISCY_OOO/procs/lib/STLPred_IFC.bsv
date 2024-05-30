@@ -20,7 +20,7 @@
  *   http://www.beri-open-systems.org/legal/license-1-0.txt
  *
  * Unless required by applicable law or agreed to in writing, Work distributed
- * under the License is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
+ * under the License is distributed on an "AS IS" BASIS, WITxHOUT WARRANTIES OR
  * CONDITIONS OF ANY KIND, either express or implied.  See the License for the
  * specific language governing permissions and limitations under the License.
  *
@@ -30,14 +30,19 @@
 `include "ProcConfig.bsv"
 import ProcTypes::*;
 
-typedef Bit#(10) StlPredKey;
-typedef Bit#(6) StlPredIndex;
-typedef Int#(3) StlPredValue;
+typedef 8 StlPredKeySize;
+typedef 6 StlPredIndexSize;
+typedef 3 StlPredValueSize;
 typedef 2 StlPredAssociativity;
 
+typedef Bit#(StlPredKeySize) StlPredKey;
+typedef Bit#(StlPredIndexSize) StlPredIndex;
+typedef Int#(StlPredValueSize) StlPredValue;
+typedef Bit#(TAdd#(StlPredKeySize, StlPredIndexSize)) HashValue;
+
 interface STLPred;
-    method Action update(Bit#(16) pc_hash, Bool waited, Bool killedLd);
-    method Bool pred(Bit#(16) pc_hash);
+    method Action update(HashValue pc_hash, Bool waited, Bool killedLd);
+    method Bool pred(HashValue pc_hash);
 `ifdef ParTag
     method Action setPTID(PTIndex ptid);
     method Action shootdown(PTIndex ptid);
