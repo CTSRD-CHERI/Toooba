@@ -51,11 +51,11 @@ export NextAddrPred(..);
 export mkBtb;
 
 (* synthesize *)
-module mkBtb(NextAddrPred#(16));
+module mkBtb(NextAddrPred#(14));
 `ifdef ParTag
-    NextAddrPred#(16) btb <- mkBtbTagged;
+    NextAddrPred#(14) btb <- mkBtbPartition;
 `else
-    NextAddrPred#(16) btb <- mkBtbCore;
+    NextAddrPred#(14) btb <- mkBtbCore;
 `endif
     return btb;
 endmodule

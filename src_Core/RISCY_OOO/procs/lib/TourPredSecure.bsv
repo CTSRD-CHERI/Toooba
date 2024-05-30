@@ -40,6 +40,8 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+`ifndef ParTag
+
 import Types::*;
 import ProcTypes::*;
 import RegFile::*;
@@ -279,3 +281,5 @@ module mkTourPredSecure(DirPredictor#(TourTrainInfo));
     endmethod
     method flush_done = flushDone._read;
 endmodule
+
+`endif
