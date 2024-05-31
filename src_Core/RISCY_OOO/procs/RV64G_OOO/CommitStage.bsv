@@ -934,7 +934,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
             if(x.ppc_vaddr_csrData matches tagged CSRData .d) begin
                 csr_data = getAddr(d);
 `ifdef ParTag
-                if(csr_idx == csrAddrPARTAG) begin
+                if(csr_idx == csrAddrUPTID) begin
                     inIfc.setNewPTID(d);
 `ifdef PERFORMANCE_MONITORING
                     events.evt_PTID_CHANGE = 1;

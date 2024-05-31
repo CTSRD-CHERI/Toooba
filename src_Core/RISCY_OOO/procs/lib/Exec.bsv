@@ -524,6 +524,7 @@ function Maybe#(Trap) checkForException(
                       || (csr == pack(csrAddrFFLAGS))
                       || (csr == pack(csrAddrFRM))
                       || (csr == pack(csrAddrFCSR))
+                      || (csr == pack(csrAddrUPTID))
                       || (csr == pack(csrAddrCYCLE) && !writes_csr)
                       || (csr == pack(csrAddrTIME) && !writes_csr)
                       || (csr == pack(csrAddrINSTRET) && !writes_csr);

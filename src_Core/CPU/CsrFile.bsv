@@ -874,7 +874,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrTERMINATE:  terminate_csr;
             csrAddrSTATS:      stats_csr;
 `ifdef ParTag
-            csrAddrPARTAG:     ptid_csr;
+            csrAddrUPTID:     ptid_csr;
 `endif
             // Supervisor CSRs
             csrAddrSSTATUS:    sstatus_csr;
