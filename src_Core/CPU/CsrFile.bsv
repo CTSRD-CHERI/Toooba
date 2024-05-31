@@ -886,7 +886,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrSTATS:      stats_csr;
             csrAddrUTID:       utid_csr;
 `ifdef ParTag
-            csrAddrPARTAG:     ptid_csr;
+            csrAddrUPTID:     ptid_csr;
 `endif
             // Supervisor CSRs
             csrAddrSSTATUS:    sstatus_csr;
