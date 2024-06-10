@@ -418,7 +418,7 @@ module mkL1DPrefetcher#(DTlbToPrefetcher toTlb)(CheriPCPrefetcher);
         //let m <- mkCheriPCPrefetcherAdapter(mkPCPrefetcherAdapter(mkAlwaysRequestTlbPrefetcher(toTlb)));
     `elsif DATA_PREFETCHER_CHERI_STRIDE_MIX
         Parameter#(512) strideTableSize <- mkParameter;
-        Parameter#(1) cLinesAheadToPrefetch <- mkParameter;
+        Parameter#(4) cLinesAheadToPrefetch <- mkParameter;
         Parameter#(1) pcInHash <- mkParameter;
         Parameter#(0) pcNotInHash <- mkParameter;
         Parameter#(1) boundsInHash <- mkParameter;
