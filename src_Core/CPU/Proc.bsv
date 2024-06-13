@@ -7,6 +7,7 @@ package Proc;
 //
 //-
 // RVFI_DII + CHERI modifications:
+//     Copyright (c) 2024 Samuel Stark
 //     Copyright (c) 2020 Jessica Clarke
 //     Copyright (c) 2020 Alexandre Joannou
 //     Copyright (c) 2020 Peter Rugg
@@ -329,7 +330,7 @@ module mkProc (Proc_IFC);
    // ----------------
    // Coherent port into LLC (used by Debug Module, DMA engines, ... to read/write memory)
 
-   interface  debug_module_mem_server = llc_mem_server;
+   interface  io_coherent_mem_server = llc_mem_server;
 
 `ifdef RVFI_DII
    interface Toooba_RVFI_DII_Server rvfi_dii_server = core[0].rvfi_dii_server;
