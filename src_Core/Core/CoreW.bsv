@@ -2,6 +2,7 @@
 //
 //-
 // RVFI_DII + CHERI modifications:
+//     Copyright (c) 2024 Samuel Stark
 //     Copyright (c) 2020-2022 Alexandre Joannou
 //     Copyright (c) 2020 Peter Rugg
 //     Copyright (c) 2020 Jonathan Woodruff
@@ -228,7 +229,7 @@ module mkCoreW_reset #(Reset porReset)
    // handle uncached interface
    AXI4_Master #( Wd_CoreW_Bus_MId, Wd_Addr, Wd_Data_Periph, 0, 0, 0, 0, 0)
        proc_uncached = prepend_AXI4_Master_id (0, zero_AXI4_Master_user (proc.master1));
-   // Bridge for uncached expernal bus transactions.
+   // Bridge for uncached external bus transactions.
    let uncached_mem_shim <- mkAXI4ShimFF(reset_by all_harts_reset);
 
    // handle cached interface
@@ -491,7 +492,7 @@ module mkCoreW_reset #(Reset porReset)
                          , Wd_AR_User_Periph, Wd_R_User_Periph ))
       slave_vector = newVector;
    slave_vector[default_slave_num] = uncached_mem_shim.slave;
-   slave_vector[llc_slave_num]     = zero_AXI4_Slave_user (proc.debug_module_mem_server);
+   slave_vector[llc_slave_num]     = zero_AXI4_Slave_user (proc.io_coherent_mem_server);
    slave_vector[plic_slave_num]    = zero_AXI4_Slave_user (plic.axi4_slave);
 
    function Vector #(CoreW_Bus_Num_Slaves, Bool) route (Bit #(Wd_Addr) addr);
