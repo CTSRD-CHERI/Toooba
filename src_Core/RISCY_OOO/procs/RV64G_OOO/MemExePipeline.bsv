@@ -120,6 +120,7 @@ typedef struct {
     // inst info
     MemFunc mem_func;
     InstTag tag;
+    CapMem pc;
     LdStQTag ldstq_tag;
     // result
     ByteOrTagEn shiftedBE;
@@ -615,6 +616,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             accessByteCount = fromInteger(valueOf(CacheUtils::CLineNumMemDataBytes));
         end
 
+        let pc = inIfc.rob_getPC(x.tag);
+
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
@@ -625,6 +628,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             inst: MemExeToFinish {
                 mem_func: x.mem_func,
                 tag: x.tag,
+                pc: pc,
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: shiftBE,
                 vaddr: x.vaddr,
@@ -635,7 +639,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
                 capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                 allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
-                capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
+                capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(pc)),
                 check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
                                           ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
 `ifdef KONATA
@@ -732,7 +736,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
                                          );
 
-        let pc = inIfc.rob_getPC(x.tag);
+        let pc = x.pc;
 `ifdef PERFORMANCE_MONITORING
 `ifdef CONTRACTS_VERIFY
         function Bool is_16b_inst (Bit #(n) inst);
