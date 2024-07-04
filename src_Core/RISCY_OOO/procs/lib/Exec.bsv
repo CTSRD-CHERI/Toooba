@@ -270,6 +270,8 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
             tagged SetFlags               :
                 setFlags(a_mut, truncate(getAddr(b)));
+            tagged SetCID                 :
+                setCID(a_mut, truncate(getAddr(b)));
             tagged FromPtr                :
                 (getAddr(a) == 0 ? nullCap : setOffset(b_mut, getAddr(a)).value);
             tagged BuildCap               :

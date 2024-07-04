@@ -1120,6 +1120,13 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             regs.src2 = Valid(tagged Gpr rs2);
                             dInst.capFunc = CapModify (SetFlags);
                         end
+                        f7_cap_CSetCID: begin
+                            dInst.iType = Cap;
+                            regs.dst = Valid(tagged Gpr rd);
+                            regs.src1 = Valid(tagged Gpr rs1);
+                            regs.src2 = Valid(tagged Gpr rs2);
+                            dInst.capFunc = CapModify(SetCID);
+                        end
                         f7_cap_CToPtr: begin
                             dInst.iType = Cap;
                             regs.dst = Valid(tagged Gpr rd);
