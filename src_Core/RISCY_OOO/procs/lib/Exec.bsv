@@ -80,7 +80,7 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
 endfunction
 
 (* noinline *)
-function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn);
+function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn, CapPipe pcc);
     function Maybe#(CSR_XCapCause) eAuth(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg: case (toCheck.check_authority_src) matches Src1: toCheck.rn1;
                                                                                                                                        Ddc: {1'b1, pack(scrAddrDDC)};
                                                                                               endcase
@@ -106,6 +106,8 @@ function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapCheck
         result = eAuth(cheriExcPermitWCapViolation);
     else if (storeValidCap && !getHardPerms(auth).permitStoreLocalCap && !getHardPerms(data).global)
         result = eAuth(cheriExcPermitWLocalCapViolation);
+    else if (getCID(auth) != getCID(pcc))
+        result = eAuth(cheriExcTypeViolation);
     return result;
 endfunction
 
