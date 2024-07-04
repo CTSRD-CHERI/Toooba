@@ -7,12 +7,13 @@
 [submodule "libs/TagController"]
 	path = libs/TagController
 	url = https://github.com/CTSRD-CHERI/TagController.git
-[submodule "libs/cheri-cap-lib"]
-	path = libs/cheri-cap-lib
-	url = https://github.com/CTSRD-CHERI/cheri-cap-lib.git
 [submodule "libs/RISCV_HPM_Events"]
 	path = libs/RISCV_HPM_Events
 	url = https://github.com/CTSRD-CHERI/RISCV_HPM_Events.git
 [submodule "libs/WindCoreInterface"]
 	path = libs/WindCoreInterface
 	url = https://github.com/CTSRD-CHERI/WindCoreInterface.git
+[submodule "libs/cheri-cap-lib"]
+	path = libs/cheri-cap-lib
+	url = git@github.com:CTSRD-CHERI/cheri-cap-lib.git
+	branch = faf28_cid_sealing
