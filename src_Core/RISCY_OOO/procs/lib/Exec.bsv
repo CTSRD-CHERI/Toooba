@@ -106,7 +106,7 @@ function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapCheck
         result = eAuth(cheriExcPermitWCapViolation);
     else if (storeValidCap && !getHardPerms(auth).permitStoreLocalCap && !getHardPerms(data).global)
         result = eAuth(cheriExcPermitWLocalCapViolation);
-    else if (getCID(auth) != getCID(pcc))
+    else if ((getCID(auth) != 0) && (getCID(auth) != getCID(pcc)))
         result = eAuth(cheriExcTypeViolation);
     return result;
 endfunction
