@@ -431,9 +431,9 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
             Sc          : rVal2;
             Amo         : rVal2;
             J           : nullWithAddr(getOffset(link_pcc));
-            CJAL        : setKind(link_pcc, SENTRY);
+            CJAL        : setCID(setKind(link_pcc, SENTRY), getCID(pcc));
             CCall       : cap_alu_result;
-            CJALR       : setKind(link_pcc, SENTRY);
+            CJALR       : setCID(setKind(link_pcc, SENTRY), getCID(pcc));
             Jr          : nullWithAddr(getOffset(link_pcc));
             Auipc       : nullWithAddr(getOffset(pcc) + getDInstImm(dInst).Valid);
             Auipcc      : incOffset(pcc, getDInstImm(dInst).Valid).value; // could be computed with alu
