@@ -335,6 +335,7 @@ typedef union tagged {
     SrcSelector Unseal;
     void AndPerm;
     void SetFlags;
+    void SetCID;
     void BuildCap;
     void Move;
     void ClearTag;
