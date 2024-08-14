@@ -46,16 +46,21 @@ import Btb_IFC::*;
 import BtbCore::*;
 import BtbPartition::*;
 import BtbTagged::*;
+import ProcTypes::*;
 
 export NextAddrPred(..);
 export mkBtb;
+export HashSize;
+
+typedef TSub#(16, PTBits) HashSize;
 
 (* synthesize *)
-module mkBtb(NextAddrPred#(14));
 `ifdef ParTag
-    NextAddrPred#(14) btb <- mkBtbPartition;
+module mkBtb(NextAddrPred#(HashSize));
+    NextAddrPred#(HashSize) btb <- mkBtbPartition;
 `else
-    NextAddrPred#(14) btb <- mkBtbCore;
+module mkBtb(NextAddrPred#(16));
+    NextAddrPred#(16) btb <- mkBtbCore;
 `endif
     return btb;
 endmodule
