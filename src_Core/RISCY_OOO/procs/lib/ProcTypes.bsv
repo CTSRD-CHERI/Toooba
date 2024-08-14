@@ -1067,7 +1067,8 @@ typedef  29 No_Of_Ctrs;
 
 `ifdef ParTag
 typedef 4 PTNumber;
-typedef Bit#(TLog#(PTNumber)) PTIndex;
+typedef TLog#(PTNumber) PTBits;
+typedef Bit#(PTBits) PTIndex;
 `endif
 
 function Bit#(outWidth) hash(Bit#(inWidth) in)
