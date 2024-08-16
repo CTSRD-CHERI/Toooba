@@ -100,9 +100,15 @@ endinterface
 
 // 4KB tournament predictor
 
-typedef 10 TourGlobalHistSz;
-typedef 8 TourLocalHistSz;
-typedef 8 PCIndexSz;
+`ifdef ParTagx
+typedef TSub#(12, PTBits) TourGlobalHistSz;
+typedef TSub#(10, PTBits) TourLocalHistSz;
+typedef TSub#(10, PTBits) PCIndexSz;
+`else
+typedef 12 TourGlobalHistSz;
+typedef 10 TourLocalHistSz;
+typedef 10 PCIndexSz;
+`endif
 
 typedef 0 DefValue;
 
