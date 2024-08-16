@@ -31,7 +31,11 @@
 import ProcTypes::*;
 
 typedef 8 StlPredKeySize;
+`ifdef ParTag
+typedef TSub#(6, PTBits) StlPredIndexSize;
+`else
 typedef 6 StlPredIndexSize;
+`endif
 typedef 3 StlPredValueSize;
 typedef 2 StlPredAssociativity;
 
