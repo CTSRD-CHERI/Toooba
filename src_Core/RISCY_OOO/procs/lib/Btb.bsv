@@ -56,8 +56,8 @@ typedef TSub#(16, PTBits) HashSize;
 
 (* synthesize *)
 `ifdef ParTag
-module mkBtb(NextAddrPred#(HashSize));
-    NextAddrPred#(HashSize) btb <- mkBtbPartition;
+module mkBtb(NextAddrPred#(16));
+    NextAddrPred#(16) btb <- mkBtbTagged;
 `else
 module mkBtb(NextAddrPred#(16));
     NextAddrPred#(16) btb <- mkBtbCore;
