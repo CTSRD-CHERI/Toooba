@@ -1066,7 +1066,7 @@ typedef  29 No_Of_Ctrs;
 `endif
 
 `ifdef ParTag
-typedef 2 PTNumber;
+typedef 8 PTNumber;
 typedef TLog#(PTNumber) PTBits;
 typedef Bit#(PTBits) PTIndex;
 `endif
