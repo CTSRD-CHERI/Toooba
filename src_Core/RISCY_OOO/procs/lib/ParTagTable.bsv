@@ -43,6 +43,7 @@
  
  interface ParTagTable;
      method Action setNewPTID(CapMem ptid);
+     method Maybe#(PTIndex) translate(CapMem ptid);
      method PTIndex getPTID();
  endinterface
  
@@ -59,6 +60,7 @@
  module mkParTagTable#(ParTagTableInput inIfc)(ParTagTable);
  
      Reg#(CapMem) rg_cur_ptid <- mkReg(0);
+     PulseWire pw <- mkPulseWire;
  
      // used a direct mapped cache, where mcid is the index
      Vector#(PTNumber, Reg#(ParTagTableEntry)) tab <- replicateM(mkReg(unpack(0)));
@@ -100,6 +102,8 @@
              end
              return ret;
          endfunction
+         // send pulse wird
+         pw.send();
          rg_cur_ptid <= aptid;
          let mptid_m = findEntry(aptid);
          if(mptid_m matches tagged Invalid) begin
@@ -128,6 +132,19 @@
          for(Integer i = 0; i < valueOf(PTNumber); i = i + 1) begin
              $display("tab: ", fshow(tab[i]));
          end
+     endmethod
+
+     method Maybe#(PTIndex) translate(CapMem ptid);
+        function Maybe#(PTIndex) findEntry(CapMem a);
+           Maybe#(PTIndex) ret = Invalid;
+           for(Integer i = 0; i < valueOf(PTNumber); i = i + 1) begin
+               let e = tab[i];
+               if(e.v && e.aptid == a) ret = tagged Valid (fromInteger(i));
+           end
+           if (pw) return Invalid;
+           else return ret;
+        endfunction
+        return findEntry(ptid);
      endmethod
  
      method PTIndex getPTID();

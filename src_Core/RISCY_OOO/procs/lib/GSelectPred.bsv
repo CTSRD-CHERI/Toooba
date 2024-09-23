@@ -157,7 +157,7 @@ module mkGSelectPred(DirPredictor#(GSelectTrainInfo));
 
     interface pred = predIfc;
 
-    method Action update(Bool taken, GSelectTrainInfo train, Bool mispred);
+    method Action update(Bool taken, GSelectTrainInfo train, Bool mispred, Maybe#(PTIndex) ptid);
         // update history if mispred
         if(mispred) begin
             GSelectGHist newHist = truncate({pack(taken), train.gHist} >> 1);
@@ -171,6 +171,7 @@ module mkGSelectPred(DirPredictor#(GSelectTrainInfo));
 
 `ifdef ParTag
     method Action setPTID(PTIndex ptid) = noAction;
+    method Action setCurrPTID(Maybe#(PTIndex) ptid) = noAction;
     method Action shootdown(PTIndex ptid) = noAction;
 `endif
 

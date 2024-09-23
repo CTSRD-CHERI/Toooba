@@ -156,7 +156,7 @@ module mkGSharePred(DirPredictor#(GShareTrainInfo));
 
     interface pred = predIfc;
 
-    method Action update(Bool taken, GShareTrainInfo train, Bool mispred);
+    method Action update(Bool taken, GShareTrainInfo train, Bool mispred, Maybe#(PTIndex) ptid);
         // update history if mispred
         if(mispred) begin
             GShareGHist newHist = truncate({pack(taken), train.gHist} >> 1);
@@ -169,6 +169,7 @@ module mkGSharePred(DirPredictor#(GShareTrainInfo));
 
 `ifdef ParTag
     method Action setPTID(PTIndex ptid) = noAction;
+    method Action setCurrPTID(Maybe#(PTIndex) ptid) = noAction;
     method Action shootdown(PTIndex ptid) = noAction;
 `endif
 

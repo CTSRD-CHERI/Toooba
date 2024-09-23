@@ -87,7 +87,7 @@ module mkBht(DirPredictor#(BhtTrainInfo));
 
     interface pred = predIfc;
 
-    method Action update(Bool taken, BhtTrainInfo train, Bool mispred);
+    method Action update(Bool taken, BhtTrainInfo train, Bool mispred, Maybe#(PTIndex) ptid);
         let index = train;
         let current_hist = hist.sub(index);
         Bit#(2) next_hist;
@@ -101,6 +101,7 @@ module mkBht(DirPredictor#(BhtTrainInfo));
 
 `ifdef ParTag
     method Action setPTID(PTIndex ptid) = noAction;
+    method Action setCurrPTID(Maybe#(PTIndex) ptid) = noAction;
     method Action shootdown(PTIndex ptid) = noAction;
 `endif
 

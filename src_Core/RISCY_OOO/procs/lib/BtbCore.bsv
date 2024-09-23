@@ -81,7 +81,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
             fullRecords[getBank(pc)].update(lookupKey(pc), VnD{v:taken, d:nextPc});
     endrule
 
-    method Action put_pc(CapMem pc);
+    method Action put_pc(CapMem pc, Maybe#(PTIndex) ptid);
         addr_reg <= pc;
         // Start SupSizeX2 BTB lookups, but ensure to lookup in the appropriate
         // bank for the alignment of each potential branch.
@@ -107,7 +107,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
         return ppcs;
     endmethod
 
-    method Action update(CapMem pc, CapMem nextPc, Bool taken);
+    method Action update(CapMem pc, CapMem nextPc, Bool taken, Maybe#(PTIndex) ptid);
         updateEn <= Valid(BtbUpdate {pc: pc, nextPc: nextPc, taken: taken});
     endmethod
 

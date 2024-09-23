@@ -49,8 +49,8 @@ import CHERICC_Fat::*;
 import CHERICap::*;
 
 interface RAS;
-    method CapMem first;
-    method ActionValue#(RasIndex) pop(Bool doPop);
+    method CapMem first(Maybe#(PTIndex) ptid);
+    method ActionValue#(RasIndex) pop(Bool doPop, Maybe#(PTIndex) ptid);
 endinterface
 
 // Local RAS Typedefs SHOULD BE A POWER OF TWO.
@@ -64,6 +64,7 @@ interface ReturnAddrStack;
     interface Vector#(SupSize, RAS) ras;
 `ifdef ParTag
     method Action setPTID(PTIndex ptid);
+    method Action setCurrPTID(Maybe#(PTIndex) ptid);
     method Action shootdown(PTIndex ptid);
 `endif
     method Bool pendingPush;

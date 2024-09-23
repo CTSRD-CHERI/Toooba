@@ -59,10 +59,20 @@ module mkBtbPartition(NextAddrPred#(hashSz))
 
     Vector#(PTNumber, NextAddrPred#(hashSz)) btbs <- replicateM(mkBtbCore);
     Reg#(PTIndex) rg_ptid <- mkReg(0); // default zero id
+    Reg#(Maybe#(PTIndex)) curr_ptid <- mkReg(?);
 
-    method put_pc = btbs[rg_ptid].put_pc;
-    interface pred = btbs[rg_ptid].pred;
-    method update = btbs[rg_ptid].update;
+    method Action put_pc(CapMem pc, Maybe#(PTIndex) ptid);
+        if(ptid matches tagged Valid .p) btbs[p].put_pc(pc, ptid);
+        else noAction;
+    endmethod
+    method Vector#(SupSizeX2, Maybe#(CapMem)) pred;
+        if(curr_ptid matches tagged Valid .cp) return btbs[cp].pred;
+        else return ?;
+    endmethod
+    method Action update(CapMem pc, CapMem brTarget, Bool taken, Maybe#(PTIndex) ptid);
+        if(ptid matches tagged Valid .p) btbs[p].update(pc, brTarget, taken, ptid);
+        else noAction;
+    endmethod
     method Action setPTID(PTIndex ptid);
         rg_ptid <= ptid;
     endmethod

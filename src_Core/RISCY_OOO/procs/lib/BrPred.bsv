@@ -87,12 +87,13 @@ interface DirPred#(type trainInfoT);
 endinterface
 
 interface DirPredictor#(type trainInfoT);
-    method Action nextPc(Addr nextPc);
+    method Action nextPc(Addr nextPC);
     interface Vector#(SupSize, DirPred#(trainInfoT)) pred;
-    method Action update(Bool taken, trainInfoT train, Bool mispred);
+    method Action update(Bool taken, trainInfoT train, Bool mispred, Maybe#(PTIndex) ptid);
 `ifdef ParTag
     method Action setPTID(PTIndex ptid);
     method Action shootdown(PTIndex ptid);
+    method Action setCurrPTID(Maybe#(PTIndex) ptid);
 `endif
     method Action flush;
     method Bool flush_done;

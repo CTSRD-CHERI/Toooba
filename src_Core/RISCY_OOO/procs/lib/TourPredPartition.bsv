@@ -43,18 +43,50 @@ import BrPred::*;
 import TourPredCore::*;
 import Vector::*;
 import ProcTypes::*;
+import Types::*;
+import Ehr::*;
 
+(* synthesize *)
 module mkTourPredPartition(DirPredictor#(TourTrainInfo));
 
     Vector#(PTNumber, DirPredictor#(TourTrainInfo)) dir_preds <- replicateM(mkTourPredCore);
     Reg#(PTIndex) rg_ptid <- mkReg(0); // default zero id
+    Ehr#(2, Maybe#(PTIndex)) curr_ptid <- mkEhr(?);
 
-    method nextPc = dir_preds[rg_ptid].nextPc;
-    interface pred = dir_preds[rg_ptid].pred;
-    method update = dir_preds[rg_ptid].update;
+
+    Vector#(SupSize, DirPred#(TourTrainInfo)) predIfc;
+    for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+        predIfc[i] = (interface DirPred;
+            method ActionValue#(DirPredResult#(TourTrainInfo)) pred;
+                if(curr_ptid[0] matches tagged Valid .cp) begin
+                    let x <- dir_preds[cp].pred[i].pred; 
+                    return x;
+                end
+                else begin
+                return DirPredResult {
+                    taken: False,
+                    train: ?
+                };
+                end
+            endmethod
+        endinterface);
+    end
+
+    method Action nextPc(Addr nextPC);
+        if(curr_ptid[1] matches tagged Valid .cp) dir_preds[cp].nextPc(nextPC);
+        else noAction;
+    endmethod
+    interface pred = predIfc;
+    method Action update(Bool taken, TourTrainInfo train, Bool mispred, Maybe#(PTIndex) ptid);
+        if (ptid matches tagged Valid .p) dir_preds[p].update(taken, train, mispred, ptid);
+        else noAction;
+    endmethod
 `ifdef ParTag
     method Action setPTID(PTIndex ptid);
         rg_ptid <= ptid;
+    endmethod
+    method Action setCurrPTID(Maybe#(PTIndex) ptid);
+        curr_ptid[0] <= ptid;
     endmethod
     method shootdown = dir_preds[rg_ptid].shootdown;
 `endif

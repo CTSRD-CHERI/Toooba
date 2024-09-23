@@ -284,8 +284,35 @@ module mkCore#(CoreId coreId)(Core);
 
    // ================================================================
 
+`ifdef ParTag
+    RWire#(PTIndex) ptidSetWire <- mkRWire;
+    RWire#(PTIndex) ptidSDWire <- mkRWire;
+`ifdef PERFORMANCE_MONITORING
+    RWire#(Bool) ptidHitWire <- mkRWire;
+`endif
+    let ptidTableInput = (interface ParTagTableInput;
+        method Action setPTID(PTIndex ptid);
+            ptidSetWire.wset(ptid);
+        endmethod
+        method Action shootdown(PTIndex ptid);
+            $display("shootdown Core");
+            ptidSDWire.wset(ptid);
+        endmethod
+`ifdef PERFORMANCE_MONITORING
+        method Action reportHit();
+            ptidHitWire.wset(True);
+`endif
+        endmethod
+    endinterface);
+    ParTagTable cidTable <- mkParTagTable(ptidTableInput);
+`endif
     // front end
-    FetchStage fetchStage <- mkFetchStage;
+    let fetchInput = (interface FetchInput;
+            method Maybe#(PTIndex) translate(CapMem ptid);
+                return cidTable.translate(ptid);
+            endmethod
+    endinterface);
+    FetchStage fetchStage <- mkFetchStage(fetchInput);
     ITlb iTlb = fetchStage.iTlbIfc;
     ICoCache iMem = fetchStage.iMemIfc;
 
@@ -635,28 +662,6 @@ module mkCore#(CoreId coreId)(Core);
     endrule
 `endif
 
-`ifdef ParTag
-    RWire#(PTIndex) ptidSetWire <- mkRWire;
-    RWire#(PTIndex) ptidSDWire <- mkRWire;
-`ifdef PERFORMANCE_MONITORING
-    RWire#(Bool) ptidHitWire <- mkRWire;
-`endif
-    let ptidTableInput = (interface ParTagTableInput;
-        method Action setPTID(PTIndex ptid);
-            ptidSetWire.wset(ptid);
-        endmethod
-        method Action shootdown(PTIndex ptid);
-            $display("shootdown Core");
-            ptidSDWire.wset(ptid);
-        endmethod
-`ifdef PERFORMANCE_MONITORING
-        method Action reportHit();
-            ptidHitWire.wset(True);
-`endif
-        endmethod
-    endinterface);
-    ParTagTable cidTable <- mkParTagTable(ptidTableInput);
-`endif
 
     // Rename stage
     let renameInput = (interface RenameInput;

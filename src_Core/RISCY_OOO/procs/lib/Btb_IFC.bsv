@@ -50,9 +50,9 @@ import CHERICC_Fat::*;
 import CHERICap::*;
 
 interface NextAddrPred#(numeric type hashSz);
-    method Action put_pc(CapMem pc);
+    method Action put_pc(CapMem pc, Maybe#(PTIndex) ptid);
     interface Vector#(SupSizeX2, Maybe#(CapMem)) pred;
-    method Action update(CapMem pc, CapMem brTarget, Bool taken);
+    method Action update(CapMem pc, CapMem brTarget, Bool taken, Maybe#(PTIndex) ptid);
 `ifdef ParTag
     method Action setPTID(PTIndex ptid);
     method Action shootdown(PTIndex ptid);

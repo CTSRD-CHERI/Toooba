@@ -161,7 +161,7 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
 
     interface pred = predIfc;
 
-    method Action update(Bool taken, TourTrainInfo train, Bool mispred);
+    method Action update(Bool taken, TourTrainInfo train, Bool mispred, Maybe#(PTIndex) ptid);
         // update history if mispred
         if(mispred) begin
             TourGlobalHist newHist = truncateLSB({pack(taken), train.globalHist});
@@ -185,6 +185,9 @@ module mkTourPredCore(DirPredictor#(TourTrainInfo));
 
 `ifdef ParTag
     method Action setPTID(PTIndex ptid);
+        noAction;
+    endmethod
+    method Action setCurrPTID(Maybe#(PTIndex) ptid);
         noAction;
     endmethod
     method Action shootdown(PTIndex ptid);

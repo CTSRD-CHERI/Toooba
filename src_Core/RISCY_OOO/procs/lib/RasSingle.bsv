@@ -75,8 +75,8 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
     Vector#(SupSize, RAS) rasIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         rasIfc[i] = (interface RAS;
-            method CapMem first = stack[head[i]][0];
-            method ActionValue#(RasIndex) pop(Bool doPop);
+            method CapMem first(Maybe#(PTIndex) ptid) = stack[head[i]][0];
+            method ActionValue#(RasIndex) pop(Bool doPop, Maybe#(PTIndex) ptid);
                 RasIndex h = head[i];
                 if (doPop) begin
                     h = h - 1;
@@ -90,6 +90,9 @@ module mkRasSingle(ReturnAddrStack) provisos(NumAlias#(TExp#(TLog#(RasEntries)),
 
 `ifdef ParTag
     method Action setPTID(PTIndex ptid);
+        noAction;
+    endmethod
+    method Action setCurrPTID(Maybe#(PTIndex) ptid);
         noAction;
     endmethod
     method Action shootdown(PTIndex ptid);

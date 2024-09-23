@@ -267,12 +267,13 @@ module mkTourPredSecure(DirPredictor#(TourTrainInfo));
 
     interface pred = predIfc;
 
-    method Action update(Bool taken, TourTrainInfo train, Bool mispred);
+    method Action update(Bool taken, TourTrainInfo train, Bool mispred, Maybe#(PTIndex) ptid);
         updateEn.wset(TourUpdate {taken: taken, train: train, mispred: mispred});
     endmethod
 
 `ifdef ParTag
     method Action setPTID(PTIndex ptid) = noAction;
+    method Action setCurrPTID(Maybe#(PTIndex) ptid) = noAction;
     method Action shootdown(PTIndex ptid) = noAction;
 `endif
 

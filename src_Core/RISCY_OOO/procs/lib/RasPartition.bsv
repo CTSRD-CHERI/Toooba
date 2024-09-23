@@ -42,10 +42,33 @@ import RasSingle::*;
 module mkRasPartition(ReturnAddrStack);
     Vector#(PTNumber, ReturnAddrStack) rases <- replicateM(mkRasSingle);
     Reg#(PTIndex) rg_ptid <- mkReg(0); // default zero id
+    Ehr#(2, Maybe#(PTIndex)) curr_ptid <- mkEhr(?);
 
-    interface ras = rases[rg_ptid].ras;
+    Vector#(SupSize, RAS) rasIfc;
+    for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+        rasIfc[i] = (interface RAS;
+            method CapMem first(Maybe#(PTIndex) ptid);
+                if(ptid matches tagged Valid .p) begin
+                    return rases[p].ras[i].first(ptid);
+                end
+                else return ?;
+            endmethod
+            method ActionValue#(RasIndex) pop(Bool doPop, Maybe#(PTIndex) ptid);
+                if(ptid matches tagged Valid .p) begin
+                    let x <- rases[p].ras[i].pop(doPop, ptid);
+                    return x;
+                end
+                else return ?;
+            endmethod
+        endinterface);
+    end
+
+    interface ras = rasIfc;
     method Action setPTID(PTIndex ptid);
         rg_ptid <= ptid;
+    endmethod
+    method Action setCurrPTID(Maybe#(PTIndex) ptid);
+        curr_ptid[0] <= ptid;
     endmethod
     method shootdown = rases[rg_ptid].shootdown;
     method pendingPush = rases[rg_ptid].pendingPush;

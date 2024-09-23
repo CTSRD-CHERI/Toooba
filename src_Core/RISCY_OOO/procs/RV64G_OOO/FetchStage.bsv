@@ -391,10 +391,14 @@ typedef union tagged {
 
 `endif
 
+interface FetchInput;
+    method Maybe#(PTIndex) translate(CapMem ptid);
+endinterface
+
 // ================================================================
 
-(* synthesize *)
-module mkFetchStage(FetchStage);
+//(* synthesize *)
+module mkFetchStage#(FetchInput inIfc)(FetchStage);
     // rule ordering: Fetch1 (BTB+TLB) < Fetch2 (decode & dir pred) < redirect method
     // Fetch1 < Fetch2 to avoid bypassing path on PC and epochs
 
@@ -427,7 +431,7 @@ module mkFetchStage(FetchStage);
     Integer pc_redirect_port = 3;
     Integer pc_final_port = 4;
     // To track the next expected PC in Decode for early lookups for prediction.
-    Ehr#(TAdd#(SupSize, 2), Addr) decode_pc_reg <- mkEhr(?);
+    Ehr#(TAdd#(SupSize, 2), CapMem) decode_pc_reg <- mkEhr(?);
     Integer decode_pc_redirect_port = valueOf(SupSize);
     Integer decode_pc_final_port = valueOf(SupSize) + 1;
 
@@ -524,7 +528,7 @@ module mkFetchStage(FetchStage);
 `endif
 
     rule updatePcInBtb;
-        nextAddrPred.put_pc(pc_reg[pc_final_port]);
+        nextAddrPred.put_pc(pc_reg[pc_final_port], inIfc.translate(pc_reg[pc_final_port]));
     endrule
 
     Reg#(Vector#(PageBuffSize,Maybe#(Vpn))) buffered_translation_virt_pc <- mkReg(replicate(Invalid));
@@ -855,6 +859,7 @@ module mkFetchStage(FetchStage);
       for (Integer i = 0; i < valueof(SupSize); i=i+1) begin
          CapMem pc = decompressPc(validValue(decodeIn[i]).pc);
          CapMem ppc = decompressPc(validValue(decodeIn[i]).ppc);
+         let ptid = inIfc.translate(pc);
          let decode_result = decodeResults[i]; // Decode 32b inst, or 32b expansion of 16b inst
          let dInst = decode_result.dInst;
          let regs = decode_result.regs;
@@ -907,7 +912,8 @@ module mkFetchStage(FetchStage);
                   Bool dst_link = linkedR(regs.dst);
                   Bool src1_link = linkedR(regs.src1);
 
-                  CapMem pop_addr = ras.ras[i].first;
+                  //ras.setCurrPTID(ptid);
+                  CapMem pop_addr = ras.ras[i].first(ptid);
                   CapMem push_addr = addPc(pc, ((in.inst_kind == Inst_32b) ? 4 : 2));
                   Bool doPop = False;
                   if ((dInst.iType == J || dInst.iType == CJAL) && dst_link) begin
@@ -940,7 +946,7 @@ module mkFetchStage(FetchStage);
                         end
                      end
                   end
-                  trainInfo.ras <- ras.ras[i].pop(doPop);
+                  trainInfo.ras <- ras.ras[i].pop(doPop, ptid);
                   if(verbose) begin
                      $display("Branch prediction: ", fshow(dInst.iType), " ; ", fshow(pc), " ; ",
                               fshow(ppc), " ; ", fshow(nextPc));
@@ -974,7 +980,7 @@ module mkFetchStage(FetchStage);
                   end
                end // if (!isValid(cause))
                if (isValid(m_push_addr)) trainInfo.ras = trainInfo.ras + 1;
-               decode_pc_reg[i] <= getAddr(ppc);
+               decode_pc_reg[i] <= ppc;
 `ifdef KONATA 
                //$display("KONATAE\t%0d\t%0d\t0\tF3", cur_cycle, in.u_id);
                $display("KONATAL\t%0d\t%0d\t0\t%x ", cur_cycle, in.u_id, getAddr(pc), fshow(dInst.iType));
@@ -1052,7 +1058,8 @@ module mkFetchStage(FetchStage);
    endrule
 
    rule reportDecodePc;
-       dirPred.nextPc(decode_pc_reg[decode_pc_final_port]);
+       dirPred.nextPc(getAddr(decode_pc_reg[decode_pc_final_port]));
+       dirPred.setCurrPTID(inIfc.translate(decode_pc_reg[decode_pc_final_port]));
    endrule
 
     // train next addr pred: we use a wire to catch outputs of napTrainByDecQ.
@@ -1070,7 +1077,7 @@ module mkFetchStage(FetchStage);
         // only when misprediction happens, i.e., train by dec is already at
         // wrong path.
         TrainNAP train = fromMaybe(validValue(napTrainByDec.wget), napTrainByExe.wget);
-        nextAddrPred.update(train.pc, train.nextPc, train.nextPc != addPc(train.pc, 2));
+        nextAddrPred.update(train.pc, train.nextPc, train.nextPc != addPc(train.pc, 2), inIfc.translate(train.pc));
     endrule
 
     // Security: we can flush when front end is empty, i.e.
@@ -1125,7 +1132,7 @@ module mkFetchStage(FetchStage);
         dii_pid_reg[pc_redirect_port] <= dii_pid;
         if (verbose) $display("%t Redirect: dii_pid_reg %d", $time(), dii_pid);
 `endif
-        decode_pc_reg[decode_pc_redirect_port] <= getAddr(new_pc);
+        decode_pc_reg[decode_pc_redirect_port] <= new_pc;
         set_main_epoch((f_main_epoch == fromInteger(valueOf(NumEpochs)-1)) ? 0 : f_main_epoch + 1, specBits);
         // redirect comes, stop stalling for redirect
         waitForRedirect[1] <= False;
@@ -1171,7 +1178,8 @@ module mkFetchStage(FetchStage);
 `endif
         if (iType == Br) begin
             // Train the direction predictor for all branches
-            dirPred.update(taken, trainInfo.dir, mispred);
+            let ptid = inIfc.translate(pc);
+            dirPred.update(taken, trainInfo.dir, mispred, ptid);
             $display("Branch train PC: %x, taken: %x, mispred: %x", getAddr(pc), taken, mispred);
         end
         // train next addr pred when mispred
