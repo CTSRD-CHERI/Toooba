@@ -393,6 +393,7 @@ typedef union tagged {
 
 interface FetchInput;
     method Maybe#(PTIndex) translate(CapMem ptid);
+    //method Action setNewPTID(CapMem aptid);
 endinterface
 
 // ================================================================
@@ -564,6 +565,7 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
     // and the lookup succeeds.
     rule doFetch1(started && !waitForRedirect[0] && !waitForFlush[0]);
         let pc = pc_reg[pc_fetch1_port];
+        //inIfc.setNewPTID(pc);
 
         // Grab a chain of predictions from the BTB, which predicts targets for the next
         // set of addresses based on the current PC.

@@ -29,6 +29,7 @@
 `ifdef ParTag
 
  import CHERICC_Fat :: *;
+ import CHERICap :: *;
  import ProcTypes :: *;
  import Vector :: *;
  import FIFOF::*;
@@ -59,7 +60,8 @@
  
  module mkParTagTable#(ParTagTableInput inIfc)(ParTagTable);
  
-     Reg#(CapMem) rg_cur_ptid <- mkReg(0);
+     Reg#(CapMem) rg_cur_aptid <- mkReg(0);
+     Reg#(PTIndex) rg_cur_mptid <- mkReg(0);
      PulseWire pw <- mkPulseWire;
  
      // used a direct mapped cache, where mcid is the index
@@ -102,9 +104,11 @@
              end
              return ret;
          endfunction
-         // send pulse wird
+         //if (getCID(rg_cur_aptid) == getCID(aptid)) noAction;
+         //else begin
+         // send pulse wire
          pw.send();
-         rg_cur_ptid <= aptid;
+         rg_cur_aptid <= aptid;
          let mptid_m = findEntry(aptid);
          if(mptid_m matches tagged Invalid) begin
              PTIndex mptid = 0;
@@ -126,12 +130,14 @@
              inIfc.reportHit();
          end
 `endif
-         inIfc.setPTID(fromMaybe(?, mptid_m));
+         // Do not set PTID anymore
+         //inIfc.setPTID(fromMaybe(?, mptid_m));
  
          $display("ParTagTable:");
          for(Integer i = 0; i < valueOf(PTNumber); i = i + 1) begin
              $display("tab: ", fshow(tab[i]));
          end
+         //end
      endmethod
 
      method Maybe#(PTIndex) translate(CapMem ptid);
@@ -148,7 +154,7 @@
      endmethod
  
      method PTIndex getPTID();
-         return reduce(rg_cur_ptid);
+         return reduce(rg_cur_aptid);
      endmethod
  endmodule
 `endif

@@ -938,7 +938,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                 csr_data = getAddr(d);
 `ifdef ParTag
                 if(csr_idx == csrAddrUPTID) begin
-                    inIfc.setNewPTID(d);
+                    //inIfc.setNewPTID(d);
 `ifdef PERFORMANCE_MONITORING
                     events.evt_PTID_CHANGE = 1;
 `endif
@@ -1172,6 +1172,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         Vector#(SupSize, Maybe#(CapMem)) returnTargets;
 `endif
 `endif
+        Maybe#(CapMem) aptid = tagged Invalid;
         // compute what actions to take
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
 `ifdef PERFORMANCE_MONITORING
@@ -1296,6 +1297,9 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                     Bool rl       =       unpack(inst[ 25 ]);
                     // For "xCHERI" ISA extension
                     let funct5rs2 =              inst[ 24 : 20 ];
+                    if(x.iType == CJALR) begin
+                        aptid = tagged Valid x.pc;
+                    end
                     case(x.iType)
                         Auipc, Auipcc: auipcCnt = auipcCnt + 1;
                         Br: brCnt = brCnt + 1;
@@ -1416,6 +1420,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         inIfc.updateTargets(targets);
         inIfc.updateReturnTargets(returnTargets);
 `endif
+        if(aptid matches tagged Valid .p) inIfc.setNewPTID(p);
 `endif
 
 `ifdef RVFI

@@ -311,6 +311,9 @@ module mkCore#(CoreId coreId)(Core);
             method Maybe#(PTIndex) translate(CapMem ptid);
                 return cidTable.translate(ptid);
             endmethod
+            //method Action setNewPTID(CapMem aptid);
+            //    cidTable.setNewPTID(aptid);
+            //endmethod
     endinterface);
     FetchStage fetchStage <- mkFetchStage(fetchInput);
     ITlb iTlb = fetchStage.iTlbIfc;
