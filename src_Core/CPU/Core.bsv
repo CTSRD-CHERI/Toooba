@@ -549,6 +549,9 @@ module mkCore#(CoreId coreId)(Core);
             method setRegReadyAggr_forward = writeAggr(forwardWrAggrPort);
             method writeRegFile = writeCons(memWrConsPort);
             method doStats = doStatsReg._read;
+            method Maybe#(PTIndex) translate(CapMem ptid);
+                return cidTable.translate(ptid);
+            endmethod
 `ifdef PERFORMANCE_MONITORING
 `ifdef CONTRACTS_VERIFY
             method rob_getPredPC = rob.getOrigPredPC[valueof(AluExeNum)].get; // last getOrigPredPC port

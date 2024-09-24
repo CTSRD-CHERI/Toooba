@@ -40,8 +40,16 @@ module mkSTLPredPartition(STLPred);
     Vector#(PTNumber, STLPred) stlpreds <- replicateM(mkSTLPredCore);
     Reg#(PTIndex) rg_ptid <- mkReg(0); // default zero id
 
-    method update = stlpreds[rg_ptid].update;
-    method pred = stlpreds[rg_ptid].pred;
+    //method update = stlpreds[rg_ptid].update;
+    method Action update(HashValue pc_hash, Bool waited, Bool killedLd, Maybe#(PTIndex) ptid);
+        if(ptid matches tagged Valid .p) stlpreds[p].update(pc_hash, waited, killedLd, ptid);
+        else noAction;
+    endmethod
+    //method pred = stlpreds[rg_ptid].pred;
+    method Bool pred(HashValue pc_hash, Maybe#(PTIndex) ptid);
+        if(ptid matches tagged Valid .p) return stlpreds[p].pred(pc_hash, ptid);
+        else return True;
+    endmethod
 `ifdef ParTag
     method Action setPTID(PTIndex ptid);
         rg_ptid <= ptid;

@@ -40,7 +40,7 @@ module mkSTLPredCore(STLPred);
         rand_count <= rand_count + 1;
     endrule
 
-    method Action update(HashValue pc_hash, Bool waited, Bool killedLd);
+    method Action update(HashValue pc_hash, Bool waited, Bool killedLd, Maybe#(PTIndex) ptid);
         Bool rand_inv = (rand_count & (512-1)) == 0;
         Int#(3) inc = -1; // Subtract one by default.
         if (waited) inc = 0; // Don't train if we waited for stores.
@@ -52,7 +52,7 @@ module mkSTLPredCore(STLPred);
         );
     endmethod
 
-    method Bool pred(HashValue pc_hash);
+    method Bool pred(HashValue pc_hash, Maybe#(PTIndex) ptid);
 `ifdef NO_SPEC_STL
         return True;
 `else

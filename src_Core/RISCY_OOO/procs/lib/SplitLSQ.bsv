@@ -60,6 +60,8 @@ import Exec::*;
 import FP_Utils::*;
 import CacheUtils::*; // For CLoadTags alignment
 import RegFile::*; // Just for the interface
+import CHERICC_Fat::*;
+import CHERICap::*;
 
 // I don't want to export auxiliary functions, so manually export all types
 export LdQMemFunc(..);
@@ -74,6 +76,7 @@ export LSQIssueLdInfo(..);
 export LSQRespLdResult(..);
 export LSQHitInfo(..);
 export SplitLSQ(..);
+export SplitLSQInput(..);
 export mkSplitLSQ;
 export isLdQMemFunc;
 export isStQMemFunc;
@@ -353,6 +356,10 @@ typedef struct {
     Bit#(16)          pcHash;
 } StQDeqEntry deriving (Bits, Eq, FShow);
 
+interface SplitLSQInput;
+    method Maybe#(PTIndex) translate(CapMem ptid);
+endinterface
+
 interface SplitLSQ;
     // Enq at renaming. We split to 2 enq methods to enable synthesize
     // boundary. If we merge into 1 enq method, the guard will depend on the
@@ -363,7 +370,8 @@ interface SplitLSQ;
                         MemInst mem_inst,
                         Maybe#(PhyDst) dst,
                         SpecBits spec_bits,
-                        Bit#(16) pcHash);
+                        Bit#(16) pcHash,
+                        CapMem fullPc);
     method Action enqSt(InstTag inst_tag,
                         MemInst mem_inst,
                         Maybe#(PhyDst) dst,
@@ -581,8 +589,8 @@ module mkLSQIssueLdQ(LSQIssueLdQ);
 endmodule
 // --- end of auxiliary types and functions ---
 
-(* synthesize *)
-module mkSplitLSQ(SplitLSQ);
+//(* synthesize *)
+module mkSplitLSQ#(SplitLSQInput inIfc)(SplitLSQ);
     // method/rule ordering
     // getHit, findIssue <
     // (deqLd (TSO ? C : <) verifySt) <
@@ -677,6 +685,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_rel             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Maybe#(PhyDst)))          ld_dst             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bit#(16)))                ld_pcHash         <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Reg#(CapMem))                  ld_fullPc         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_waitForOlderSt  <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Ehr#(2, Addr))                 ld_paddr           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
@@ -1419,7 +1428,8 @@ module mkSplitLSQ(SplitLSQ);
                         MemInst mem_inst,
                         Maybe#(PhyDst) dst,
                         SpecBits spec_bits,
-                        Bit#(16) pcHash) if(ld_can_enq_wire && !wrongSpec_conflict);
+                        Bit#(16) pcHash,
+                        CapMem fullPc) if(ld_can_enq_wire && !wrongSpec_conflict);
         if(verbose) begin
             $display("[LSQ - enqLd] enqP %d; ", ld_enqP,
                      "; ", fshow(inst_tag),
@@ -1448,7 +1458,8 @@ module mkSplitLSQ(SplitLSQ);
         ld_done_enq[ld_enqP] <= False;
         ld_killed_enq[ld_enqP] <= Invalid;
         ld_pcHash[ld_enqP] <= pcHash;
-        ld_waitForOlderSt[ld_enqP] <= stlPred.pred(truncate(pcHash));
+        ld_fullPc[ld_enqP] <= fullPc;
+        ld_waitForOlderSt[ld_enqP] <= stlPred.pred(truncate(pcHash), inIfc.translate(fullPc));
         ld_readFrom_enq[ld_enqP] <= Invalid;
         ld_depLdQDeq_enq[ld_enqP] <= Invalid;
         ld_depStQDeq_enq[ld_enqP] <= Invalid;
@@ -2071,7 +2082,7 @@ module mkSplitLSQ(SplitLSQ);
         end
         Bool waited = ld_waitForOlderSt[deqP]; // Don't negative train if we waited for older stores.
         // Update predictor.
-        stlPred.update(truncate(ld_pcHash[deqP]), waited, killedLd);
+        stlPred.update(truncate(ld_pcHash[deqP]), waited, killedLd, inIfc.translate(ld_fullPc[deqP]));
 
         // remove the entry
         ld_valid_deqLd[deqP] <= False;

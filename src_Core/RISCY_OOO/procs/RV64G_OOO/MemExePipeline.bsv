@@ -242,6 +242,8 @@ interface MemExeInput;
     // performance
     method Bool doStats;
 
+    method Maybe#(PTIndex) translate(CapMem ptid);
+
 `ifdef PERFORMANCE_MONITORING
 `ifdef CONTRACTS_VERIFY
     method CapMem rob_getPredPC(InstTag t);
@@ -338,8 +340,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `else
     StoreBuffer stb <- mkStoreBufferEhr;
 `endif
+    let splitLSQInput = (interface SplitLSQInput;
+        method Maybe#(PTIndex) translate(CapMem ptid);
+            return inIfc.translate(ptid);
+        endmethod
+    endinterface);
     // LSQ
-    SplitLSQ lsq <- mkSplitLSQ;
+    SplitLSQ lsq <- mkSplitLSQ(splitLSQInput);
     // wire to issue Ld which just finish addr tranlation
     RWire#(LSQIssueLdInfo) issueLd <- mkRWire;
 

@@ -45,8 +45,8 @@ typedef Int#(StlPredValueSize) StlPredValue;
 typedef Bit#(TAdd#(StlPredKeySize, StlPredIndexSize)) HashValue;
 
 interface STLPred;
-    method Action update(HashValue pc_hash, Bool waited, Bool killedLd);
-    method Bool pred(HashValue pc_hash);
+    method Action update(HashValue pc_hash, Bool waited, Bool killedLd, Maybe#(PTIndex) ptid);
+    method Bool pred(HashValue pc_hash, Maybe#(PTIndex) ptid);
 `ifdef ParTag
     method Action setPTID(PTIndex ptid);
     method Action shootdown(PTIndex ptid);

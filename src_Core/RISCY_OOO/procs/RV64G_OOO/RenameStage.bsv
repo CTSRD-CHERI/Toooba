@@ -788,7 +788,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                          "Mem (non-Fence) needs imm for virtual addr");
                 // put in ldstq
                 if(isLdQ) begin
-                    lsq.enqLd(inst_tag, mem_inst, allow_cap, phy_regs.dst, spec_bits, hash(getAddr(pc)));
+                    lsq.enqLd(inst_tag, mem_inst, allow_cap, phy_regs.dst, spec_bits, hash(getAddr(pc)), pc);
                 end
                 else begin
                     lsq.enqSt(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)));
@@ -1162,7 +1162,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 doAssert(!isValid(spec_tag), "should not have spec tag");
                                 // put in ldstq
                                 if(isLdQ) begin
-                                    lsq.enqLd(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)));
+                                    lsq.enqLd(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)), pc);
                                 end
                                 else begin
                                     lsq.enqSt(inst_tag, mem_inst, phy_regs.dst, spec_bits, hash(getAddr(pc)));
