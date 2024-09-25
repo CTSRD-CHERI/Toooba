@@ -15,5 +15,5 @@
 	url = https://github.com/CTSRD-CHERI/WindCoreInterface.git
 [submodule "libs/cheri-cap-lib"]
 	path = libs/cheri-cap-lib
-	url = https://github.com:CTSRD-CHERI/cheri-cap-lib.git
+	url = https://github.com/CTSRD-CHERI/cheri-cap-lib.git
 	branch = faf28_cid_sealing
