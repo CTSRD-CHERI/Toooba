@@ -285,18 +285,17 @@ module mkCore#(CoreId coreId)(Core);
    // ================================================================
 
 `ifdef ParTag
-    RWire#(PTIndex) ptidSetWire <- mkRWire;
-    RWire#(PTIndex) ptidSDWire <- mkRWire;
+    Ehr#(2, Maybe#(PTIndex)) ptidSDEhr <- mkEhr(Invalid);
 `ifdef PERFORMANCE_MONITORING
     RWire#(Bool) ptidHitWire <- mkRWire;
 `endif
     let ptidTableInput = (interface ParTagTableInput;
         method Action setPTID(PTIndex ptid);
-            ptidSetWire.wset(ptid);
+            $display("setPTID");
         endmethod
         method Action shootdown(PTIndex ptid);
-            $display("shootdown Core");
-            ptidSDWire.wset(ptid);
+            $display("shootdown from Core");
+            ptidSDEhr[1] <= tagged Valid ptid;
         endmethod
 `ifdef PERFORMANCE_MONITORING
         method Action reportHit();
@@ -859,14 +858,17 @@ module mkCore#(CoreId coreId)(Core);
     endrule
 
 `ifdef ParTag
-    rule doSetPTID(ptidSetWire.wget() matches tagged Valid .ptid);
-        fetchStage.setPTID(ptid);
-        coreFix.memExeIfc.setPTID(ptid);
-    endrule
+    //rule doSetPTID(ptidSetWire.wget() matches tagged Valid .ptid);
+    //    fetchStage.setPTID(ptid);
+    //    coreFix.memExeIfc.setPTID(ptid);
+    //endrule
 
-    rule doShootdown(ptidSDWire.wget() matches tagged Valid .ptid);
-        fetchStage.shootdown(ptid);
-        coreFix.memExeIfc.shootdown(ptid);
+    rule doShootdown;
+        if(ptidSDEhr[0] matches tagged Valid .p) begin
+            fetchStage.shootdown(p);
+            coreFix.memExeIfc.shootdown(p);
+            ptidSDEhr[0] <= Invalid;
+        end
     endrule
 `endif
 
@@ -1269,7 +1271,7 @@ module mkCore#(CoreId coreId)(Core);
 `endif
 
 `ifdef ParTag
-     texe_evts.evt_UARCH_COMP_EVICTION = isValid(ptidSDWire.wget()) ? 1 : 0;
+     texe_evts.evt_UARCH_COMP_EVICTION = isValid(ptidSDEhr[0]) ? 1 : 0;
      texe_evts.evt_UARCH_COMP_HIT = isValid(ptidHitWire.wget()) ? 1 : 0;
 `endif
      mab_trans_exe = tagged Valid texe_evts;

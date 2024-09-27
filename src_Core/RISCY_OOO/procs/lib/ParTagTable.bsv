@@ -62,7 +62,7 @@
  
      Reg#(CapMem) rg_cur_aptid <- mkReg(0);
      Reg#(PTIndex) rg_cur_mptid <- mkReg(0);
-     PulseWire pw <- mkPulseWire;
+     RWire#(CapMem) wr_aptid <- mkRWire;
  
      // used a direct mapped cache, where mcid is the index
      Vector#(PTNumber, Reg#(ParTagTableEntry)) tab <- replicateM(mkReg(unpack(0)));
@@ -90,54 +90,59 @@
          count <= count + 1;
      endrule
  
-     method Action setNewPTID(CapMem aptid);
-         // cycle counter is the "pseudo random number generator"
-         function PTIndex getRandomIndex();
-             return count;
-         endfunction
+     rule setPTID;
+        if(wr_aptid.wget() matches tagged Valid .ap) begin
+            // cycle counter is the "pseudo random number generator"
+            function PTIndex getRandomIndex();
+                return count;
+            endfunction
  
-         function Maybe#(PTIndex) findEntry(CapMem a);
-             Maybe#(PTIndex) ret = Invalid;
-             for(Integer i = 0; i < valueOf(PTNumber); i = i + 1) begin
-                 let e = tab[i];
-                 if(e.v && e.aptid == a) ret = tagged Valid (fromInteger(i));
-             end
-             return ret;
-         endfunction
-         //if (getCID(rg_cur_aptid) == getCID(aptid)) noAction;
-         //else begin
-         // send pulse wire
-         pw.send();
-         rg_cur_aptid <= aptid;
-         let mptid_m = findEntry(aptid);
-         if(mptid_m matches tagged Invalid) begin
-             PTIndex mptid = 0;
-             if(freeQ.notEmpty) begin
-                 mptid = freeQ.first;
-                 freeQ.deq;
-             end
-             else begin
-                 mptid = getRandomIndex;
-                 inIfc.shootdown(mptid);
-             end
-             ParTagTableEntry e = ParTagTableEntry{aptid: aptid, v: True};
-             tab[mptid] <= e;
-             mptid_m = tagged Valid mptid;
-             $display("setNewPTID - aptid: ", fshow(aptid), "; mptid: ", fshow(mptid));
-         end
+            function Maybe#(PTIndex) findEntry(CapMem a);
+                Maybe#(PTIndex) ret = Invalid;
+                for(Integer i = 0; i < valueOf(PTNumber); i = i + 1) begin
+                    let e = tab[i];
+                    if(e.v && e.aptid == a) ret = tagged Valid (fromInteger(i));
+                end
+                return ret;
+            endfunction
+            //if (getCID(rg_cur_aptid) == getCID(aptid)) noAction;
+            //else begin
+            // send pulse wire
+            //pw.send();
+            rg_cur_aptid <= ap;
+            let mptid_m = findEntry(ap);
+            if(mptid_m matches tagged Invalid) begin
+                PTIndex mptid = 0;
+                if(freeQ.notEmpty) begin
+                    mptid = freeQ.first;
+                    freeQ.deq;
+                end
+                else begin
+                    mptid = getRandomIndex;
+                    inIfc.shootdown(mptid);
+                end
+                ParTagTableEntry e = ParTagTableEntry{aptid: ap, v: True};
+                tab[mptid] <= e;
+                mptid_m = tagged Valid mptid;
+                $display("setNewPTID - aptid: ", fshow(ap), "; mptid: ", fshow(mptid));
+            end
 `ifdef PERFORMANCE_MONITORING
-         else begin
-             inIfc.reportHit();
-         end
+            else begin
+                inIfc.reportHit();
+            end
 `endif
          // Do not set PTID anymore
          //inIfc.setPTID(fromMaybe(?, mptid_m));
  
-         $display("ParTagTable:");
-         for(Integer i = 0; i < valueOf(PTNumber); i = i + 1) begin
-             $display("tab: ", fshow(tab[i]));
-         end
-         //end
+            $display("ParTagTable:");
+            for(Integer i = 0; i < valueOf(PTNumber); i = i + 1) begin
+                $display("tab: ", fshow(tab[i]));
+            end
+        end
+     endrule
+
+     method Action setNewPTID(CapMem aptid);
+        wr_aptid.wset(aptid);
      endmethod
 
      method Maybe#(PTIndex) translate(CapMem ptid);
@@ -147,8 +152,9 @@
                let e = tab[i];
                if(e.v && e.aptid == a) ret = tagged Valid (fromInteger(i));
            end
-           if (pw) return Invalid;
-           else return ret;
+           //if (pw) return Invalid;
+           //else return ret;
+           return ret;
         endfunction
         return findEntry(ptid);
      endmethod
