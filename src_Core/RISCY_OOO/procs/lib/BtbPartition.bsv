@@ -62,8 +62,14 @@ module mkBtbPartition(NextAddrPred#(hashSz))
     Reg#(Maybe#(PTIndex)) curr_ptid <- mkReg(?);
 
     method Action put_pc(CapMem pc, Maybe#(PTIndex) ptid);
-        if(ptid matches tagged Valid .p) btbs[p].put_pc(pc, ptid);
-        else noAction;
+        if(ptid matches tagged Valid .p) begin
+            btbs[p].put_pc(pc, ptid);
+            $display("BtbPartition.put_pc() ptid: ", fshow(p));
+        end
+        else begin
+            $display("BtbPartition.put_pc() no valid ptid");
+        end
+        curr_ptid <= ptid;
     endmethod
     method Vector#(SupSizeX2, Maybe#(CapMem)) pred;
         if(curr_ptid matches tagged Valid .cp) return btbs[cp].pred;

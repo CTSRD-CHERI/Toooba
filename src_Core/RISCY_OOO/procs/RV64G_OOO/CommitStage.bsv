@@ -894,6 +894,16 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         doAssert(x.spec_bits == 0, "cannot have spec bits");
     endrule
 
+    rule printStuffCommitSystemInst;
+        $display("!pauseCommit: ", fshow(!pauseCommit));
+        $display("!isValid(rob.deqPort[0].deq_data.trap): ", fshow(!isValid(rob.deqPort[0].deq_data.trap)));
+        $display("!isValid(rob.deqPort[0].deq_data.ldKilled): ", fshow(!isValid(rob.deqPort[0].deq_data.ldKilled)));
+        $display("rob.deqPort[0].deq_data.rob_inst_state == Executed: ", fshow(rob.deqPort[0].deq_data.rob_inst_state == Executed));
+        $display("isSystem(rob.deqPort[0].deq_data.iType): ", fshow(isSystem(rob.deqPort[0].deq_data.iType)));
+        $display("!rob.deqPort[0].deq_data.isPureDataRead: ", fshow(!rob.deqPort[0].deq_data.isPureDataRead));
+        $display("! send_mip_csr_change_to_tv: ", fshow(! send_mip_csr_change_to_tv));
+    endrule
+
     // commit system inst
     rule doCommitSystemInst(
 `ifdef INCLUDE_GDB_CONTROL
@@ -936,14 +946,14 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
             Data csr_data = ?;
             if(x.ppc_vaddr_csrData matches tagged CSRData .d) begin
                 csr_data = getAddr(d);
-`ifdef ParTag
-                if(csr_idx == csrAddrUPTID) begin
-                    //inIfc.setNewPTID(d);
-`ifdef PERFORMANCE_MONITORING
-                    events.evt_PTID_CHANGE = 1;
-`endif
-                end
-`endif
+//`ifdef ParTag
+//                if(csr_idx == csrAddrUPTID) begin
+//                    inIfc.setNewPTID(d);
+//`ifdef PERFORMANCE_MONITORING
+//                    events.evt_PTID_CHANGE = 1;
+//`endif
+//                end
+//`endif
             end
             else begin
                 doAssert(False, "must have csr data");

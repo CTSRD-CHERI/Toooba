@@ -403,7 +403,7 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
     // rule ordering: Fetch1 (BTB+TLB) < Fetch2 (decode & dir pred) < redirect method
     // Fetch1 < Fetch2 to avoid bypassing path on PC and epochs
 
-    Bool verbose = False;
+    Bool verbose = True;
     Integer verbosity = 0;
 
     // Basic State Elements
@@ -556,6 +556,16 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
             end
         end else buffered_translation_virt_pc <= replicate(Invalid);
         if (verbosity >= 2) $display ("%d Fetch Translate: pc: %x, ", cur_cycle, translateAddress.first, fshow (tr));
+    endrule
+
+    rule printStuff;
+        $display("fetch1toFetch2.notEmpty(): ", fshow(fetch1toFetch2.notEmpty()));
+        $display("f2d.deqS[0].canDeq (): ", fshow(f2d.deqS[0].canDeq ()));
+        $display("f2d.deqS[1].canDeq (): ", fshow(f2d.deqS[1].canDeq ()));
+        $display("out_fifo.deqS[0].canDeq (): ", fshow(out_fifo.deqS[0].canDeq ()));
+        $display("out_fifo.deqS[1].canDeq (): ", fshow(out_fifo.deqS[1].canDeq ()));
+        $display("waitForRedirect[0]: ", fshow(waitForRedirect[0]));
+        $display("waitForFlush[0]: ", fshow(waitForFlush[0]));
     endrule
 
     // doFetch1 pulls a prediction out of the BTB and attempts to translate it
@@ -861,7 +871,7 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
       for (Integer i = 0; i < valueof(SupSize); i=i+1) begin
          CapMem pc = decompressPc(validValue(decodeIn[i]).pc);
          CapMem ppc = decompressPc(validValue(decodeIn[i]).ppc);
-         let ptid = inIfc.translate(pc);
+         Maybe#(PTIndex) ptid = inIfc.translate(pc);
          let decode_result = decodeResults[i]; // Decode 32b inst, or 32b expansion of 16b inst
          let dInst = decode_result.dInst;
          let regs = decode_result.regs;
@@ -1180,7 +1190,7 @@ module mkFetchStage#(FetchInput inIfc)(FetchStage);
 `endif
         if (iType == Br) begin
             // Train the direction predictor for all branches
-            let ptid = inIfc.translate(pc);
+            Maybe#(PTIndex) ptid = inIfc.translate(pc);
             dirPred.update(taken, trainInfo.dir, mispred, ptid);
             $display("Branch train PC: %x, taken: %x, mispred: %x", getAddr(pc), taken, mispred);
         end

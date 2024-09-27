@@ -38,11 +38,11 @@ import Ehr::*;
 import CHERICC_Fat::*;
 import CHERICap::*;
 import Ras_IFC::*;
-`ifdef ParTag
+//`ifdef ParTag
 import RasPartition::*;
-`else
+//`else
 import RasSingle::*;
-`endif
+//`endif
 
 
 (* synthesize *)
