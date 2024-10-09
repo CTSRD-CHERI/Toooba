@@ -52,12 +52,12 @@ export NextAddrPred(..);
 export mkBtb;
 export HashSize;
 
-typedef TSub#(16, PTBits) HashSize;
-
+//typedef TSub#(16, PTBits) HashSize;
+typedef 16 HashSize;
 (* synthesize *)
 `ifdef ParTag
 module mkBtb(NextAddrPred#(HashSize));
-    NextAddrPred#(HashSize) btb <- mkBtbPartition;
+    NextAddrPred#(HashSize) btb <- mkBtbTagged;
 `else
 module mkBtb(NextAddrPred#(16));
     NextAddrPred#(16) btb <- mkBtbCore;
