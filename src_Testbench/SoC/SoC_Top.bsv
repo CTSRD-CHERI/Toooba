@@ -169,7 +169,10 @@ module mkSoC_Top #(Reset dm_power_on_reset)
            , AXI4_Master #(TAdd#(Wd_MId,1), Wd_Addr, Wd_Data_Periph, 0, 0, 0, 0, 0) )
      wideS_narrowM <- mkAXI4DataWidthShim_WideToNarrow (proxyInDepth, proxyOutDepth);
    match {.wideS, .narrowM} = wideS_narrowM;
-   mkConnection(corew.manager_0, wideS);
+   AXI4_Shim#(TAdd #(Wd_MId, 1), Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
+       manager_0_deburster <- mkBurstToNoBurst;
+   mkConnection(corew.manager_0, manager_0_deburster.slave);
+   mkConnection(manager_0_deburster.master, wideS);
 
    // SoC IPs
    UART_IFC   uart0  <- mkUART;

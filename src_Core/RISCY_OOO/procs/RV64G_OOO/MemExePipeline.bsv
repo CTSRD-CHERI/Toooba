@@ -6,6 +6,7 @@
 //     Copyright (c) 2020 Alexandre Joannou
 //     Copyright (c) 2020 Peter Rugg
 //     Copyright (c) 2020 Jonathan Woodruff
+//     Copyright (c) 2024 Franz Fuchs
 //     All rights reserved.
 //
 //     This software was developed by SRI International and the University of
@@ -14,6 +15,11 @@
 //     DARPA SSITH research programme.
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
+//
+//     This software was developed by the University of  Cambridge
+//     Department of Computer Science and Technology under the
+//     SIPP (Secure IoT Processor Platform with Remote Attestation)
+//     project funded by EPSRC: EP/S030868/1
 //-
 //
 // Permission is hereby granted, free of charge, to any person
@@ -87,6 +93,9 @@ typedef struct {
     LdStQTag ldstq_tag;
     CapChecks cap_checks;
     Bool ddc_offset;
+`ifdef KONATA
+    Bit#(64) u_id;
+`endif
 } MemDispatchToRegRead deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -98,7 +107,13 @@ typedef struct {
     // src reg vals
     CapPipe rVal1;
     CapPipe rVal2;
+    CapPipe vaddr;
     CapChecks cap_checks;
+    ByteOrTagEn origBE;
+    MemDataByteEn shiftBEData;
+`ifdef KONATA
+    Bit#(64) u_id;
+`endif
 } MemRegReadToExe deriving(Bits, FShow);
 
 typedef struct {
@@ -119,6 +134,9 @@ typedef struct {
     Bool allowCapLoad;
     Maybe#(CSR_XCapCause) capException;
     Maybe#(BoundsCheck) check;
+`ifdef KONATA
+    Bit#(64) u_id;
+`endif
 } MemExeToFinish deriving(Bits, FShow);
 
 // bookkeeping when waiting for MMIO resp which may cause exception
@@ -143,6 +161,7 @@ typedef struct {
     MemTaggedData shiftedData;
 } WaitStResp deriving(Bits, Eq, FShow);
 
+//SpecFifo#(2,IncorrectSpec,1,1) incorrectSpec_ff <- mkSpecFifoCF(True);
 // synthesized pipeline fifos
 typedef SpecFifo_SB_deq_enq_C_deq_enq#(1, MemDispatchToRegRead) MemDispToRegFifo;
 (* synthesize *)
@@ -252,7 +271,7 @@ interface MemExePipeline;
 endinterface
 
 module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
-    Bool verbose = False;
+    Bool verbose = True;
 
     // we change cache request in case of single core, becaues our MSI protocol
     // is not good with single core
@@ -455,13 +474,17 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doDispatchMem;
         rsMem.doDispatch;
         let x = rsMem.dispatchData;
-        if(verbose) $display("[doDispatchMem] ", fshow(x));
+        if(verbose) $display("%t : [doDispatchMem] ", $time, fshow(x));
 
         // check store not having dst reg: this is for setting store to be
         // executed after address transation
         doAssert(!(x.data.mem_func == St && isValid(x.regs.dst)),
                  "St cannot have dst reg");
-
+`ifdef KONATA 
+        $display("KONATAE\t%0d\t%0d\t0\tRsvM", cur_cycle, x.u_id);
+        $display("KONATAS\t%0d\t%0d\t0\tMem1", cur_cycle, x.u_id);
+        $fflush;
+`endif
         // go to next stage
         dispToRegQ.enq(ToSpecFifo {
             data: MemDispatchToRegRead {
@@ -472,6 +495,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 ldstq_tag: x.data.ldstq_tag,
                 cap_checks: x.data.cap_checks,
                 ddc_offset: x.data.ddc_offset
+`ifdef KONATA
+                , u_id: x.u_id
+`endif
             },
             spec_bits: x.spec_bits
         });
@@ -484,11 +510,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     endrule
 
+`ifdef RVFI
+    Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Data)) memData <- replicateM(mkReg(?));
+`endif
+
     rule doRegReadMem;
         dispToRegQ.deq;
         let dispToReg = dispToRegQ.first;
         let x = dispToReg.data;
-        if(verbose) $display("[doRegReadMem] ", fshow(dispToReg));
+        if(verbose) $display("%t : [doRegReadMem] ", $time, fshow(dispToReg));
 
         // check conservative scoreboard
         let regsReady = inIfc.sbCons_lazyLookup(x.regs);
@@ -508,34 +538,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             rVal2 <- readRFBypass(src2, regsReady.src2, inIfc.rf_rd2(src2), bypassWire);
         end
 
-        // go to next stage
-        regToExeQ.enq(ToSpecFifo {
-            data: MemRegReadToExe {
-                mem_func: x.mem_func,
-                imm: x.imm,
-                tag: x.tag,
-                ldstq_tag: x.ldstq_tag,
-                rVal1: rVal1,
-                rVal2: rVal2,
-                cap_checks: x.cap_checks
-            },
-            spec_bits: dispToReg.spec_bits
-        });
-    endrule
-
-`ifdef RVFI
-    Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Data)) memData <- replicateM(mkReg(?));
-`endif
-
-    rule doExeMem;
-        regToExeQ.deq;
-        let regToExe = regToExeQ.first;
-        let x = regToExe.data;
-        if(verbose) $display("[doExeMem] ", fshow(regToExe));
-
         // get virtual addr & St/Sc/Amo data
-        CapPipe vaddr = modifyOffset(x.rVal1, signExtend(x.imm), True).value;
-        CapPipe data = x.rVal2;
+        CapPipe vaddr = modifyOffset(rVal1, signExtend(x.imm), True).value;
+        CapPipe data = rVal2;
         MemTaggedData toMemData = unpack(pack(toMem(data)));
 
 `ifdef RVFI
@@ -553,10 +558,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                          , data: unpack(pack(d.data) << {byteOffset, 3'b0})});
         endfunction
         let {shiftBEData, shiftData} = getShiftedBEData(getAddr(vaddr), origBE.DataMemAccess, toMemData);
-        let shiftBE = DataMemAccess(shiftBEData);
-        if (origBE == TagMemAccess) begin
-            shiftBE = TagMemAccess;
-        end
 
         // update LSQ data now
         if(x.ldstq_tag matches tagged St .stTag) begin
@@ -569,14 +570,56 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         end
 
+`ifdef KONATA 
+        $display("KONATAE\t%0d\t%0d\t0\tMem1", cur_cycle, x.u_id);
+        $display("KONATAS\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
+        $fflush;
+`endif
+        // go to next stage
+        regToExeQ.enq(ToSpecFifo {
+            data: MemRegReadToExe {
+                mem_func: x.mem_func,
+                imm: x.imm,
+                tag: x.tag,
+                ldstq_tag: x.ldstq_tag,
+                rVal1: rVal1,
+                rVal2: rVal2,
+                vaddr: vaddr,
+                cap_checks: x.cap_checks,
+                origBE: origBE,
+                shiftBEData: shiftBEData
+`ifdef KONATA
+                , u_id: x.u_id
+`endif
+            },
+            spec_bits: dispToReg.spec_bits
+        });
+    endrule
+
+    rule doExeMem;
+        regToExeQ.deq;
+        let regToExe = regToExeQ.first;
+        let x = regToExe.data;
+        if(verbose) $display("%t : [doExeMem] ", $time, fshow(regToExe));
+
+        let shiftBE = DataMemAccess(x.shiftBEData);
+        if (x.origBE == TagMemAccess) begin
+            shiftBE = TagMemAccess;
+        end
+
         CapPipe ddc = cast(inIfc.scaprf_rd(scrAddrDDC));
 
         // get size of the access
-        Bit#(TAdd#(CacheUtils::LogCLineNumMemDataBytes,1)) accessByteCount = zeroExtend(pack(countOnes(pack(origBE.DataMemAccess))));
-        if (origBE == TagMemAccess) begin
+        Bit#(TAdd#(CacheUtils::LogCLineNumMemDataBytes,1)) accessByteCount = zeroExtend(pack(countOnes(pack(x.origBE.DataMemAccess))));
+        if (x.origBE == TagMemAccess) begin
             accessByteCount = fromInteger(valueOf(CacheUtils::CLineNumMemDataBytes));
         end
 
+`ifdef KONATA 
+        $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
+        $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
+        $fflush;
+`endif
         // go to next stage by sending to TLB
         dTlb.procReq(DTlbReq {
             inst: MemExeToFinish {
@@ -584,17 +627,20 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: x.tag,
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: shiftBE,
-                vaddr: vaddr,
+                vaddr: x.vaddr,
 `ifdef INCLUDE_TANDEM_VERIF
-                store_data: data,
+                store_data: x.rVal2,
                 store_data_BE: origBE,
 `endif
-                misaligned: memAddrMisaligned(getAddr(vaddr), origBE),
-                capStore: isValidCap(data) && origBE == DataMemAccess(unpack(~0)),
-                allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && origBE == DataMemAccess(unpack(~0)),
-                capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, origBE),
+                misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
+                capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
+                allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
+                capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
                 check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                          ddc, getAddr(vaddr), accessByteCount, x.cap_checks)
+                                          ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
+`ifdef KONATA
+                , u_id: x.u_id
+`endif
             },
             specBits: regToExe.spec_bits
         });
@@ -608,7 +654,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Maybe#(Trap) cause = Invalid;
         if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
 
-        if(verbose) $display("[doFinishMem] ", fshow(dTlbResp));
+        if(verbose) $display("%t : [doFinishMem] ", $time, fshow(dTlbResp));
         if(isValid(cause) && verbose) $display("  [doFinishMem - dTlb response] PAGEFAULT!");
 
         Data store_data = ?;
@@ -686,6 +732,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
                                          );
 
+        let pc = inIfc.rob_getPC(x.tag);
 `ifdef PERFORMANCE_MONITORING
 `ifdef CONTRACTS_VERIFY
         function Bool is_16b_inst (Bit #(n) inst);
@@ -701,8 +748,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
 `endif
 `endif
-        let pc = inIfc.rob_getPC(x.tag);
 
+`ifdef KONATA 
+        $display("KONATAE\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
+        $display("KONATAS\t%0d\t%0d\t0\tMem4", cur_cycle, x.u_id);
+        $fflush;
+`endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE
@@ -762,7 +813,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // search LSQ
         LSQIssueLdResult issRes <- lsq.issueLd(info.tag, info.paddr, info.shiftedBE, sbRes);
         if(verbose) begin
-            $display("[doIssueLd] fromIssueQ: ", fshow(fromIssueQ), " ; ",
+            $display("%t : [doIssueLd] fromIssueQ: ", $time, fshow(fromIssueQ), " ; ",
                      fshow(info), " ; ", fshow(sbRes), " ; ", fshow(issRes));
         end
         // summarize
@@ -808,8 +859,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     rule doIssueLdFromIssueQ;
         // get issue entry from LSQ
-        LSQIssueLdInfo info <- lsq.getIssueLd;
-        doIssueLd(info, True);
+        doIssueLd(lsq.getIssueLd, True);
     endrule
 
     // we have ordered setRegReadyAggr_forward < setRegReadyAggr_mem to make

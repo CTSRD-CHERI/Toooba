@@ -258,6 +258,15 @@ function CSR unpackCSR(Bit#(12) addr);
     endcase);
 endfunction
 
+function Bool implementedCSR(Bit#(12) addr);
+    return (case(addr)
+`define CSR(n, v) v: True;
+`include "CSRs.bsvi"
+`undef CSR
+        default: False;
+    endcase);
+endfunction
+
 // values for MSPEC CSR
 Bit#(2) mSpecAll    = 0; // every inst can speculate
 Bit#(2) mSpecNonMem = 1; // only non-memory inst can speculate
@@ -301,7 +310,7 @@ typedef enum {
 } ModifyOffsetFunc deriving(Bits, Eq, FShow);
 
 typedef enum {
-    SetBounds, CRRL, CRAM
+    SetBoundsExact, SetBoundsRounding, CRRL, CRAM
 } SetBoundsFunc deriving(Bits, Eq, FShow);
 
 typedef enum {
@@ -330,6 +339,7 @@ typedef union tagged {
     SpecialRWFunc SpecialRW;
     AddrSource SetAddr;
     void Seal;
+    void CSeal;
     void SealEntry;
     SrcSelector Unseal;
     void AndPerm;

@@ -20,6 +20,7 @@ package P3_Core;
 
 import Vector        :: *;
 import FIFO          :: *;
+import FIFOF         :: *;
 import GetPut        :: *;
 import ClientServer  :: *;
 import Connectable   :: *;
@@ -34,10 +35,10 @@ import GetPut_Aux :: *;
 import Routable   :: *;
 import BlueBasics :: *;
 import BlueAXI4   :: *;
-import SourceSink :: *;
 import WindCoreInterface :: *;
 import Semi_FIFOF :: *;
 import Cur_Cycle  :: *;
+import AXI4_DelayShim :: *;
 
 // ================================================================
 // Project imports
@@ -117,6 +118,9 @@ endinterface
 (* synthesize *)
 module mkP3_Core (P3_Core_IFC);
 
+   // System address map
+   SoC_Map_IFC  soc_map  <- mkSoC_Map;
+
    // ================================================================
    // The RISC-V Debug Module is at the following point in the module hierarchy:
    //     p3_core.corew.debug_module
@@ -173,7 +177,78 @@ module mkP3_Core (P3_Core_IFC);
            , AXI4_Master #(TAdd#(Wd_MId,1), Wd_Addr, Wd_Data_Periph, 0, 0, 0, 0, 0) )
      wideS_narrowM <- mkAXI4DataWidthShim_WideToNarrow (proxyInDepth, proxyOutDepth);
    match {.wideS, .narrowM} = wideS_narrowM;
-   mkConnection(corew.manager_0, wideS);
+   AXI4_Shim#(TAdd #(Wd_MId, 1), Wd_Addr, Wd_Data, 0, 0, 0, 0, 0)
+       manager_0_deburster <- mkBurstToNoBurst;
+   mkConnection(corew.manager_0, manager_0_deburster.slave);
+   mkConnection(manager_0_deburster.master, wideS);
+
+   // ================================================================
+   // Delay DRAM to compensate for relatively lower FPGA clock
+
+   Bit#(16) defaultLatency = 0;
+   Reg#(Bit#(16)) latencyCycles0 <- mkReg(defaultLatency);
+   Reg#(Bit#(16)) latencyCycles1 <- mkReg(defaultLatency);
+
+   NumProxy#(128) depthProxy = error("Do not look inside proxy");
+   let master_0_delay <- mkAXI4_DelayShim(depthProxy, latencyCycles0);
+   let master_1_delay <- mkAXI4_DelayShim(depthProxy, latencyCycles1);
+
+   // Support dynamic changing of latency
+   let latencyToggleShim <- mkAXI4Shim;
+
+   rule changeLatency;
+       let awflit <- get(latencyToggleShim.master.aw);
+       let wflit <- get(latencyToggleShim.master.w);
+       $display("rule changeLatency: aw - ", fshow(awflit),
+              "\n                     w - ", fshow(wflit));
+       let bresp = OKAY;
+       let latency = truncate(wflit.wdata);
+       Bit#(12) addr = truncate(awflit.awaddr);
+       case(addr)
+           0:       latencyCycles0 <= latency;
+           64:      latencyCycles1 <= latency;
+           default: bresp = SLVERR;
+       endcase
+       let bflit = AXI4_BFlit { bid: awflit.awid
+                              , bresp: bresp
+                              , buser: awflit.awuser };
+       latencyToggleShim.master.b.put(bflit);
+   endrule
+
+   rule queryLatency;
+       let arflit <- get(latencyToggleShim.master.ar);
+       $display("rule queryLatency: ar - ", fshow(arflit));
+       Bit#(12) addr = truncate(arflit.araddr);
+       let rresp = OKAY;
+       Bit#(Wd_Data_Periph) rdata = ?;
+       case(addr)
+           0:       rdata = zeroExtend(latencyCycles0);
+           64:      rdata = zeroExtend(latencyCycles1);
+           default: rresp = SLVERR;
+       endcase
+       let rflit = AXI4_RFlit { rid: arflit.arid
+                              , rresp: rresp
+                              , rdata: rdata
+                              , rlast: True
+                              , ruser: arflit.aruser };
+       latencyToggleShim.master.r.put(rflit);
+   endrule
+
+   let master_vector = cons(corew.manager_1, nil);
+   let slave_vector = cons(master_1_delay.slave, cons(latencyToggleShim.slave, nil));
+
+   function Vector #(2, Bool) route (Bit #(Wd_Addr) addr);
+      Vector #(2, Bool) res = replicate(False);
+      if (inRange(soc_map.m_soc_config_addr_range, addr))
+        res[1] = True;
+      else
+        res[0] = True;
+      return res;
+   endfunction
+
+   mkAXI4Bus (route, master_vector, slave_vector);
+
+   mkConnection(master_0_delay.slave, narrowM);
 
 `ifdef INCLUDE_GDB_CONTROL
 
@@ -270,8 +345,8 @@ module mkP3_Core (P3_Core_IFC);
 
    // ================================================================
    // INTERFACE
-   let master0_sig <- toAXI4_Master_Sig (narrowM);
-   let master1_sig <- toAXI4_Master_Sig (corew.manager_1);
+   let master0_sig <- toAXI4_Master_Sig (master_0_delay.master);
+   let master1_sig <- toAXI4_Master_Sig (master_1_delay.master);
    // ----------------------------------------------------------------
    // Core CPU interfaces
 

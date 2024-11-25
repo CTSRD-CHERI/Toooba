@@ -43,6 +43,7 @@ import ProcTypes::*;
 import TlbTypes::*;
 import Performance::*;
 import FullAssocTlb::*;
+import DReg::*;
 import ConfigReg::*;
 import Fifos::*;
 import Cntrs::*;
@@ -249,6 +250,8 @@ module mkITlb(ITlb::ITlb);
         no_pending_wire <= !isValid(miss);
     endrule
 
+    Reg#(Bool) vm_info_change <- mkDReg(False);
+
     method Action flush if(!needFlush);
         needFlush <= True;
         waitFlushP <= False;
@@ -257,9 +260,10 @@ module mkITlb(ITlb::ITlb);
         // (2) flush truly starts when there is no pending req
     endmethod
 
-    method Bool flush_done = !needFlush;
+    method Bool flush_done = !needFlush && !vm_info_change;
 
     method Action updateVMInfo(VMInfo vm);
+        if (vm_info != vm) vm_info_change <= True;
         vm_info <= vm;
     endmethod
 
@@ -294,14 +298,9 @@ module mkITlb(ITlb::ITlb);
                 eparvm_info.sanctum_evmask = 0;
                 if ((vm_info.prv == prvM ? (outOfProtectionDomain(parvm_info,vaddr) && outOfProtectionDomain(eparvm_info,vaddr)) : outOfProtectionDomain(vm_info, vaddr))) begin
                     hitQ.enq(tuple2(?, Valid (excInstAccessFault)));
-                end
-`else
-                // No security check
-                if (False) begin
-                    noAction;
-                end
+                end else
 `endif
-                else if (vm_info.sv39) begin
+                if (vm_info.sv39) begin
                     let vpn = getVpn(vaddr);
                     let trans_result = tlb.translate(vpn, vm_info.asid);
                     if (!validVirtualAddress(vaddr)) hitQ.enq(tuple3(?, Valid (excInstPageFault), False));

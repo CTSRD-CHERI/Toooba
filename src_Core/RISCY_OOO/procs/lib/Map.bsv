@@ -76,7 +76,7 @@ Bitwise#(ix), Eq#(ix), Arith#(ix));
     Reg#(ix) clearCount <- mkReg(0);
     PulseWire didUpdate <- mkPulseWire;
     rule doClear(clearReg && !didUpdate);
-        MapKeyValue#(ky,vl) inv = MapKeyValue{valid: False, key: ?, value: ?};
+        MapKeyValue#(ky,vl) inv = MapKeyValue{valid: False, key: ?, value: default_value};
         for (Integer i = 0; i < a; i = i + 1) mem[i].upd(clearCount, inv);
         clearCount <= clearCount + 1;
         if (clearCount == ~0) clearReg <= False;
