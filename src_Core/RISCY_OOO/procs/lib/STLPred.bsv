@@ -30,8 +30,8 @@
 `include "ProcConfig.bsv"
 import Map::*;
 
-typedef Bit#(10) StlPredKey;
-typedef Bit#(6) StlPredIndex;
+typedef Bit#(8) StlPredKey;
+typedef Bit#(5) StlPredIndex;
 typedef Int#(3) StlPredValue;
 typedef 2 StlPredAssociativity;
 

@@ -86,8 +86,8 @@ typedef struct {
 } VnD#(type data) deriving(Bits, Eq, FShow);
 
 (* synthesize *)
-module mkBtb(NextAddrPred#(16));
-    NextAddrPred#(16) btb <- mkBtbCore;
+module mkBtb(NextAddrPred#(15));
+    NextAddrPred#(15) btb <- mkBtbCore;
     return btb;
 endmodule
 
