@@ -665,7 +665,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_acq             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_rel             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Maybe#(PhyDst)))          ld_dst             <- replicateM(mkConfigRegU);
-    Vector#(LdQSize, Reg#(Bit#(16)))                ld_pcHash         <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Reg#(Bit#(13)))                ld_pcHash         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_waitForOlderSt  <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Ehr#(2, Addr))                 ld_paddr           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
@@ -1120,7 +1120,7 @@ module mkSplitLSQ(SplitLSQ);
                 tag: tag,
                 paddr: ld_paddr_findIss[tag],
                 shiftedBE: ld_shiftedBE_findIss[tag],
-                pcHash: ld_pcHash[tag]
+                pcHash: extend(ld_pcHash[tag])
             };
             issueLdInfo.wset(info);
             if(verbose) begin
@@ -1436,8 +1436,8 @@ module mkSplitLSQ(SplitLSQ);
         ld_executing_enq[ld_enqP] <= False;
         ld_done_enq[ld_enqP] <= False;
         ld_killed_enq[ld_enqP] <= Invalid;
-        ld_pcHash[ld_enqP] <= pcHash;
-        ld_waitForOlderSt[ld_enqP] <= stlPred.pred(pcHash);
+        ld_pcHash[ld_enqP] <= truncate(pcHash);
+        ld_waitForOlderSt[ld_enqP] <= stlPred.pred(truncate(pcHash));
         ld_readFrom_enq[ld_enqP] <= Invalid;
         ld_depLdQDeq_enq[ld_enqP] <= Invalid;
         ld_depStQDeq_enq[ld_enqP] <= Invalid;

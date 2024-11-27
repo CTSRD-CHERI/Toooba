@@ -50,7 +50,7 @@ export mkTourPredSecure;
 // logic. It is guaranteed outside that no prediction or update can happen when
 // flushing.
 
-typedef 10 PCIndexSz;
+typedef 9 PCIndexSz;
 typedef Bit#(PCIndexSz) PCIndex;
 
 // We group several sat counters/local hists together in order to flush faster

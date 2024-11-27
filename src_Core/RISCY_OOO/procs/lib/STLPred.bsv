@@ -34,10 +34,11 @@ typedef Bit#(8) StlPredKey;
 typedef Bit#(5) StlPredIndex;
 typedef Int#(3) StlPredValue;
 typedef 2 StlPredAssociativity;
+typedef Bit#(13) HashValue;
 
 interface STLPred;
-    method Action update(Bit#(16) pc_hash, Bool waited, Bool killedLd);
-    method Bool pred(Bit#(16) pc_hash);
+    method Action update(HashValue pc_hash, Bool waited, Bool killedLd);
+    method Bool pred(HashValue pc_hash);
 endinterface
 
 module mkSTLPred(STLPred);
@@ -48,7 +49,7 @@ module mkSTLPred(STLPred);
         rand_count <= rand_count + 1;
     endrule
 
-    method Action update(Bit#(16) pc_hash, Bool waited, Bool killedLd);
+    method Action update(HashValue pc_hash, Bool waited, Bool killedLd);
         Bool rand_inv = (rand_count & (512-1)) == 0;
         Int#(3) inc = -1; // Subtract one by default.
         if (waited) inc = 0; // Don't train if we waited for stores.
@@ -60,7 +61,7 @@ module mkSTLPred(STLPred);
         );
     endmethod
 
-    method Bool pred(Bit#(16) pc_hash);
+    method Bool pred(HashValue pc_hash);
 `ifdef NO_SPEC_STL
         return True;
 `else
