@@ -261,6 +261,12 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 else begin
                     // free the phy reg claimed by this renaming (arch reg is don't care)
                     valid[curDeqP][valid_commit_port] <= False;
+                    let v = cleared_vec[curDeqP][0];
+                    for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
+                        if(unpack(v[j])) begin
+                            renaming_table[j][rt_commit_port(i)] <= 0;
+                        end
+                    end
                 end
                 // sanity check
                 doAssert(valid[curDeqP][valid_commit_port], "committing entry must be valid");
