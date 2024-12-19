@@ -127,9 +127,10 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Integer sb_claim_port = 0;
     Integer sb_correctSpec_port = 1;
 
-    Integer clear_getRename_start_port = 0;
-    Integer clear_write_start_port = clear_getRename_start_port + valueof(SupSize);
-    Integer clear_wrongSpec_port = clear_write_start_port + valueof(SupSize);
+    Integer clear_getRename_start_index = 1;
+    Integer clear_write_start_index = 0;
+    //Integer clear_write_start_port = clear_getRename_start_port + valueof(SupSize);
+    Integer clear_wrongSpec_port = valueof(SupSize) * 2;
 
     // non-speculative renaming table at commit port
     // initially arch reg i --> phy reg i
@@ -256,14 +257,17 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     new_renamings_phy[curDeqP] <= freed_phy_reg;
                     valid[curDeqP][valid_commit_port] <= False;
                     // update renaming_table
+		    $display("Write renaming table [", fshow(rtIdx), "] = ", fshow(commit_phy_reg));
                     renaming_table[rtIdx][rt_commit_port(i)] <= commit_phy_reg;
                 end
                 else begin
                     // free the phy reg claimed by this renaming (arch reg is don't care)
                     valid[curDeqP][valid_commit_port] <= False;
                     let v = cleared_vec[curDeqP][0];
+		    $display("Write cleared_vec: ", fshow(v));
                     for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
                         if(unpack(v[j])) begin
+			    $display("Arch zero renaming table [", fshow(fromInteger(j)), "]");
                             renaming_table[j][rt_commit_port(i)] <= 0;
                         end
                     end
@@ -325,6 +329,8 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     new_renamings_arch[curEnqP] <= claim.arch; // keep phy reg unchanged
                     valid[curEnqP][valid_claim_port] <= True;
                     spec_bits[curEnqP][sb_claim_port] <= claim.specBits;
+                        let ve = readVEhr(i, cleared);
+                        cleared_vec[curEnqP][i] <= pack(ve);
                     // sanity check
                     doAssert(!valid[curEnqP][valid_get_port], "claiming entry must be invalid");
                     doAssert(claim.phy == new_renamings_phy[curEnqP], "phy reg should match");
@@ -445,47 +451,57 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     src3: tagged Invalid,
                     dst: tagged Invalid
                 };
+		for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
+			$display($time, " cleared: ", fshow(cleared[j][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))]));
+		end
                 if (r.src1 matches tagged Valid .valid_src1) begin
-                    if (valid_src1 matches tagged Gpr .g &&& cleared[g][fromInteger(clear_getRename_start_port + i)]) begin
+                    if (valid_src1 matches tagged Gpr .g &&& cleared[g][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))]) begin
                         phy_regs.src1 = tagged Valid zero_reg;
                     end
                     else if (valid_src1 matches tagged Fpu .f) begin
                         Bit#(TLog#(NumArchReg)) idx = zeroExtend(f) + 32;
-                        if(cleared[idx][fromInteger(clear_getRename_start_port + i)]) phy_regs.src1 = tagged Valid zero_reg;
+                        if(cleared[idx][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))]) phy_regs.src1 = tagged Valid zero_reg;
                         else phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
                     end
                     else phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
+		    let arch_reg=valid_src1;
+        let claim_phy_reg = search_claimed_renamings(i, arch_reg);
+        let new_phy_reg = search_new_src_renamings(arch_reg);
+        let existing_phy_reg = renaming_table[getRTIndex(arch_reg)][rt_get_port];
+		$display("claim_phy_reg: ", fshow(claim_phy_reg));
+		$display("new_phy_reg: ", fshow(new_phy_reg));
+		$display("existing_phy_reg: ", fshow(existing_phy_reg));
                 end
                 if (r.src2 matches tagged Valid .valid_src2) begin
-                    if (valid_src2 matches tagged Gpr .g &&& cleared[g][fromInteger(clear_getRename_start_port + i)]) begin
+                    if (valid_src2 matches tagged Gpr .g &&& cleared[g][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))]) begin
                         phy_regs.src2 = tagged Valid zero_reg;
                     end
                     else if (valid_src2 matches tagged Fpu .f) begin
                         Bit#(TLog#(NumArchReg)) idx = zeroExtend(f) + 32;
-                        if(cleared[idx][fromInteger(clear_getRename_start_port + i)]) phy_regs.src2 = tagged Valid zero_reg;
+                        if(cleared[idx][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))]) phy_regs.src2 = tagged Valid zero_reg;
                         else phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
                     end
                     else phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
                 end
                 if (r.src3 matches tagged Valid .valid_src3) begin
                     Bit#(TLog#(NumArchReg)) idx = zeroExtend(valid_src3) + 32;
-                    if(cleared[idx][fromInteger(clear_getRename_start_port + i)]) phy_regs.src3 = tagged Valid zero_reg;
+                    if(cleared[idx][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))]) phy_regs.src3 = tagged Valid zero_reg;
                     else phy_regs.src3 = tagged Valid (get_src_renaming(i, tagged Fpu valid_src3));
                 end
                 
                 if (r.dst matches tagged Valid .valid_dst) begin
                     if (valid_dst matches tagged Gpr .g) begin
-                        cleared[g][fromInteger(clear_getRename_start_port + i)] <= False;
+                        cleared[g][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))] <= False;
                         let ve = readVEhr(i, cleared);
                         ve[g] = False;
-                        cleared_vec[claimIndex[i]][i] <= pack(ve);
+                        //cleared_vec[claimIndex[i]][i] <= pack(ve);
                     end
                     else if (valid_dst matches tagged Fpu .f) begin
                         Bit#(TLog#(NumArchReg)) idx = zeroExtend(f) + 32;
-                        cleared[idx][fromInteger(clear_getRename_start_port + i)] <= False;
+                        cleared[idx][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))] <= False;
                         let ve = readVEhr(i, cleared);
                         ve[idx] = False;
-                        cleared_vec[claimIndex[i]][i] <= pack(ve);
+                        //cleared_vec[claimIndex[i]][i] <= pack(ve);
                     end
                     phy_regs.dst = Valid (PhyDst {
                         indx: claim_phy_reg,
@@ -524,10 +540,10 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 if(iType == FPClear) begin
                     v0 = {truncate(v0), 32'b0};
                 end
-                let v1 = pack(readVEhr(fromInteger(clear_write_start_port + i), cleared));
+                let v1 = pack(readVEhr(fromInteger(clear_write_start_index + (i * valueof(SupSize))), cleared));
                 let v2 = v0 | v1;
                 for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
-                    cleared[j][fromInteger(clear_write_start_port + i)] <= unpack(v2[j]);
+                    cleared[j][fromInteger(clear_write_start_index + (i * valueof(SupSize)))] <= unpack(v2[j]);
                 end
             endmethod
         endinterface);
