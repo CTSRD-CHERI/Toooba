@@ -150,12 +150,12 @@
 `ifdef CACHE_LARGE
 
     // L1
-    `define LOG_L1_LINES 9 // 32KB
-    `define LOG_L1_WAYS 2 // 4 ways
+    `define LOG_L1_LINES 7 // 8KB
+    `define LOG_L1_WAYS 1 // 2 ways
 
     // LLC
-    `define LOG_LLC_LINES 14 // 1MB
-    `define LOG_LLC_WAYS 4 // 16 ways
+    `define LOG_LLC_LINES 10 // 64KB
+    `define LOG_LLC_WAYS 2 // 4 ways
 
 `endif
 
@@ -266,24 +266,24 @@
 `ifdef CORE_SMALL
 
     // superscalar
-    `define sizeSup 2
+    `define sizeSup 1
 
     // ROB
-    `define ROB_SIZE 64
+    `define ROB_SIZE 16
 
     // speculation
-    `define NUM_EPOCHS 12
-    `define NUM_SPEC_TAGS 12
+    `define NUM_EPOCHS 4
+    `define NUM_SPEC_TAGS 4
 
     // LSQ
-    `define LDQ_SIZE 24
-    `define STQ_SIZE 14
-    `define SB_SIZE 4
+    `define LDQ_SIZE 5
+    `define STQ_SIZE 3
+    `define SB_SIZE 2
 
     // reservation station sizes
-    `define RS_ALU_SIZE 16
-    `define RS_MEM_SIZE 16
-    `define RS_FPUMULDIV_SIZE 16
+    `define RS_ALU_SIZE 7
+    `define RS_MEM_SIZE 2
+    `define RS_FPUMULDIV_SIZE 2
 
 `endif
 
