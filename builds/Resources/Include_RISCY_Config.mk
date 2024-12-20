@@ -8,9 +8,9 @@
 PROC := RV64G_OOO
 
 # core size
-CORE_SIZE ?= SMALL
+CORE_SIZE ?= MICRO
 # cache size
-CACHE_SIZE ?= LARGE
+CACHE_SIZE ?= MICRO
 # always include perf counter
 PERF_COUNT := true
 # dram type in simulation: VC707 or AWSF1
@@ -59,7 +59,7 @@ DATA_PREFETCHER_LOCATION ?= L1
 DATA_PREFETCHER_TYPE ?= STRIDE
 
 # clk frequency depends on core size
-ifneq (,$(filter $(CORE_SIZE),TINY SMALL BOOM MEDIUM))
+ifneq (,$(filter $(CORE_SIZE),MICRO TINY SMALL BOOM MEDIUM))
 USER_CLK_PERIOD ?= 24
 else ifneq (,$(filter $(CORE_SIZE),SMALL_WIDE LARGE))
 USER_CLK_PERIOD ?= 32
@@ -69,7 +69,7 @@ else
 $(error unsupported CORE_SIZE)
 endif
 
-ifeq (,$(filter $(CACHE_SIZE),TEST SMALL LARGE MC_1MB MC_2MB))
+ifeq (,$(filter $(CACHE_SIZE),TEST MICRO SMALL LARGE MC_1MB MC_2MB))
 $(error unsupported CACHE_SIZE)
 endif
 
@@ -114,7 +114,7 @@ BSC_COMPILATION_FLAGS += \
 	-D RV64 \
 	-D ISA_PRIV_M  -D ISA_PRIV_S  -D ISA_PRIV_U  \
 	-D SV39 \
-	-D ISA_I  -D ISA_M  -D ISA_A  -D ISA_F  -D ISA_D  -D ISA_FD_DIV  -D ISA_C  \
+	-D ISA_I  -D ISA_M  -D ISA_A  -D ISA_F  -D ISA_D  -D ISA_FD_DIV  -D ISA_C \
 	-D NO_SPEC_TRAINING -D NO_SPEC_REDIRECT -D NO_SPEC_STRAIGHT_PATH -D SPEC_RSB_FIXUP -D MELTDOWN_CF \
 	-D CheriBusBytes=64 \
 	-D CheriMasterIDWidth=1 \

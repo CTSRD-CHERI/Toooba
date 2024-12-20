@@ -123,6 +123,18 @@
 
 `endif
 
+`ifdef CACHE_MICRO
+
+    // L1
+    `define LOG_L1_LINES 7 // 8KB
+    `define LOG_L1_WAYS 1 // 2 ways
+
+    // LLC
+    `define LOG_LLC_LINES 10 // 64KB
+    `define LOG_LLC_WAYS 2 // 4 ways
+
+`endif
+
 `ifdef CACHE_SMALL
 
     // L1
@@ -174,6 +186,30 @@
 //
 // ==== CORE SIZE ====
 //
+
+`ifdef CORE_MICRO
+
+    // superscalar
+    `define sizeSup 1
+
+    // ROB
+    `define ROB_SIZE 16
+
+    // speculation
+    `define NUM_EPOCHS 4
+    `define NUM_SPEC_TAGS 4
+
+    // LSQ
+    `define LDQ_SIZE 5
+    `define STQ_SIZE 3
+    `define SB_SIZE 2
+
+    // reservation station sizes
+    `define RS_ALU_SIZE 7
+    `define RS_MEM_SIZE 2
+    `define RS_FPUMULDIV_SIZE 2
+
+`endif
 
 `ifdef CORE_MINI
 
