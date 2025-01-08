@@ -432,7 +432,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
             St          : rVal2;
             Sc          : rVal2;
             Amo         : rVal2;
-            J           : nullWithAddr(getOffset(link_pcc));
+            J           : nullWithAddr(getAddr(link_pcc));
             CJAL        : setKind(link_pcc, SENTRY);
             CCall       : cap_alu_result;
             CJALR       : setKind(link_pcc, SENTRY);

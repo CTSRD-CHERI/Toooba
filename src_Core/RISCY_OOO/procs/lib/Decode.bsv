@@ -523,9 +523,15 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
         end
 
         opcJal: begin
-            dInst.iType = CJAL;
-
             legalInst = True;
+
+            if (cap_mode) begin
+                dInst.iType = CJAL;
+            end
+            else begin
+                dInst.iType = J;
+            end
+            
             regs.dst  = Valid(tagged Gpr rd);
             regs.src1 = Invalid;
             regs.src2 = Invalid;
