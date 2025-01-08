@@ -200,19 +200,19 @@ endfunction
 
 (* noinline *)
 function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWFunc scrType);
-    function csrOp (oldOffset, val, f) =
+    function csrOp (oldAddr, val, f) =
         case (f)
             Write: val;
-            Set: (oldOffset | val);
-            Clear: (oldOffset & ~val);
+            Set: (oldAddr | val);
+            Clear: (oldAddr & ~val);
         endcase;
-    let offset = getOffset(cap);
-    let oldOffset = getOffset(oldCap);
+    let addr = getAddr(cap);
+    let oldAddr = getAddr(oldCap);
     CapPipe res = (case (scrType) matches
-        tagged TVEC .csrf: update_scr_via_csr(oldCap, csrOp(oldOffset, getAddr(cap), csrf) & ~64'h2, False);
-        tagged EPC .csrf: update_scr_via_csr(oldCap, csrOp(oldOffset, getAddr(cap), csrf) & ~64'h1, False);
-        tagged TCC: update_scr_via_csr(cap, offset & ~64'h2, False); // Mask out bit 1
-        tagged EPCC: update_scr_via_csr(cap, offset & ~64'h1, offset[0] == 1'b0); // Mask out bit 0
+        tagged TVEC .csrf: update_scr_via_csr(oldCap, csrOp(oldAddr, getAddr(cap), csrf) & ~64'h2, False);
+        tagged EPC .csrf: update_scr_via_csr(oldCap, csrOp(oldAddr, getAddr(cap), csrf) & ~64'h1, False);
+        tagged TCC: update_scr_via_csr(cap, addr & ~64'h2, False); // Mask out bit 1
+        tagged EPCC: update_scr_via_csr(cap, addr & ~64'h1, addr[0] == 1'b0); // Mask out bit 0
         tagged Normal: cap;
     endcase);
     return res;
@@ -269,7 +269,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
             tagged SetFlags               :
                 setFlags(a_mut, truncate(getAddr(b)));
             tagged FromPtr                :
-                (getAddr(a) == 0 ? nullCap : setOffset(b_mut, getAddr(a)).value);
+                (getAddr(a) == 0 ? nullCap : setAddr(b_mut, getAddr(a)).value);
             tagged SetHigh:
                 fromMem(tuple2(False, {getAddr(b), getAddr(a)}));
             tagged BuildCap               :
@@ -436,7 +436,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
             CJAL        : setKind(link_pcc, SENTRY);
             CCall       : cap_alu_result;
             CJALR       : setKind(link_pcc, SENTRY);
-            Jr          : nullWithAddr(getOffset(link_pcc));
+            Jr          : nullWithAddr(getAddr(link_pcc));
             Auipc       : nullWithAddr(getOffset(pcc) + getDInstImm(dInst).Valid);
             Auipcc      : incOffset(pcc, getDInstImm(dInst).Valid).value; // could be computed with alu
             Csr         : rVal1;
