@@ -249,8 +249,8 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                       tagged TCC: b;
                       tagged EPCC: b;
                       tagged Normal: b;
-                      tagged TVEC ._: nullWithAddr(getOffset(b));
-                      tagged EPC ._: nullWithAddr(getOffset(b));
+                      tagged TVEC ._: nullWithAddr(getAddr(b));
+                      tagged EPC ._: nullWithAddr(getAddr(b));
                    endcase
             tagged SetAddr .addrSource    :
                 clearTagIf(setAddr(b_mut, (addrSource == Src1Type) ? a_type : getAddr(a) ).value, (addrSource == Src1Type) ? a_res : False);
