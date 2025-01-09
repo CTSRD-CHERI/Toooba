@@ -137,7 +137,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(NumArchReg, Ehr#(SupSize, PhyRIndx)) renaming_table <- genWithM(compose(mkEhr, fromInteger));
 
     // bit vector for cleared registers
-    Vector#(NumArchReg, Ehr#(ClearPortNum, Bool)) cleared <- replicateM(mkEhr(False));
+    Vector#(NumArchReg, Ehr#(TAdd#(ClearPortNum,1), Bool)) cleared <- replicateM(mkEhr(False));
 
     // A FIFO of
     // - in-flight renaming: when valid = True i.e. within [enqP, deqP)
@@ -257,14 +257,14 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     new_renamings_phy[curDeqP] <= freed_phy_reg;
                     valid[curDeqP][valid_commit_port] <= False;
                     // update renaming_table
-		    $display("Write renaming table [", fshow(rtIdx), "] = ", fshow(commit_phy_reg));
+		    $display($time, " Write renaming table [", fshow(rtIdx), "] = ", fshow(commit_phy_reg));
                     renaming_table[rtIdx][rt_commit_port(i)] <= commit_phy_reg;
                 end
                 else begin
                     // free the phy reg claimed by this renaming (arch reg is don't care)
                     valid[curDeqP][valid_commit_port] <= False;
                     let v = cleared_vec[curDeqP][0];
-		    $display("Write cleared_vec: ", fshow(v));
+		    $display($time, " Write cleared_vec: ", fshow(v));
                     for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
                         if(unpack(v[j])) begin
 			    $display("Arch zero renaming table [", fshow(fromInteger(j)), "]");
@@ -329,7 +329,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     new_renamings_arch[curEnqP] <= claim.arch; // keep phy reg unchanged
                     valid[curEnqP][valid_claim_port] <= True;
                     spec_bits[curEnqP][sb_claim_port] <= claim.specBits;
-                        let ve = readVEhr(i, cleared);
+                        let ve = readVEhr(fromInteger(clear_getRename_start_index + (i * valueof(SupSize))) + 1, cleared);
                         cleared_vec[curEnqP][i] <= pack(ve);
                     // sanity check
                     doAssert(!valid[curEnqP][valid_get_port], "claiming entry must be invalid");
@@ -452,7 +452,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     dst: tagged Invalid
                 };
 		for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
-			$display($time, " cleared: ", fshow(cleared[j][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))]));
+			$display($time, " cleared: ", fshow(fromInteger(j)), " - ", fshow(cleared[j][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))]));
 		end
                 if (r.src1 matches tagged Valid .valid_src1) begin
                     if (valid_src1 matches tagged Gpr .g &&& cleared[g][fromInteger(clear_getRename_start_index + (i * valueof(SupSize)))]) begin
