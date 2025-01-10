@@ -138,6 +138,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
 
     // bit vector for cleared registers
     Vector#(NumArchReg, Ehr#(TAdd#(ClearPortNum,1), Bool)) cleared <- replicateM(mkEhr(False));
+    Vector#(NumArchReg, Ehr#(SupSize, Bool)) arch_cleared <- replicateM(mkEhr(False));
 
     // A FIFO of
     // - in-flight renaming: when valid = True i.e. within [enqP, deqP)
@@ -259,6 +260,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     // update renaming_table
 		    $display($time, " Write renaming table [", fshow(rtIdx), "] = ", fshow(commit_phy_reg));
                     renaming_table[rtIdx][rt_commit_port(i)] <= commit_phy_reg;
+                    arch_cleared[rtIdx][rt_commit_port(i)] <= False;
                 end
                 else begin
                     // free the phy reg claimed by this renaming (arch reg is don't care)
@@ -268,7 +270,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     for(Integer j = 0; j < valueof(NumArchReg); j = j + 1) begin
                         if(unpack(v[j])) begin
 			    $display("Arch zero renaming table [", fshow(fromInteger(j)), "]");
-                            renaming_table[j][rt_commit_port(i)] <= 0;
+                            arch_cleared[j][rt_commit_port(i)] <= True;
                         end
                     end
                 end
@@ -424,6 +426,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         let claim_phy_reg = search_claimed_renamings(getPort, arch_reg);
         let new_phy_reg = search_new_src_renamings(arch_reg);
         let existing_phy_reg = renaming_table[getRTIndex(arch_reg)][rt_get_port];
+	if (arch_cleared[getRTIndex(arch_reg)][rt_get_port]) existing_phy_reg = 0;
         return fromMaybe(fromMaybe(existing_phy_reg, new_phy_reg), claim_phy_reg);
     endfunction
 
