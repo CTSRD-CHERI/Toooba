@@ -123,18 +123,6 @@
 
 `endif
 
-`ifdef CACHE_MICRO
-
-    // L1
-    `define LOG_L1_LINES 7 // 8KB
-    `define LOG_L1_WAYS 1 // 2 ways
-
-    // LLC
-    `define LOG_LLC_LINES 10 // 64KB
-    `define LOG_LLC_WAYS 2 // 4 ways
-
-`endif
-
 `ifdef CACHE_SMALL
 
     // L1
