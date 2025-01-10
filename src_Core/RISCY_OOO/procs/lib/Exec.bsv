@@ -365,7 +365,9 @@ function CapPipe brAddrCalc(CapPipe pc, CapPipe val, IType iType, Data imm, Bool
           doInc = False;
         end
     end
-    CapPipe targetAddr = modifyOffset(nextPc, offset, doInc).value;
+    CapPipe targetAddr = ?;
+    if(cap) targetAddr = modifyOffset(nextPc, offset, doInc).value;
+    else targetAddr = setAddr(nextPc, offset).value;
     // jumpTarget.address[0] = 1'b0;
     targetAddr = setAddrUnsafe(targetAddr, {truncateLSB(getAddr(targetAddr)), 1'b0});
     targetAddr = setKind(targetAddr, UNSEALED); // It is checked elsewhere that we have an unsealed cap already, or sentry if permitted
@@ -437,7 +439,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
             CCall       : cap_alu_result;
             CJALR       : setKind(link_pcc, SENTRY);
             Jr          : nullWithAddr(getAddr(link_pcc));
-            Auipc       : nullWithAddr(getOffset(pcc) + getDInstImm(dInst).Valid);
+            Auipc       : nullWithAddr(getAddr(pcc) + getDInstImm(dInst).Valid);
             Auipcc      : incOffset(pcc, getDInstImm(dInst).Valid).value; // could be computed with alu
             Csr         : rVal1;
             Scr         : cap_alu_result;
