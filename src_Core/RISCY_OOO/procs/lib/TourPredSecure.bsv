@@ -34,6 +34,7 @@
 // CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
+`include "ProcConfig.bsv"
 import Types::*;
 import ProcTypes::*;
 import RegFile::*;

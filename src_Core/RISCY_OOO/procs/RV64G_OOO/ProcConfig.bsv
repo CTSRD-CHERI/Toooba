@@ -186,6 +186,7 @@
     // speculation
     `define NUM_EPOCHS 4
     `define NUM_SPEC_TAGS 4
+    `define SMALL_BRANCH_PREDICTOR
 
     // LSQ
     `define LDQ_SIZE 5
