@@ -366,7 +366,7 @@ function CapPipe brAddrCalc(CapPipe pc, CapPipe val, IType iType, Data imm, Bool
         end
     end
     CapPipe targetAddr = ?;
-    if(cap) targetAddr = modifyOffset(nextPc, offset, doInc).value;
+    if(doInc) targetAddr = modifyOffset(nextPc, offset, doInc).value;
     else targetAddr = setAddr(nextPc, offset).value;
     // jumpTarget.address[0] = 1'b0;
     targetAddr = setAddrUnsafe(targetAddr, {truncateLSB(getAddr(targetAddr)), 1'b0});
