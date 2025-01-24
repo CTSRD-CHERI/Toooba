@@ -15,7 +15,7 @@
 `Opcode(Fnmsub,  7'b1001011)
 `Opcode(Fnmadd,  7'b1001111)
 `Opcode(OpFp,    7'b1010011)
-`Opcode(OpCHERI, 7'b1011011)
+`Opcode(OpXCHERI,7'b1011011)
 `Opcode(Branch,  7'b1100011)
 `Opcode(Jalr,    7'b1100111)
 `Opcode(Jal,     7'b1101111)

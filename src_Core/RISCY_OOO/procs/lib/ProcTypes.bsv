@@ -851,6 +851,34 @@ Bit#(5) opFCVT_FF = 5'b01000;
 Bit#(5) opFCVT_WF = 5'b11000;
 Bit#(5) opFCVT_FW = 5'b11010;
 
+// CHERI
+Bit#(5) opGCTAG     = 5'b00000;
+Bit#(5) opGCPERM    = 5'b00001;
+Bit#(5) opGCTYPE    = 5'b00010;
+Bit#(5) opGCMODE    = 5'b00011;
+Bit#(5) opGCHI      = 5'b00100;
+Bit#(5) opGCBASE    = 5'b00101;
+Bit#(5) opGCLEN     = 5'b00110;
+Bit#(5) opCRAM      = 5'b00111;
+Bit#(5) opSENTRY    = 5'b01000;
+
+Bit#(3) opCADD      = 3'b000;
+Bit#(3) opSCADDR    = 3'b001;
+Bit#(3) opACPERM    = 3'b010;
+Bit#(3) opSCHI      = 3'b011;
+Bit#(3) opSCEQ      = 3'b100;
+Bit#(3) opCBLD      = 3'b101;
+Bit#(3) opSCSS      = 3'b110;
+Bit#(3) opSCMODE    = 3'b111;
+
+Bit#(3) opSCBNDS    = 3'b000;
+Bit#(3) opSCBNDSR   = 3'b001;
+Bit#(3) fnCADDI     = 3'b010;
+
+Bit#(7) opCapInspect = 7'b0001000;
+Bit#(7) opCapArith   = 7'b0000110;
+Bit#(7) opCapBounds  = 7'b0000111;
+
 //MiscMem
 Bit#(3) fnFENCE  = 3'b000;
 Bit#(3) fnFENCEI = 3'b001;

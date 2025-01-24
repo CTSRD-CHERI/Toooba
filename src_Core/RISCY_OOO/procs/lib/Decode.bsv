@@ -323,6 +323,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
     ImmData immU  = signExtend({ inst[31:12], 12'b0 });
     ImmData immJ  = signExtend({ inst[31], inst[19:12], inst[20], inst[30:21], 1'b0});
     ImmData immIunsigned = zeroExtend(inst[31:20]);
+    ImmData immBounds = zeroExtend(inst[25] == 1'b1 ? {inst[24:20], 4'b0} : {4'b0, inst[24:20]});
+    Bool immBoundsInvalid = inst[25] == 1'b1 && inst[24:21] == 4'b0;
 
     // Results of mini-decoders
     Maybe#(MemInst) mem_inst = decodeMemInst(inst, cap_mode, isa);
@@ -330,41 +332,47 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
 
     case (opcode)
         opcOpImm: begin
-            dInst.iType = Alu;
-            Maybe#(AluFunc) mAluFunc = case (funct3)
-                fnADD: Valid(Add);
-                fnSLT: Valid(Slt);
-                fnSLTU: Valid(Sltu);
-                fnAND: Valid(And);
-                fnOR: Valid(Or);
-                fnXOR: Valid(Xor);
-                fnSLL: (immI[11:6] == 6'b000000 ? Valid(Sll) : Invalid);
-                fnSR: (immI[11:6] == 6'b000000 ? Valid(Srl) :
-                       immI[11:6] == 6'b010000 ? Valid(Sra) :
+            Maybe#(Tuple3#(IType, AluFunc, CapFunc)) mDecode = case (funct3)
+                fnADD: Valid(tuple3(Alu, Add, ?));
+                fnSLT: Valid(tuple3(Alu, Slt, ?));
+                fnSLTU: Valid(tuple3(Alu, Sltu, ?));
+                fnAND: Valid(tuple3(Alu, And, ?));
+                fnOR: Valid(tuple3(Alu, Or, ?));
+                fnXOR: Valid(tuple3(Alu, Xor, ?));
+                fnSLL: (immI[11:6] == 6'b000000 ? Valid(tuple3(Alu, Sll, ?)) : Invalid);
+                fnSR: (immI[11:6] == 6'b000000 ? Valid(tuple3(Alu, Srl, ?)) :
+                       immI[11:6] == 6'b010000 ? Valid(tuple3(Alu, Sra, ?)) :
+                       immI[11:6] == 6'b000001 && !immBoundsInvalid ?
+                           Valid(tuple3(Cap, ?, CapModify(SetBounds(SetBoundsExact)))) : // SCBNDSI
                        Invalid);
                 default: Invalid;
             endcase;
-            legalInst = isValid(mAluFunc);
-            dInst.execFunc = tagged Alu mAluFunc.Valid;
+            legalInst = isValid(mDecode);
+            dInst.iType = tpl_1(mDecode.Valid);
+            dInst.execFunc = tagged Alu tpl_2(mDecode.Valid);
+            // Set capFunc in case this is an SCBNDSI
+            dInst.capFunc = tpl_3(mDecode.Valid);
             regs.dst  = Valid(tagged Gpr rd);
             regs.src1 = Valid(tagged Gpr rs1);
             regs.src2 = Invalid;
-            dInst.imm = Valid(immI);
+            dInst.imm = Valid(tpl_1(mDecode.Valid) == Cap ? immBounds : immI);
             dInst.csr = tagged Invalid;
         end
 
         opcOpImm32: begin
-            dInst.iType = Alu;
-            Maybe#(AluFunc) mAluFunc = case (funct3)
-                fnADD: Valid(Addw);
-                fnSLL: (immI[11:5] == 7'b0000000 ? Valid(Sllw) : Invalid);
-                fnSR: (immI[11:5] == 7'b0000000 ? Valid(Srlw) :
-                       immI[11:5] == 7'b0100000 ? Valid(Sraw) :
+            Maybe#(Tuple3#(IType, AluFunc, CapFunc)) mDecode = case (funct3)
+                fnADD: Valid(tuple3(Alu, Addw, ?));
+                fnSLL: (immI[11:5] == 7'b0000000 ? Valid(tuple3(Alu, Sllw, ?)) : Invalid);
+                fnSR: (immI[11:5] == 7'b0000000 ? Valid(tuple3(Alu, Srlw, ?)) :
+                       immI[11:5] == 7'b0100000 ? Valid(tuple3(Alu, Sraw, ?)) :
                        Invalid);
+                fnCADDI: Valid(tuple3(Cap, ?, CapModify(ModifyOffset(IncOffset))));
                 default: Invalid;
             endcase;
-            legalInst = isValid(mAluFunc);
-            dInst.execFunc = tagged Alu mAluFunc.Valid;
+            legalInst = isValid(mDecode);
+            dInst.iType = tpl_1(mDecode.Valid);
+            dInst.execFunc = tagged Alu tpl_2(mDecode.Valid);
+            dInst.capFunc = tpl_3(mDecode.Valid);
             regs.dst  = Valid(tagged Gpr rd);
             regs.src1 = Valid(tagged Gpr rs1);
             regs.src2 = Invalid;
@@ -434,6 +442,59 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             func: mFunc.Valid, w: w, sign: sign
                         });
                     end
+                end
+                opCapInspect: begin
+                    if (funct3 == 3'b000) begin
+                        Maybe#(CapFunc) mCapFunc = case(rs2)
+                            opGCTAG  : Valid(CapInspect(GetTag));
+                            opGCPERM : Valid(CapInspect(GetPerm));
+                            opGCTYPE : Valid(CapInspect(GetType));
+                            opGCMODE : Valid(CapInspect(GetFlags));
+                            opGCHI   : Valid(CapInspect(GetHigh));
+                            opGCBASE : Valid(CapInspect(GetBase));
+                            opGCLEN  : Valid(CapInspect(GetLen));
+                            opCRAM   : Valid(CapModify(SetBounds(CRAM)));
+                            opSENTRY : Valid(CapModify(SealEntry));
+                            default  : Invalid;
+                        endcase;
+                        dInst.capFunc = mCapFunc.Valid;
+                        legalInst = isValid(mCapFunc);
+                        dInst.iType = Cap;
+                        regs.dst = Valid(tagged Gpr rd);
+                        regs.src1 = Valid(tagged Gpr rs1);
+                    end
+                end
+                opCapArith: begin
+                    Maybe#(CapFunc) mCapFunc = case(funct3)
+                        opCADD   : Valid(CapModify(rs2 == 0 ? Move : ModifyOffset(IncOffset)));
+                        opSCADDR : Valid(CapModify(SetAddr(Src1Addr)));
+                        opACPERM : Valid(CapModify(AndPerm));
+                        opSCHI   : Valid(CapModify(SetHigh));
+                        opSCEQ   : Valid(CapInspect(SetEqualExact));
+                        opCBLD   : Valid(CapModify(BuildCap));
+                        opSCSS   : Valid(CapInspect(TestSubset));
+                        opSCMODE : Valid(CapModify(SetFlags));
+                        default  : Invalid;
+                    endcase;
+                    dInst.capFunc = mCapFunc.Valid;
+                    legalInst = isValid(mCapFunc);
+                    dInst.iType = Cap;
+                    regs.dst = Valid(tagged Gpr rd);
+                    regs.src1 = Valid(tagged Gpr rs1);
+                    regs.src2 = mCapFunc != Valid(CapModify(Move)) ? Valid(tagged Gpr rs2) : Invalid;
+                end
+                opCapBounds: begin
+                    Maybe#(CapFunc) mCapFunc = case(funct3)
+                        opSCBNDS : Valid(CapModify(SetBounds(SetBoundsExact)));
+                        opSCBNDSR: Valid(CapModify(SetBounds(SetBoundsRounding)));
+                        default: Invalid;
+                    endcase;
+                    legalInst = isValid(mCapFunc);
+                    dInst.capFunc = mCapFunc.Valid;
+                    dInst.iType = Cap;
+                    regs.dst = Valid(tagged Gpr rd);
+                    regs.src1 = Valid(tagged Gpr rs1);
+                    regs.src2 = Valid(tagged Gpr rs2);
                 end
             endcase
         end
@@ -950,7 +1011,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
             end
         end
 
-        opcOpCHERI: begin
+        opcOpXCHERI: begin
             case (funct3)
                 f3_cap_CIncOffsetImmediate: begin
                     legalInst = True;
