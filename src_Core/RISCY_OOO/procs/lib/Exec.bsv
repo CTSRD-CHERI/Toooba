@@ -60,6 +60,7 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
         result = e1(cheriExcSealViolation);
     else if (toCheck.src1_unsealed_or_imm_zero && isValidCap(a) && (getKind(a) != UNSEALED) && (imm != 0))
         result = e1(cheriExcSealViolation);
+`ifndef ZCHERI
     else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
         result = e1(cheriExcSealViolation);
     else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
@@ -72,6 +73,7 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
         result = e1(cheriExcPermitCCallViolation);
     else if (toCheck.src2_permit_ccall         && !getHardPerms(b).permitCCall)
         result = e2(cheriExcPermitCCallViolation);
+`endif
     else if (toCheck.src1_permit_x             && !getHardPerms(a).permitExecute)
         result = e1(cheriExcPermitXViolation);
     else if (toCheck.src2_no_permit_x          && getHardPerms(b).permitExecute)
@@ -98,13 +100,25 @@ function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapCheck
         result = eAuth(cheriExcSealViolation);
     else if (isLoad && !getHardPerms(auth).permitLoad)
         result = eAuth(cheriExcPermitRViolation);
+`ifdef ZCHERI
+    else if (isLoad && !(getHardPerms(auth).permitLoad && getHardPerms(auth).permitCap) && byteOrTagEn == TagMemAccess)
+`else
     else if (isLoad && !getHardPerms(auth).permitLoadCap && byteOrTagEn == TagMemAccess)
+`endif
         result = eAuth(cheriExcPermitRCapViolation);
     else if (isStore && !getHardPerms(auth).permitStore)
         result = eAuth(cheriExcPermitWViolation);
+`ifdef ZCHERI
+    else if (storeValidCap && !(getHardPerms(auth).permitStore && getHardPerms(auth).permitCap))
+`else
     else if (storeValidCap && !getHardPerms(auth).permitStoreCap)
+`endif
         result = eAuth(cheriExcPermitWCapViolation);
+`ifdef ZCHERI
+    else if (storeValidCap && !(getHardPerms(auth).permissionStoreLevel < getHardPerms(data).capabilityLevel))
+`else
     else if (storeValidCap && !getHardPerms(auth).permitStoreLocalCap && !getHardPerms(data).global)
+`endif
         result = eAuth(cheriExcPermitWLocalCapViolation);
     return result;
 endfunction
@@ -139,7 +153,9 @@ function Maybe#(BoundsCheck) prepareBoundsCheck(CapPipe a, CapPipe b, CapPipe pc
     case(toCheck.check_low_src)
         Src1Addr: ret.check_low = getAddr(a);
         Src1Base: ret.check_low = getBase(a);
+`ifndef ZCHERI
         Src1Type: ret.check_low = zeroExtend(getKind(a).SEALED_WITH_TYPE);
+`endif
         Src2Addr: ret.check_low = getAddr(b);
         Vaddr:    ret.check_low = vaddr;
     endcase
@@ -147,7 +163,9 @@ function Maybe#(BoundsCheck) prepareBoundsCheck(CapPipe a, CapPipe b, CapPipe pc
     case(toCheck.check_high_src)
         Src1AddrPlus2: ret.check_high = {1'b0,getAddr(a)+2};
         Src1Top: ret.check_high = getTop(a);
+`ifndef ZCHERI
         Src1Type: ret.check_high = zeroExtend(getKind(a).SEALED_WITH_TYPE);
+`endif
         Src2Addr: ret.check_high = {1'b0,getAddr(b)};
         ResultTop: ret.check_high = {1'b0,getAddr(a)} + {1'b0,getAddr(b)};
         VaddrPlusSize: ret.check_high = {1'b0,vaddr} + zeroExtend(size);
@@ -220,10 +238,14 @@ endfunction
 
 function Tuple2#(Data, Bool) extractType(CapPipe a);
     if      (getKind(a) == UNSEALED) return tuple2(otype_unsealed_ext, True);
+`ifdef ZCHERI
+    else return tuple2(otype_sentry_ext, True);
+`else
     else if (getKind(a) == SENTRY  ) return tuple2(otype_sentry_ext, True);
     else if (getKind(a) == RES0    ) return tuple2(otype_res0_ext, True);
     else if (getKind(a) == RES1    ) return tuple2(otype_res1_ext, True);
     else return tuple2(zeroExtend(getKind(a).SEALED_WITH_TYPE), False);
+`endif
 endfunction
 
 function CapPipe clearTagIf(CapPipe a, Bool cond);
@@ -236,10 +258,14 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
     let b_mut = setValidCap(b, isValidCap(b) && getKind(b) == UNSEALED);
     match {.a_type, .a_res} = extractType(a);
     Bool sealPassthrough = !isValidCap(b) || getKind(a) != UNSEALED || !isInBounds(b, False) || getAddr(b) == otype_unsealed_ext;
+`ifdef ZCHERI
+    Bool sealIllegal = getKind(b) != UNSEALED;
+`else
     Bool sealIllegal = getKind(b) != UNSEALED || !getHardPerms(b).permitSeal || !validAsType(b, getAddr(b));
     let new_hard_perms = getHardPerms(a);
     new_hard_perms.global = new_hard_perms.global && getHardPerms(b).global;
     Bool unsealIllegal = !isValidCap(b) || getKind(a) != UNSEALED || getKind(b) == UNSEALED || a_res || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
+`endif
     Bool buildCapIllegal = !isValidCap(b) || getKind(b) != UNSEALED || !isDerivable(a) || (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b); // XXX needs optimisation
     CapPipe res = (case(func) matches
             tagged ModifyOffset .offsetOp :
@@ -258,6 +284,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 clearTagIf(setAddr(b_mut, (addrSource == Src1Type) ? a_type : getAddr(a) ).value, (addrSource == Src1Type) ? a_res : False);
             tagged SealEntry              :
                 setKind(a_mut, SENTRY);
+`ifndef ZCHERI
             tagged Seal                   :
                 clearTagIf( setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b))))
                           , sealPassthrough || sealIllegal);
@@ -266,12 +293,16 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                      clearTagIf(setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b)))), sealIllegal));
             tagged Unseal .src            :
                 clearTagIf(setHardPerms(setKind(((src == Src1) ? a:b), UNSEALED), new_hard_perms), (src == Src1) && unsealIllegal);
+`endif
             tagged AndPerm                :
                 setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
+`ifndef ZCHERI
             tagged SetFlags               :
                 setFlags(a_mut, truncate(getAddr(b)));
             tagged FromPtr                :
                 (getAddr(a) == 0 ? nullCap : setAddr(b_mut, getAddr(a)).value);
+                (getAddr(a) == 0 ? nullCap : setOffset(b_mut, getAddr(a)).value);
+`endif
             tagged SetHigh:
                 fromMem(tuple2(False, {getAddr(b), getAddr(a)}));
             tagged BuildCap               :
@@ -309,7 +340,11 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                tagged GetOffset              :
                    getOffset(a);
                tagged GetFlags               :
+`ifdef ZCHERI
+                   zeroExtend(pack(getIntMode(a)));
+`else
                    zeroExtend(getFlags(a));
+`endif
                tagged GetPerm                :
                    zeroExtend(getPerms(a));
                tagged GetHigh                :
