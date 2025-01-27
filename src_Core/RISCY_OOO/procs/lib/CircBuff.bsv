@@ -14,6 +14,9 @@ endinterface
 
 interface CircBuff#(numeric type size, type t);
     interface Vector#(SupSize, CircBuffAssign#(size)) specAssign;
+
+    method CircBuffIndex#(size) specAssignUnconfirmed;
+    method Action specAssignConfirmed(SupCnt count);
     // Seperate actions so only slow for updates after a misprediction? critical path?
     method Action enqueue(t data, CircBuffIndex#(size) index);
     method ActionValue#(Bit#(TLog#(size))) handleMispred(CircBuffIndex#(size) index);
@@ -29,7 +32,7 @@ module mkCircBuff(CircBuff#(size, t)) provisos(Bits#(t, a__));
     Reg#(CircBuffIndex#(size)) startSpec <- mkConfigReg(0);
     
     // For now - allow for multiple predictions in a cycle
-    Ehr#(TAdd#(SupSize,2), CircBuffIndex#(size)) endSpec <- mkEhr(0);
+    Ehr#(TAdd#(SupSize,3), CircBuffIndex#(size)) endSpec <- mkEhr(0);
     Reg#(CircBuffIndex#(size)) endSpecLast <- mkConfigReg(0);
 
     function CircBuffIndex#(size) nextIndex(CircBuffIndex#(size) ind);
@@ -56,6 +59,18 @@ module mkCircBuff(CircBuff#(size, t)) provisos(Bits#(t, a__));
         endinterface);
     end
     interface specAssign = assignIfc;
+
+    method CircBuffIndex#(size) specAssignUnconfirmed;
+        return endSpec[0];
+    endmethod
+
+    method Action specAssignConfirmed(SupCnt count);
+        CircBuffIndex#(size) index = endSpecLast;
+        for(Integer i = 0; fromInteger(i) < count; i = i +1)
+            index = nextIndex(index);
+
+        endSpec[valueOf(SupSize)] <= index;
+    endmethod
     
     // Assuming that after a misprediction is registered I will not recieve updates from branches speculated from it
     // Even if the misprediciton itself was from a mispeculated branch
@@ -70,14 +85,14 @@ module mkCircBuff(CircBuff#(size, t)) provisos(Bits#(t, a__));
 
     // Index should always be == argument of enqueue, but I seperate the methods here
     method ActionValue#(Bit#(TLog#(size))) handleMispred(CircBuffIndex#(size) index);
-        endSpec[valueOf(SupSize)] <= nextIndex(index);
+        endSpec[valueOf(SupSize)+1] <= nextIndex(index);
         /*
             In the predictor it already stops predictions from updating the history in the case of a misprediction in the same cycle
             So recovery isn't needed for these bits.
         */
         let recoverBy = index < endSpecLast ? endSpecLast - index - 1: endSpecLast + (fromInteger(valueOf(size)-1) - index);
         `ifdef DEBUG_TAGETEST   
-            $display("TAGETEST Mispredict on %d, p1=%d, p2=%d\n", index, startSpec, endSpec[valueOf(SupSize)]);
+            $display("TAGETEST Mispredict on %d, p1=%d, p2=%d\n", index, startSpec, endSpecLast);
             $display("TAGETEST recovered history by %d bits\n", recoverBy+1);
         `endif
         return recoverBy;

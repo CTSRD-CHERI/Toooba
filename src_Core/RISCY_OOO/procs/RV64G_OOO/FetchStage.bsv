@@ -677,7 +677,6 @@ module mkFetchStage(FetchStage);
             end else if (in.decode_epoch == decode_epoch_local) begin   
                DirPredResult#(DirPredTrainInfo, DirPredSpecInfo) dir_pred = DirPredResult{taken: False, train: ?, spec: ?, pc: ?};
                if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
-                    branchResults[branchCount] = pack(validValue(decodeIn[i]).pred_jump);
                     
                     // So it compiles - REMOVE LATER
                     Bit#(1) took <- dummy(1);
@@ -691,12 +690,13 @@ module mkFetchStage(FetchStage);
                     if(predResults[branchCountRecieved] matches tagged Valid .res &&& res.pc == last_x16_pc) begin
                         predOutput.deqS[branchCountRecieved].deq;
                         
-                        branchCountRecieved = branchCountRecieved + 1;
                         dir_pred = res;
                         likely_epoch_change = (dir_pred.taken != validValue(decodeIn[i]).pred_jump);
 
+                        branchResults[branchCountRecieved] = pack(dir_pred.taken);
+                        branchCountRecieved = branchCountRecieved + 1;
+
                         $display("PREDICT with %x %x %d %d\n", pc, dir_pred.pc, dir_pred.taken);
-                        branchResults[branchCount] = pack(dir_pred.taken);
                     end
                     else begin
                         let next = decodeBrPred(pc, decode_result.dInst, False, (validValue(decodeIn[i]).inst_kind == Inst_32b));
@@ -828,7 +828,7 @@ module mkFetchStage(FetchStage);
          napTrainByDecQ.enq(x);
       end
 
-      dirPred.confirmPred(branchResults, branchCount);
+      dirPred.confirmPred(branchResults, branchCountRecieved);
 `ifdef PERF_COUNT
       // performance counter: check whether redirect happens
       if(redirectInst matches tagged Valid .iType &&& doStats) begin

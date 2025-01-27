@@ -38,8 +38,9 @@ import GSharePred::*;
 import TourPred::*;
 
 import TourPredSecure::*;
-import TageTest::*;
 */
+import TageTest::*;
+
 import TourPredStaged::*;
 
 export DirPredTrainInfo(..);
@@ -106,7 +107,7 @@ module mkDirPredictor#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(DirPredTrainI
     let m <- mkBimodal;
 `endif
 `ifdef DIR_PRED_TAGETEST
-    let m <- mkTageTest;
+    let m <- mkTageTest(in);
 `endif
 
 `ifdef DIR_PRED_TOUR_STAGED
