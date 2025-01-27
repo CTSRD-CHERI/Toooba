@@ -85,6 +85,9 @@ interface DirPredictor#(type trainInfoT, type specInfoT);
     //interface Vector#(SupSize, DirPred#(trainInfoT, specInfoT)) pred;
     method Action update(Bool taken, trainInfoT train, Bool mispred);
     method Action confirmPred(Bit#(SupSize) results, SupCnt count); // By decode stage, for speculative history and end_pointer update
+    
+    method specInfoT getSpec(SupCnt i);
+
     method Action flush;
     method Bool flush_done;
 endinterface

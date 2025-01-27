@@ -675,7 +675,7 @@ module mkFetchStage(FetchStage);
                redirectPc = Valid (pc); // record redirect to the first PC in this bundle.
                trainNAP = Valid (TrainNAP {pc: pc, nextPc: pc + 2, branch: False});
             end else if (in.decode_epoch == decode_epoch_local) begin   
-               DirPredResult#(DirPredTrainInfo, DirPredSpecInfo) dir_pred = DirPredResult{taken: False, train: ?, spec: ?, pc: ?};
+               DirPredResult#(DirPredTrainInfo, DirPredSpecInfo) dir_pred = DirPredResult{taken: False, train: unpack(0), spec: unpack(0), pc: ?};
                if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
                     
                     // So it compiles - REMOVE LATER
@@ -691,12 +691,13 @@ module mkFetchStage(FetchStage);
                         predOutput.deqS[branchCountRecieved].deq;
                         
                         dir_pred = res;
+                        dir_pred.spec = dirPred.getSpec(branchCountRecieved);
                         likely_epoch_change = (dir_pred.taken != validValue(decodeIn[i]).pred_jump);
 
                         branchResults[branchCountRecieved] = pack(dir_pred.taken);
                         branchCountRecieved = branchCountRecieved + 1;
 
-                        $display("PREDICT with %x %x %d %d\n", pc, dir_pred.pc, dir_pred.taken);
+                        $display("PREDICT with %x %x %d ID=%d %d\n", pc, dir_pred.pc, dir_pred.taken, dir_pred.spec, dirPred.getSpec(branchCountRecieved));
                     end
                     else begin
                         let next = decodeBrPred(pc, decode_result.dInst, False, (validValue(decodeIn[i]).inst_kind == Inst_32b));

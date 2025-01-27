@@ -15,7 +15,7 @@ endinterface
 interface CircBuff#(numeric type size, type t);
     interface Vector#(SupSize, CircBuffAssign#(size)) specAssign;
 
-    method CircBuffIndex#(size) specAssignUnconfirmed;
+    method CircBuffIndex#(size) specAssignUnconfirmed(SupCnt count);
     method Action specAssignConfirmed(SupCnt count);
     // Seperate actions so only slow for updates after a misprediction? critical path?
     method Action enqueue(t data, CircBuffIndex#(size) index);
@@ -41,7 +41,7 @@ module mkCircBuff(CircBuff#(size, t)) provisos(Bits#(t, a__));
 
     (* no_implicit_conditions, fire_when_enabled*)
     rule updateEndSpecLast;
-        endSpecLast <= endSpec[valueOf(SupSize)+1];
+        endSpecLast <= endSpec[valueOf(SupSize)+2];
     endrule
 
     // Methods should not conflict as the indices for update and predict theoretically should not overlap
@@ -60,8 +60,12 @@ module mkCircBuff(CircBuff#(size, t)) provisos(Bits#(t, a__));
     end
     interface specAssign = assignIfc;
 
-    method CircBuffIndex#(size) specAssignUnconfirmed;
-        return endSpec[0];
+    method CircBuffIndex#(size) specAssignUnconfirmed(SupCnt count);
+        CircBuffIndex#(size) index = endSpecLast;
+        for(Integer i = 0; fromInteger(i) < count; i = i +1)
+            index = nextIndex(index);
+
+        return index;
     endmethod
 
     method Action specAssignConfirmed(SupCnt count);

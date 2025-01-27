@@ -50,6 +50,10 @@ module mkTageTest#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTestTrainInfo
         tage.dirPredInterface.specRecover(specInfo, taken);
     endmethod
 
+    method TageSpecInfo getSpec(SupCnt i);
+        return tage.dirPredInterface.getSpec(i);
+    endmethod
+
     method flush = noAction;
     method flush_done = True;
 endmodule

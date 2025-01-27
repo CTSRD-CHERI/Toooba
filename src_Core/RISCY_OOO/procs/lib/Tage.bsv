@@ -496,11 +496,10 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
                 ret.taken = prediction;
             end
 
-            let ooIndex = ooBuff.specAssignUnconfirmed;
+            //let ooIndex = ooBuff.specAssignUnconfirmed;
 
             `ifdef DEBUG_TAGETEST   
                 $display("TAGETEST Prediction on: %x,%d, Taken: %d, cycle %d\n", in.pc , i, ret.taken, cur_cycle);
-                $display("TAGETEST Id given = %d\n",ooIndex);
             `endif
           
             pred1ToPred2[i] <= tagged Valid GuardedResult {
@@ -509,7 +508,7 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
                     train: ret,
                     pc: in.pc,
                     spec: TageSpecInfo {
-                        ooIndex: ooIndex,
+                        ooIndex: ?,
                         confirmed: True
                     }
                 },
@@ -614,8 +613,13 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
             end
         endmethod
 
+        method TageSpecInfo getSpec(SupCnt i);
+            return TageSpecInfo{ooIndex: ooBuff.specAssignUnconfirmed(i), confirmed: True};
+        endmethod
+
         method Action confirmPred(Bit#(SupSize) results, SupCnt count);
-            $display("Confirm Pred %b %d\n", results, count);
+            if(count > 0)
+                $display("TAGETEST Confirm Pred %b %d\n", results, count);
             numPred[0] <= count;
             predResults[0] <= results;
         endmethod
