@@ -225,7 +225,12 @@ Bit #(3) w_SIZE_MAX = f3_SD;
 Bit #(3) f3_AMO_CAP = w_SIZE_CAP;
 
 // Special cases of Otypes that are extended to XLEN
+`ifdef ZCHERI
+Bit #(XLEN) otype_unsealed_ext = 0;
+Bit #(XLEN) otype_sentry_ext = 1;
+`else
 Bit #(XLEN) otype_unsealed_ext = -1;
 Bit #(XLEN) otype_sentry_ext = -2;
 Bit #(XLEN) otype_res0_ext = -3;
 Bit #(XLEN) otype_res1_ext = -4;
+`endif
