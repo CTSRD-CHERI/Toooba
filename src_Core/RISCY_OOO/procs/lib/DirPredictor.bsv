@@ -73,7 +73,7 @@ typedef TageTestSpecInfo DirPredSpecInfo;
 `endif
 
 //(* synthesize *)
-module mkDirPredictor#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(DirPredTrainInfo, DirPredSpecInfo))) in)(DirPredictor#(DirPredTrainInfo, DirPredSpecInfo));
+module mkDirPredictor#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(DirPredTrainInfo))) in)(DirPredictor#(DirPredTrainInfo, DirPredSpecInfo));
 `ifdef DIR_PRED_BHT
 `ifdef SECURITY
     staticAssert(False, "BHT with flush methods is not implemented");

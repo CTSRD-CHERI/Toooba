@@ -75,7 +75,7 @@ module mkTourGHistReg(TourGHistReg);
 endmodule
 
 //(* synthesize *)
-module mkTourPredStaged#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TourTrainInfo, TourPredSpecInfo))) outInf)(DirPredictor#(TourTrainInfo, TourPredSpecInfo));
+module mkTourPredStaged#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TourTrainInfo))) outInf)(DirPredictor#(TourTrainInfo, TourPredSpecInfo));
     // local history: MSB is the latest branch
     RegFile#(PCIndex, TourLocalHist) localHistTab <- mkRegFileWCF(0, maxBound);
     // local sat counters
@@ -89,7 +89,7 @@ module mkTourPredStaged#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TourTrainIn
     
     // Lookup PC
     Vector#(SupSize, RWire#(PredIn)) predIn <- replicateM(mkRWire);
-    Vector#(SupSize, Reg#(Maybe#(GuardedResult#(TourTrainInfo, TourPredSpecInfo)))) pred1ToPred2 <- replicateM(mkDReg(tagged Invalid));
+    Vector#(SupSize, Reg#(Maybe#(GuardedResult#(TourTrainInfo)))) pred1ToPred2 <- replicateM(mkDReg(tagged Invalid));
 
     // EHR to record predict results in this cycle
     Ehr#(TAdd#(1, SupSize), SupCnt) predCnt <- mkEhr(0);
@@ -163,8 +163,7 @@ module mkTourPredStaged#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TourTrainIn
                         localTaken: localTaken,
                         pcIndex: pcIndex
                     },
-                    pc: in.pc,
-                    spec: 0
+                    pc: in.pc
                 },
                 main_epoch: in.main_epoch,
                 decode_epoch: in.decode_epoch
@@ -176,7 +175,7 @@ module mkTourPredStaged#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TourTrainIn
 
     // Very awkward, it doesn't like me doing it directly, as it thinks there is a conflict
     rule predStageTwo;
-        Vector#(SupSize, GuardedResult#(TourTrainInfo, TourPredSpecInfo)) results = replicate(unpack(0));
+        Vector#(SupSize, GuardedResult#(TourTrainInfo)) results = replicate(unpack(0));
         Bit#(TAdd#(TLog#(SupSize),1)) count = 0;
         for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
             if(pred1ToPred2[i] matches tagged Valid .in) begin
@@ -234,6 +233,10 @@ module mkTourPredStaged#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TourTrainIn
             let choiceCnt = choiceBht.sub(train.globalHist);
             choiceBht.upd(train.globalHist, updateCnt(choiceCnt, useLocal));
         end
+    endmethod
+
+    method Bit#(1) getSpec(SupCnt i);
+        return 0;
     endmethod
 
     method Action specRecover(TourPredSpecInfo dummy, Bool taken) = noAction;

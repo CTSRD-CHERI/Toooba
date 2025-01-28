@@ -59,14 +59,13 @@ typedef struct {
     trainInfoT train;
     // For debug
     Addr pc;
-    specInfoT spec;
-} DirPredResult#(type trainInfoT, type specInfoT) deriving(Bits, Eq, FShow);
+} DirPredResult#(type trainInfoT) deriving(Bits, Eq, FShow);
 
 typedef struct {
-    DirPredResult#(trainInfoT, specInfoT) result;
+    DirPredResult#(trainInfoT) result;
     Epoch main_epoch;
     Bool decode_epoch;
-} GuardedResult#(type trainInfoT, type specInfoT) deriving(Bits, Eq, FShow);
+} GuardedResult#(type trainInfoT) deriving(Bits, Eq, FShow);
 
 typedef struct {
   Addr pc;
@@ -75,8 +74,8 @@ typedef struct {
 } PredIn deriving(Bits, Eq, FShow);
 
 
-interface DirPred#(type trainInfoT, type specInfoT);
-  method ActionValue#(Maybe#(GuardedResult#(trainInfoT, specInfoT))) pred;
+interface DirPred#(type trainInfoT);
+  method ActionValue#(Maybe#(GuardedResult#(trainInfoT))) pred;
 endinterface
 
 interface DirPredictor#(type trainInfoT, type specInfoT);

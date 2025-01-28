@@ -23,7 +23,7 @@ export mkTageTest;
 typedef TageTrainInfo#(`NUM_TABLES) TageTestTrainInfo;
 typedef TageSpecInfo TageTestSpecInfo;
 
-module mkTageTest#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTestTrainInfo, TageTestSpecInfo))) outInf)(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo));
+module mkTageTest#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTestTrainInfo))) outInf)(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo));
     Reg#(Bool) starting <- mkReg(True);
     Tage#(7) tage <- mkTage(outInf);
     Reg#(UInt#(64)) predCount <- mkReg(0);

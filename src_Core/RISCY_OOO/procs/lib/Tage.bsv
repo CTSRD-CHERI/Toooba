@@ -154,7 +154,7 @@ endinterface
 
 */
 
-module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTables), TageSpecInfo))) outInf)(Tage#(numTables)) provisos(
+module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTables)))) outInf)(Tage#(numTables)) provisos(
     Bits#(TageTrainInfo#(numTables), a__),
     Add#(1, b__, TLog#(TAdd#(1, numTables))),
     Add#(c__, numTables, 20)
@@ -185,7 +185,7 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
     Reg#(Bool) starting <- mkReg(True);
 
     Vector#(SupSize, RWire#(PredIn)) predIn <- replicateM(mkRWire);
-    Vector#(SupSize, Reg#(Maybe#(GuardedResult#(TageTrainInfo#(numTables), TageSpecInfo)))) pred1ToPred2 <- replicateM(mkDReg(tagged Invalid));
+    Vector#(SupSize, Reg#(Maybe#(GuardedResult#(TageTrainInfo#(numTables))))) pred1ToPred2 <- replicateM(mkDReg(tagged Invalid));
   
     function Bool useAlt;
         return unpack(pack(alt_on_na)[`METAPREDICTOR_CTR_SIZE-1]);
@@ -506,11 +506,7 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
                 result: DirPredResult{
                     taken: ret.taken,
                     train: ret,
-                    pc: in.pc,
-                    spec: TageSpecInfo {
-                        ooIndex: ?,
-                        confirmed: True
-                    }
+                    pc: in.pc
                 },
                 main_epoch: in.main_epoch,
                 decode_epoch: in.decode_epoch
@@ -519,7 +515,7 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
     end
 
     rule predStageTwo;
-        Vector#(SupSize, GuardedResult#(TageTrainInfo#(numTables), TageSpecInfo)) results = replicate(unpack(0));
+        Vector#(SupSize, GuardedResult#(TageTrainInfo#(numTables))) results = replicate(unpack(0));
         Bit#(TAdd#(TLog#(SupSize),1)) count = 0;
         for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
             if(pred1ToPred2[i] matches tagged Valid .in) begin

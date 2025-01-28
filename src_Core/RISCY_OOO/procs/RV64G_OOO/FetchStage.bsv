@@ -304,8 +304,9 @@ module mkFetchStage(FetchStage);
     SupFifo#(SupSizeX2, 3, Fetch2ToDecode) f2d <- mkUGSupFifo; // Unguarded to prevent the static analyser from exploding.
     SupFifo#(SupSize, 3, FromFetchStage) out_fifo <- mkSupFifo;
     
+    // May be overkill
     SupFifo#(SupSizeX2, 4, PredIn) predInput <- mkUGSupFifo;
-    SupFifo#(SupSize, 6, GuardedResult#(DirPredTrainInfo, DirPredSpecInfo)) predOutput <- mkUGSupFifo;
+    SupFifo#(SupSize, 6, GuardedResult#(DirPredTrainInfo)) predOutput <- mkUGSupFifo;
        // Can the fifo size be smaller?
 
     // Branch Predictors
@@ -562,7 +563,7 @@ module mkFetchStage(FetchStage);
     endrule: doFetch2
 
    function Bool isCurrent(Fetch2ToDecode in) = (in.main_epoch == f_main_epoch && in.decode_epoch == decode_epoch[0]);
-   function Bool isCurrentPred(GuardedResult#(DirPredTrainInfo, DirPredSpecInfo) in) = (in.main_epoch == f_main_epoch && in.decode_epoch == decode_epoch[0]);
+   function Bool isCurrentPred(GuardedResult#(DirPredTrainInfo) in) = (in.main_epoch == f_main_epoch && in.decode_epoch == decode_epoch[0]);
 
    rule doDecodeFlush(f2d.deqS[0].canDeq && !isCurrent(f2d.deqS[0].first));
       for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1)
@@ -602,12 +603,12 @@ module mkFetchStage(FetchStage);
       Bit#(TLog#(SupSize)) pick_count = 0;
       Bool prev_frag_available = False;
       
-      Vector#(SupSize, Maybe#(DirPredResult#(DirPredTrainInfo, DirPredSpecInfo))) predResults = replicate(Invalid);
+      Vector#(SupSize, Maybe#(DirPredResult#(DirPredTrainInfo))) predResults = replicate(Invalid);
       for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
         if(predOutput.deqS[i].canDeq) begin
             predResults[i] = tagged Valid predOutput.deqS[i].first.result;
         end
-       end
+      end
       
       for (Integer i = 0; i < valueOf(SupSizeX2) && !isValid(decodeIn[valueOf(SupSize) - 1]); i = i + 1) begin
          Maybe#(InstrFromFetch2) new_pick = Invalid;
@@ -675,7 +676,9 @@ module mkFetchStage(FetchStage);
                redirectPc = Valid (pc); // record redirect to the first PC in this bundle.
                trainNAP = Valid (TrainNAP {pc: pc, nextPc: pc + 2, branch: False});
             end else if (in.decode_epoch == decode_epoch_local) begin   
-               DirPredResult#(DirPredTrainInfo, DirPredSpecInfo) dir_pred = DirPredResult{taken: False, train: unpack(0), spec: unpack(0), pc: ?};
+               DirPredResult#(DirPredTrainInfo) dir_pred = DirPredResult{taken: False, train: unpack(0), pc: ?};
+               DirPredSpecInfo dir_spec = unpack(0);
+
                if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
                     
                     // So it compiles - REMOVE LATER
@@ -691,13 +694,13 @@ module mkFetchStage(FetchStage);
                         predOutput.deqS[branchCountRecieved].deq;
                         
                         dir_pred = res;
-                        dir_pred.spec = dirPred.getSpec(branchCountRecieved);
+                        dir_spec = dirPred.getSpec(branchCountRecieved);
                         likely_epoch_change = (dir_pred.taken != validValue(decodeIn[i]).pred_jump);
 
                         branchResults[branchCountRecieved] = pack(dir_pred.taken);
                         branchCountRecieved = branchCountRecieved + 1;
 
-                        $display("PREDICT with %x %x %d ID=%d %d\n", pc, dir_pred.pc, dir_pred.taken, dir_pred.spec, dirPred.getSpec(branchCountRecieved));
+                        $display("PREDICT with %x %x %d ID=%d %d\n", pc, dir_pred.pc, dir_pred.taken, dir_spec, dirPred.getSpec(branchCountRecieved));
                     end
                     else begin
                         let next = decodeBrPred(pc, decode_result.dInst, False, (validValue(decodeIn[i]).inst_kind == Inst_32b));
@@ -795,7 +798,7 @@ module mkFetchStage(FetchStage);
                                         ppc: ppc,
                                         main_epoch: in.main_epoch,
                                         dpTrain: dir_pred.train,
-                                        dpSpec: dir_pred.spec,
+                                        dpSpec: dir_spec,
                                         inst: in.inst,
                                         dInst: dInst,
                                         orig_inst: in.orig_inst,
