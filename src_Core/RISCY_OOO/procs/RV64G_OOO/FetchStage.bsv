@@ -181,9 +181,10 @@ typedef Bit#(PcIdxSz) PcIdx;
 typedef struct {
     PcLSB lsb;
     PcIdx idx;
+    Bool  cap_mode;
 } PcCompressed deriving(Bits,Eq,FShow);
 function PcCompressed compressPc(PcIdx i, CapMem a) =
-    PcCompressed{idx: i, lsb: truncate(a)};
+    PcCompressed{idx: i, lsb: truncate(a), cap_mode: !getIntMode(a)};
 
 typedef struct {
     Addr pc;
@@ -269,15 +270,18 @@ function Bool popInst(DecodeResult dr);
     return doPop;
 endfunction
 
-function InstrFromFetch2 fetch2_2_instC(Fetch2ToDecode in, Instruction inst, Bit#(32) orig_inst) =
-   InstrFromFetch2 {
-      pc: in.pc,
+function InstrFromFetch2 fetch2_2_instC(Fetch2ToDecode in, Instruction inst, Bit#(32) orig_inst, Bool cap_mode);
+   let new_pc = in.pc;
+   new_pc.cap_mode = cap_mode;
+   return InstrFromFetch2 {
+      pc: new_pc,
 `ifdef RVFI_DII
       dii_pid: in.dii_pid,
 `endif
       // This assumes we will call this function on the last fragment of any instruction.
-      ppc: fromMaybe(PcCompressed{lsb: in.pc.lsb + 2,
-                                  idx: in.pc.idx + ((in.pc.lsb == -2) ? 1:0)}, // If we move to a new page, we will move to the next index in the compressed PC table.
+      ppc: fromMaybe(PcCompressed{lsb: new_pc.lsb + 2,
+                                  idx: new_pc.idx + ((new_pc.lsb == -2) ? 1:0), // If we move to a new page, we will move to the next index in the compressed PC table.
+                                  cap_mode: new_pc.cap_mode},
                      in.ppc),
       pred_jump: isValid(in.ppc),
       decode_epoch: in.decode_epoch,
@@ -292,10 +296,12 @@ function InstrFromFetch2 fetch2_2_instC(Fetch2ToDecode in, Instruction inst, Bit
       , u_id: in.u_id
 `endif
    };
+endfunction
 
-function InstrFromFetch2 fetch2s_2_inst(Fetch2ToDecode inHi, Fetch2ToDecode inLo);
+function InstrFromFetch2 fetch2s_2_inst(Fetch2ToDecode inHi, Fetch2ToDecode inLo, Bool cap_mode);
    Instruction inst = {inHi.inst_frag, inLo.inst_frag};
-   InstrFromFetch2 ret = fetch2_2_instC(inHi, inst, inst);
+   InstrFromFetch2 ret = fetch2_2_instC(inHi, inst, inst, cap_mode);
+   if (decodeCapModeswInst(inst) matches tagged Valid .new_cap_mode) ret.ppc.cap_mode = new_cap_mode;
    if (isValid(inLo.cause)) ret.cause = inLo.cause;
    else if (isValid(inHi.cause)) ret.cause_second_half = True;
    ret.inst_kind = Inst_32b;
@@ -410,6 +416,8 @@ module mkFetchStage(FetchStage);
     // We stall until the flush is done
     Ehr#(3, Bool) waitForFlush <- mkEhr(False);
 
+    // Note that pc_reg's flags will not reflect the current cap_mode: that is tracked by
+    // cap_mode_reg since it needs to be updated later in the pipeline as modesw insts are decoded
     Ehr#(5, CapMem) pc_reg <- mkEhr(nullCap);
 `ifdef RVFI_DII
     Ehr#(4, Dii_Parcel_Id) dii_pid_reg <- mkEhr(0);
@@ -423,6 +431,17 @@ module mkFetchStage(FetchStage);
     Ehr#(TAdd#(SupSize, 2), Addr) decode_pc_reg <- mkEhr(?);
     Integer decode_pc_redirect_port = valueOf(SupSize);
     Integer decode_pc_final_port = valueOf(SupSize) + 1;
+
+    // Decode is in charge of tracking the capmode.
+    // This register will always hold the correct capmode except in the only mispredict case (see below).
+    // On redirect() or start(), it is updated to contain the redirect PCC's capmode.
+    // modesw instructions are tracked precisely as they are decoded.
+    // The mode is otherwise predicted not to change between instructions.
+    // This can only cause a mispredict when a capability mode jump jumps to an integer mode target.
+    // This mispredict case is detected in execute: it is expected to be rare.
+    Ehr#(2, Bool) cap_mode_reg <- mkEhr(False);
+    Integer cap_mode_decode_port = 0;
+    Integer cap_mode_redirect_port = 1;
 
     // PC compression structure holding an indexed set of PC blocks so that only indexes need be tracked.
     IndexedMultiset#(PcIdx, PcMSB, SupSizeX2) pcBlocks <- mkIndexedMultisetQueue;
@@ -741,6 +760,7 @@ module mkFetchStage(FetchStage);
    Maybe#(Bit#(TLog#(SupSizeX2))) m_used_frag_count = Invalid;
    Bit#(TLog#(SupSize)) pick_count = 0;
    Bool prev_frag_available = False;
+   Bool cap_mode = cap_mode_reg[cap_mode_decode_port];
 `ifdef KONATA
    Vector#(SupSizeX2, Maybe#(KInfo)) kinfos = replicate(Invalid);
 `endif
@@ -752,7 +772,10 @@ module mkFetchStage(FetchStage);
 `ifdef KONATA
             kinfos[i] = Valid (tagged MergedFrag ( KMergedFrag{ puid: prev_frag.u_id, cuid: fromMaybe(?,frags[i]).u_id, pc: prev_frag.pc}));
 `endif
-            new_pick = tagged Valid fetch2s_2_inst(frag, prev_frag);
+            let inst = fetch2s_2_inst(frag, prev_frag, cap_mode);
+            new_pick = tagged Valid inst;
+
+            cap_mode = inst.ppc.cap_mode;
 
             /*if (!validValue(new_pick).mispred_first_half) begin
                doAssert(getAddr(decompressPc(prev_frag.pc))+2 == getAddr(decompressPc(frag.pc)), "Attached fragments with non-contigious PCs");
@@ -766,7 +789,8 @@ module mkFetchStage(FetchStage);
 `endif
             new_pick = tagged Valid fetch2_2_instC(frag,
                                                    fv_decode_C (misa, misa_mxl_64, getFlags(decompressPc(frag.pc))==1, frag.inst_frag),
-                                                   zeroExtend(frag.inst_frag));
+                                                   zeroExtend(frag.inst_frag),
+                                                   cap_mode);
          end
       end
       decodeIn[pick_count] = new_pick;
@@ -1018,7 +1042,11 @@ module mkFetchStage(FetchStage);
       // update PC and epoch
       if(redirectPc matches tagged Valid .rp) begin
          pc_reg[pc_decode_port] <= rp;
+         cap_mode_reg[cap_mode_decode_port] <= !getIntMode(rp);
          decode_redirect_count <= decode_redirect_count + 1;
+      end else begin
+         // Update cap_mode based on last decoded frag
+         cap_mode_reg[cap_mode_decode_port] <= cap_mode;
       end
 `ifdef RVFI_DII
       doAssert(isValid(redirectPc) == isValid(redirectDiiPid), "PC and DII redirections always happen together");
@@ -1089,6 +1117,7 @@ module mkFetchStage(FetchStage);
 `endif
     );
         pc_reg[0] <= start_pc;
+        cap_mode_reg[0] <= !getIntMode(start_pc);
 `ifdef RVFI_DII
         dii_pid_reg[0] <= dii_pid;
 `endif
@@ -1114,6 +1143,7 @@ module mkFetchStage(FetchStage);
         if (verbose)
         $display("Redirect: newpc %h, old f_main_epoch %d, new f_main_epoch %d, specBits %x",new_pc,f_main_epoch,f_main_epoch+1, specBits);
         pc_reg[pc_redirect_port] <= new_pc;
+        cap_mode_reg[cap_mode_redirect_port] <= !getIntMode(new_pc);
 `ifdef RVFI_DII
         dii_pid_reg[pc_redirect_port] <= dii_pid;
         if (verbose) $display("%t Redirect: dii_pid_reg %d", $time(), dii_pid);
