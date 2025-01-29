@@ -878,6 +878,8 @@ Bit#(3) fnCADDI     = 3'b010;
 Bit#(7) opCapInspect = 7'b0001000;
 Bit#(7) opCapArith   = 7'b0000110;
 Bit#(7) opCapBounds  = 7'b0000111;
+Bit#(7) opMSWCap     = 7'b0001001;
+Bit#(7) opMSWInt     = 7'b0001010;
 
 //MiscMem
 Bit#(3) fnFENCE  = 3'b000;

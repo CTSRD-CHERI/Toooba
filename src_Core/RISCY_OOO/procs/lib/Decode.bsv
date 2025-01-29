@@ -47,6 +47,21 @@ import ISA_Decls_CHERI::*;
 
 Bit#(3) memWU   = 3'b110;
 
+function Maybe#(Bool) decodeCapModeswInst(Instruction inst);
+    let ret = Invalid;
+    if (inst[24:0] == {5'b00000, 5'b00000, 3'b001, 5'b00000, opcOp.opc}) begin
+        ret = case (inst[31:25])
+            opMSWCap:
+                Valid(True);
+            opMSWInt:
+                Valid(False);
+            default:
+                Invalid;
+        endcase;
+    end
+    return ret;
+endfunction
+
 // Smaller decode functions
 function Maybe#(MemInst) decodeMemInst(Instruction inst, Bool cap_mode, RiscVISASubset isa);
     Bool illegalInst = False;
@@ -329,6 +344,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
     // Results of mini-decoders
     Maybe#(MemInst) mem_inst = decodeMemInst(inst, cap_mode, isa);
     Maybe#(MemInst) exp_bnds_mem_inst = decodeExplicitBoundsMemInst(inst);
+    Maybe#(Bool) modesw_inst = decodeCapModeswInst(inst);
 
     case (opcode)
         opcOpImm: begin
@@ -495,6 +511,10 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                     regs.dst = Valid(tagged Gpr rd);
                     regs.src1 = Valid(tagged Gpr rs1);
                     regs.src2 = Valid(tagged Gpr rs2);
+                end
+                opMSWCap, opMSWInt: begin
+                    legalInst = isValid(modesw_inst);
+                    dInst.iType = Nop; // Handled in fetch stage
                 end
             endcase
         end
