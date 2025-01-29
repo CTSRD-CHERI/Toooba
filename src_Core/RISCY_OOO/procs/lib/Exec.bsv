@@ -115,7 +115,8 @@ function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapCheck
 `endif
         result = eAuth(cheriExcPermitWCapViolation);
 `ifdef ZCHERI
-    else if (storeValidCap && !(getHardPerms(auth).permissionStoreLevel < getHardPerms(data).capabilityLevel))
+    // XXX This line does not work with the January 2025 zcheri sail model.
+    //else if (storeValidCap && !(getHardPerms(auth).permissionStoreLevel < getHardPerms(data).capabilityLevel))
 `else
     else if (storeValidCap && !getHardPerms(auth).permitStoreLocalCap && !getHardPerms(data).global)
 `endif
