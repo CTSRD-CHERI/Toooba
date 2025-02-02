@@ -135,6 +135,7 @@ typedef struct {
     Bool access_mmio; // inst fetch from MMIO
     Bool decode_epoch;
     Epoch main_epoch;
+    Bit#(SupSizeX2) branches_predicted;
 } Fetch1ToFetch2 deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -144,6 +145,7 @@ typedef struct {
     Bit#(16) inst_frag;
     Bool decode_epoch;
     Epoch main_epoch;
+    Bool predicted_branch;
 } Fetch2ToDecode deriving(Bits, Eq, FShow);
 
 // Used purely internally in doDecode.
@@ -159,6 +161,7 @@ typedef struct {
   Maybe#(Exception) cause;
   Bool cause_second_half;
   Bool mispred_first_half;
+  Bool predicted_branch;
 } InstrFromFetch2 deriving(Bits, Eq, FShow);
 
 function InstrFromFetch2 fetch2_2_instC(Fetch2ToDecode in, Instruction inst, Bit#(32) orig_inst) =
@@ -176,7 +179,8 @@ function InstrFromFetch2 fetch2_2_instC(Fetch2ToDecode in, Instruction inst, Bit
       inst_kind: Inst_16b,
       cause: in.cause,
       cause_second_half: False,
-      mispred_first_half: False
+      mispred_first_half: False,
+      predicted_branch: in.predicted_branch
    };
 
 function InstrFromFetch2 fetch2s_2_inst(Fetch2ToDecode inHi, Fetch2ToDecode inLo);
@@ -187,6 +191,8 @@ function InstrFromFetch2 fetch2s_2_inst(Fetch2ToDecode inHi, Fetch2ToDecode inLo
    ret.inst_kind = Inst_32b;
    ret.pc = inLo.pc; // The PC comes from the 1st fragment.
    ret.mispred_first_half = isValid(inLo.ppc); // If we predicted a jump on the first half of the 32-bit instruction, we have erred.
+   ret.predicted_branch = ret.predicted_branch || inLo.predicted_branch; // Want to detect misprediction in the first half
+   
    return ret;
 endfunction
 
@@ -411,18 +417,22 @@ module mkFetchStage(FetchStage);
 
         Vector#(SupSize, Maybe#(PredIn)) in = replicate(tagged Invalid);
         Vector#(SupSizeX2, Maybe#(PredIn)) branches = replicate(tagged Invalid);
+        Bit#(SupSizeX2) mask = 0;
         Bit#(TAdd#(TLog#(SupSizeX2),1)) count = 0;
         Bit#(TAdd#(TLog#(SupSizeX2),1)) enqCount = 0; // Because SpecFifo forces consecutive enqueues
         
-        // How to do this efficiently???
+        // How to do this efficiently??? !
         for(Integer i = 0; i < valueOf(SupSizeX2) && fromInteger(i) <= posLastSupX2; i = i + 1) begin
             if (tpl_2(pred_future_pc[i])) begin
                 branches[count] = tagged Valid PredIn{pc: pc + fromInteger(2*i), main_epoch: f_main_epoch, decode_epoch: decode_epoch[0]};
                 count = count + 1;
+                mask[i] = 1;
             end
         end
 
+        `ifdef DEBUG_TAGETEST
         $display("FETCH1 %x, Cycle: %d last inst: %d branch count: %d", pc, cur_cycle, posLastSupX2, count);
+        `endif
 
         // Search the last few translations to look for a match.
         Maybe#(UInt#(TLog#(PageBuffSize))) m_buff_match_idx = findElem(Valid(getVpn(pc)), buffered_translation_virt_pc);
@@ -464,31 +474,39 @@ module mkFetchStage(FetchStage);
                 cause: cause,
                 access_mmio: access_mmio,
                 decode_epoch: decode_epoch[0],
-                main_epoch: f_main_epoch };
+                main_epoch: f_main_epoch,
+                branches_predicted: mask
+            };
             fetch1toFetch2.enq(out);
 
             // Set up branch prediction
             // Nicer to have a FIFO which handles the bypass, but complications
             for(Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
                 if(predInput.deqS[i].canDeq) begin // Missing guard?
-                    if(isValid(branches[i]) && predInput.enqS[enqCount].canEnq)
-                        predInput.enqS[enqCount].enq(validValue(branches[i]));
                     predInput.deqS[i].deq;
+
+                    `ifdef DEBUG_TAGETEST
                     $display("Enqueue %d to %d\n", i, enqCount);
-                    enqCount = enqCount + 1;
+                    `endif
+                    
                     in[i] = tagged Valid predInput.deqS[i].first;
                 end
                 else begin
-                    in[i] = branches[i];
+                    in[i] = branches[enqCount];
+                    if(isValid(branches[enqCount]))
+                        enqCount = enqCount + 1;
                 end
             end
 
             // Possible remaining branches
-            for(Integer i = valueOf(SupSize); i < valueOf(SupSizeX2); i = i + 1) begin
-                if(isValid(branches[i])) begin
-                    if(predInput.enqS[enqCount].canEnq) begin
+            Bit#(TLog#(SupSizeX2)) enqNum = truncate(count - enqCount); // Not a fan, a better way to do this>
+            for(Integer i = 0; fromInteger(i) < enqNum; i = i + 1) begin
+                if(isValid(branches[enqCount])) begin
+                    if(predInput.enqS[i].canEnq) begin
+                        `ifdef DEBUG_TAGETEST
                         $display("Enqueue %d\n", i);
-                        predInput.enqS[enqCount].enq(validValue(branches[i]));
+                        `endif
+                        predInput.enqS[i].enq(validValue(branches[enqCount]));
                         enqCount = enqCount + 1;
                     end 
                     else
@@ -557,7 +575,8 @@ module mkFetchStage(FetchStage);
                inst_frag: validValue(inst_d[i]),
                cause: fetch2In.cause,
                decode_epoch: fetch2In.decode_epoch,
-               main_epoch: fetch2In.main_epoch
+               main_epoch: fetch2In.main_epoch,
+               predicted_branch: unpack(fetch2In.branches_predicted[i])
            });
         end
     endrule: doFetch2
@@ -671,7 +690,7 @@ module mkFetchStage(FetchStage);
                // We predicted a taken branch for PC, but this is an
                // uncompressed instruction, so we redirect to this PC and
                // train it to fetch the other half in future.
-               if (True) $display("mispredicted first half in decode: pc :  %h", pc);
+               if (verbose) $display("mispredicted first half in decode: pc :  %h", pc);
                decode_epoch_local = !decode_epoch_local;
                redirectPc = Valid (pc); // record redirect to the first PC in this bundle.
                trainNAP = Valid (TrainNAP {pc: pc, nextPc: pc + 2, branch: False});
@@ -681,26 +700,29 @@ module mkFetchStage(FetchStage);
 
                if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
                     
-                    // So it compiles - REMOVE LATER
+                    // So it compiles - REMOVE LATER!
                     Bit#(1) took <- dummy(1);
                     dir_pred.taken = unpack(took);
-
                     let last_x16_pc = pc + ((in.inst_kind == Inst_32b) ? 2 : 0);
+
+                    `ifdef DEBUG_TAGETEST
                     $display("DECODE PREDICT on %x %x\n", pc, last_x16_pc);
                     if(predResults[branchCountRecieved] matches tagged Valid .res) begin
                         $display("DECODE PRED RESULTS %d on %x\n",branchCountRecieved, res.pc);
                     end
-                    if(predResults[branchCountRecieved] matches tagged Valid .res &&& res.pc == last_x16_pc) begin
-                        predOutput.deqS[branchCountRecieved].deq;
-                        
+                    `endif
+
+                    if(predResults[branchCountRecieved] matches tagged Valid .res &&& in.predicted_branch) begin
+                        doAssert(res.pc == last_x16_pc, "Branch PC is inconsistent\n");
                         dir_pred = res;
                         dir_spec = dirPred.getSpec(branchCountRecieved);
                         likely_epoch_change = (dir_pred.taken != validValue(decodeIn[i]).pred_jump);
 
                         branchResults[branchCountRecieved] = pack(dir_pred.taken);
-                        branchCountRecieved = branchCountRecieved + 1;
-
-                        $display("PREDICT with %x %x %d ID=%d %d\n", pc, dir_pred.pc, dir_pred.taken, dir_spec, dirPred.getSpec(branchCountRecieved));
+                        
+                        `ifdef DEBUG_TAGETEST
+                        $display("PREDICT with %x %x %d ID=%d %d\n", pc, dir_pred.pc, dir_pred.taken, dir_spec, dirPred.getSpec(branchCountRecieved+1));
+                        `endif
                     end
                     else begin
                         let next = decodeBrPred(pc, decode_result.dInst, False, (validValue(decodeIn[i]).inst_kind == Inst_32b));
@@ -708,6 +730,13 @@ module mkFetchStage(FetchStage);
                     end
                     branchCount = branchCount + 1;
                end
+
+               // Mispredict in one of the halves
+               if(predResults[branchCountRecieved] matches tagged Valid .res &&& in.predicted_branch)  begin
+                    $display("DECODE DEQUEUE on %x ", pc, fshow(decode_result.dInst.iType), "\n");
+                    branchCountRecieved = branchCountRecieved+1;
+               end
+
                Maybe#(Addr) dir_ppc = decodeBrPred(pc, decode_result.dInst, dir_pred.taken, (validValue(decodeIn[i]).inst_kind == Inst_32b));
                doAssert(in.main_epoch == f_main_epoch, "main epoch must match");
 
@@ -784,7 +813,9 @@ module mkFetchStage(FetchStage);
                      ppc = decode_pred_next_pc;
                      // train next addr pred when mispredict
                      let last_x16_pc = pc + ((in.inst_kind == Inst_32b) ? 2 : 0);
+                     `ifdef DEBUG_TAGETEST
                      $display("DECODE NAP TRAIN %x\n", last_x16_pc);
+                     `endif
                      trainNAP = Valid (TrainNAP {pc: last_x16_pc, nextPc: decode_pred_next_pc, branch: decode_result.dInst.iType == Br});
 `ifdef PERF_COUNT
                      // performance stats: record decode redirect
@@ -831,6 +862,10 @@ module mkFetchStage(FetchStage);
       if (trainNAP matches tagged Valid .x) begin
          napTrainByDecQ.enq(x);
       end
+      
+      for(Integer i = 0; i < valueOf(SupSize) && fromInteger(i) < branchCountRecieved; i = i +1) begin
+        predOutput.deqS[i].deq;
+      end
 
       dirPred.confirmPred(branchResults, branchCountRecieved);
 `ifdef PERF_COUNT
@@ -865,7 +900,9 @@ module mkFetchStage(FetchStage);
         // only when misprediction happens, i.e., train by dec is already at
         // wrong path.
         TrainNAP train = fromMaybe(validValue(napTrainByDec.wget), napTrainByExe.wget);
+        `ifdef DEBUG_TAGETEST
         $display("Train BTB on %x next pc: %d branch: %d", train.pc, train.nextPc, train.branch);
+        `endif
         nextAddrPred.update(train.pc, train.nextPc, train.nextPc != train.pc + 2, train.branch);
     endrule
 
