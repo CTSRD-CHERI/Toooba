@@ -131,7 +131,7 @@ function Maybe#(MemInst) decodeMemInst(Instruction inst, Bool cap_mode, RiscVISA
         memBU, memHU, memWU:
             unsignedLd = True;
         default:
-            illegalInst = True;
+            illegalInst = !capWidth;
     endcase
     // This is a minor fix to make our processor's results match spike since
     // they don't sign extend when loading single precision values from memory
