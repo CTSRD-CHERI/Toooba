@@ -211,7 +211,7 @@ Bit #(1) cap_mem_signed = 1'h0;
 // Other:
 
 // Region in MISC_MEM for LQ
-Bit #(3) f3_LQ = 3'h2;
+Bit #(3) f3_LQ = 3'b100;
 Bit #(3) f3_SQ = 3'b100;
 
 `ifdef RV64
