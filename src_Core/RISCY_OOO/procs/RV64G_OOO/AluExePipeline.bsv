@@ -147,7 +147,7 @@ interface AluExeInput;
     method Action rob_setExecuted(InstTag t, Data dst_data, Maybe#(Data) csrData, ControlFlow cf);
     // Fetch stage
     method Action fetch_train_predictors(ToSpecFifo#(FetchTrainBP) train);
-    method Action fetch_recover_spec(DirPredSpecInfo specInfo, Bool taken);
+    method Action fetch_recover_spec(DirPredSpecInfo specInfo, Bool taken, Bool nonBranch);
 
     // global broadcast methods
     // set aggressive sb & wake up inst in RS
@@ -344,9 +344,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
             // must be a branch, train branch predictor
             doAssert(x.iType == Jr || x.iType == Br, "only jr and br can mispredict");
 
-            if(x.iType == Br) begin
-                inIfc.fetch_recover_spec(x.dpSpec, x.controlFlow.taken);
-            end
+            inIfc.fetch_recover_spec(x.dpSpec, x.controlFlow.taken, !(x.iType == Br));
 
             inIfc.fetch_train_predictors(ToSpecFifo{
                 data: FetchTrainBP {

@@ -239,7 +239,7 @@ module mkTourPredStaged#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TourTrainIn
         return 0;
     endmethod
 
-    method Action specRecover(TourPredSpecInfo dummy, Bool taken) = noAction;
+    method Action specRecover(TourPredSpecInfo dummy, Bool taken, Bool nonBranch) = noAction;
 
     method flush = noAction;
     method flush_done = True;

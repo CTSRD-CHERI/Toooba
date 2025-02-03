@@ -19,7 +19,7 @@ interface CircBuff#(numeric type size, type t);
     method Action specAssignConfirmed(SupCnt count);
     // Seperate actions so only slow for updates after a misprediction? critical path?
     method Action enqueue(t data, CircBuffIndex#(size) index);
-    method ActionValue#(Bit#(TLog#(size))) handleMispred(CircBuffIndex#(size) index);
+    method ActionValue#(Bit#(TLog#(size))) handleMispred(CircBuffIndex#(size) index, Bool isBranch);
 
     method ActionValue#(Maybe#(t)) retrieveNext;
 endinterface
@@ -88,13 +88,18 @@ module mkCircBuff(CircBuff#(size, t)) provisos(Bits#(t, a__));
     endmethod
 
     // Index should always be == argument of enqueue, but I seperate the methods here
-    method ActionValue#(Bit#(TLog#(size))) handleMispred(CircBuffIndex#(size) index);
-        endSpec[valueOf(SupSize)+1] <= nextIndex(index);
+    method ActionValue#(Bit#(TLog#(size))) handleMispred(CircBuffIndex#(size) index, Bool isBranch);
+            endSpec[valueOf(SupSize)+1] <= isBranch ? nextIndex(index) : index;
         /*
             In the predictor it already stops predictions from updating the history in the case of a misprediction in the same cycle
             So recovery isn't needed for these bits.
         */
-        let recoverBy = index < endSpecLast ? endSpecLast - index - 1: endSpecLast + (fromInteger(valueOf(size)-1) - index);
+        
+        Bit#(TLog#(size)) recoverBy = 0;
+        if(isBranch)
+            recoverBy = index < endSpecLast ? endSpecLast - index - 1: endSpecLast + (fromInteger(valueOf(size)-1) - index);
+        else
+            recoverBy = index <= endSpecLast ? endSpecLast - index : endSpecLast + (fromInteger(valueOf(size)-1) - index + 1);
         `ifdef DEBUG_TAGETEST   
             $display("TAGETEST Mispredict on %d, p1=%d, p2=%d\n", index, startSpec, endSpecLast);
             $display("TAGETEST recovered history by %d bits\n", recoverBy+1);

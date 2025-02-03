@@ -46,8 +46,8 @@ module mkTageTest#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTestTrainInfo
         tage.dirPredInterface.nextPc(next);
     endmethod
 
-    method Action specRecover(TageSpecInfo specInfo, Bool taken);
-        tage.dirPredInterface.specRecover(specInfo, taken);
+    method Action specRecover(TageSpecInfo specInfo, Bool taken, Bool nonBranch);
+        tage.dirPredInterface.specRecover(specInfo, taken, nonBranch);
     endmethod
 
     method TageSpecInfo getSpec(SupCnt i);

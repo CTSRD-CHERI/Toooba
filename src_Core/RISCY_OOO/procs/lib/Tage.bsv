@@ -590,22 +590,31 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
         endmethod
 
         // Recover histories before table writes
-        method Action specRecover(TageSpecInfo specInfo, Bool taken);
+        method Action specRecover(TageSpecInfo specInfo, Bool taken, Bool nonBranch);
             if(specInfo.confirmed) begin
-                let numBits <- ooBuff.handleMispred(specInfo.ooIndex);
+                let numBits <- ooBuff.handleMispred(specInfo.ooIndex, !nonBranch);
+                    if(!(nonBranch && numBits == 0)) begin
+                        if(nonBranch)
+                            numBits = numBits - 1;
+                        // Recover histories first, then update bit
+                        let recoverNumber = numBits;
+                        global.recoverFrom[recoverNumber].undo;
 
-                // Recover histories first, then update bit
-                let recoverNumber = numBits;
-                global.recoverFrom[recoverNumber].undo;
-                global.updateRecoveredHistory(pack(taken));
+                        if(!nonBranch)
+                            global.updateRecoveredHistory(pack(taken));
 
-                `ifdef DEBUG_TAGETEST   
-                    $display("TAGETEST Misprediction on %d, cycle %d\n", specInfo.ooIndex, cur_cycle);
-                `endif
-                for (Integer i = 0; i < valueOf(numTables); i = i +1) begin
-                    let tab = taggedTablesVector[i];
-                    `CASE_ALL_TABLES(tab, (*/ t.recoverHistory(recoverNumber); t.updateRecovered(pack(taken)); /*))
-                end 
+                        `ifdef DEBUG_TAGETEST   
+                            $display("TAGETEST Recovery by %d Misprediction on %d, cycle %d %d\n", numBits, specInfo.ooIndex, cur_cycle, nonBranch);
+                        `endif
+                        for (Integer i = 0; i < valueOf(numTables); i = i +1) begin
+                            let tab = taggedTablesVector[i];
+                            `CASE_ALL_TABLES(tab, (*/ 
+                            t.recoverHistory(recoverNumber); 
+                            if(!nonBranch)
+                                t.updateRecovered(pack(taken)); /*))
+                        end 
+                    end
+                //end
             end
         endmethod
 
@@ -614,8 +623,10 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
         endmethod
 
         method Action confirmPred(Bit#(SupSize) results, SupCnt count);
+            `ifdef DEBUG_TAGETEST
             if(count > 0)
                 $display("TAGETEST Confirm Pred %b %d\n", results, count);
+            `endif
             numPred[0] <= count;
             predResults[0] <= results;
         endmethod

@@ -377,8 +377,8 @@ module mkCore#(CoreId coreId)(Core);
                 method rob_getOrig_Inst = rob.getOrig_Inst[i].get;
                 method rob_setExecuted = rob.setExecuted_doFinishAlu[i].set;
                 method fetch_train_predictors = trainBPQ[i].enq;
-                method Action fetch_recover_spec(DirPredSpecInfo specInfo, Bool taken); 
-                    fetchStage.recover_spec(specInfo, taken);
+                method Action fetch_recover_spec(DirPredSpecInfo specInfo, Bool taken, Bool nonBranch); 
+                    fetchStage.recover_spec(specInfo, taken, nonBranch);
                 endmethod
                 method setRegReadyAggr = writeAggr(aluWrAggrPort(i));
                 interface sendBypass = sendBypassIfc;

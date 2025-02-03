@@ -88,7 +88,7 @@ interface FetchStage;
         DirPredTrainInfo dpTrain, Bool mispred, Bool isCompressed
     );
 
-    method Action recover_spec(DirPredSpecInfo dpSpec, Bool taken);
+    method Action recover_spec(DirPredSpecInfo dpSpec, Bool taken, Bool nonBranch);
 
     // security
     method Bool emptyForFlush;
@@ -670,7 +670,7 @@ module mkFetchStage(FetchStage);
       Bool likely_epoch_change = False;
 
       Bit#(TAdd#(TLog#(SupSize),1)) branchCountRecieved = 0;
-      Bit#(TAdd#(TLog#(SupSize),1)) branchCount = 0;
+      Bit#(TAdd#(TLog#(SupSize),1)) trueBranchCount = 0; // Violating make the common case cast? very rarely /= branchCountRecieved, only on the edge case
       Bit#(SupSize) branchResults = 0;
       for (Integer i = 0; i < valueof(SupSize); i=i+1) begin
          Addr pc = decompressPc(validValue(decodeIn[i]).pc);
@@ -696,10 +696,8 @@ module mkFetchStage(FetchStage);
                trainNAP = Valid (TrainNAP {pc: pc, nextPc: pc + 2, branch: False});
             end else if (in.decode_epoch == decode_epoch_local) begin   
                DirPredResult#(DirPredTrainInfo) dir_pred = DirPredResult{taken: False, train: unpack(0), pc: ?};
-               DirPredSpecInfo dir_spec = unpack(0);
-
+               DirPredSpecInfo dir_spec = dirPred.getSpec(trueBranchCount);
                if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
-                    
                     // So it compiles - REMOVE LATER!
                     Bit#(1) took <- dummy(1);
                     dir_pred.taken = unpack(took);
@@ -715,20 +713,19 @@ module mkFetchStage(FetchStage);
                     if(predResults[branchCountRecieved] matches tagged Valid .res &&& in.predicted_branch) begin
                         doAssert(res.pc == last_x16_pc, "Branch PC is inconsistent\n");
                         dir_pred = res;
-                        dir_spec = dirPred.getSpec(branchCountRecieved);
                         likely_epoch_change = (dir_pred.taken != validValue(decodeIn[i]).pred_jump);
 
-                        branchResults[branchCountRecieved] = pack(dir_pred.taken);
-                        
+                        branchResults[trueBranchCount] = pack(dir_pred.taken);
+                        trueBranchCount = trueBranchCount + 1;
                         `ifdef DEBUG_TAGETEST
-                        $display("PREDICT with %x %x %d ID=%d %d\n", pc, dir_pred.pc, dir_pred.taken, dir_spec, dirPred.getSpec(branchCountRecieved+1));
+                        $display("PREDICT with %x %x %d ID=%d %d\n", pc, dir_pred.pc, dir_pred.taken, dir_spec, dirPred.getSpec(trueBranchCount+1));
                         `endif
                     end
                     else begin
                         let next = decodeBrPred(pc, decode_result.dInst, False, (validValue(decodeIn[i]).inst_kind == Inst_32b));
-                        trainNAP = Valid (TrainNAP {pc: last_x16_pc, nextPc: validValue(next), branch: decode_result.dInst.iType == Br});    
+                        trainNAP = Valid (TrainNAP {pc: last_x16_pc, nextPc: validValue(next), branch: decode_result.dInst.iType == Br});
+                        dir_spec = unpack(0);
                     end
-                    branchCount = branchCount + 1;
                end
 
                // Mispredict in one of the halves
@@ -867,7 +864,7 @@ module mkFetchStage(FetchStage);
         predOutput.deqS[i].deq;
       end
 
-      dirPred.confirmPred(branchResults, branchCountRecieved);
+      dirPred.confirmPred(branchResults, trueBranchCount);
 `ifdef PERF_COUNT
       // performance counter: check whether redirect happens
       if(redirectInst matches tagged Valid .iType &&& doStats) begin
@@ -963,8 +960,8 @@ module mkFetchStage(FetchStage);
         // It's fine for the effect of this method to be overwritten, because it fires very often
     endmethod
 
-    method Action recover_spec(DirPredSpecInfo dpSpec, Bool taken);
-        dirPred.specRecover(dpSpec, taken);
+    method Action recover_spec(DirPredSpecInfo dpSpec, Bool taken, Bool nonBranch);
+        dirPred.specRecover(dpSpec, taken, nonBranch);
     endmethod
 
     method Action train_predictors(

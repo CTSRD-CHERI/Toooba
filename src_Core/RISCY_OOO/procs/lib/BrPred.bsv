@@ -80,7 +80,7 @@ endinterface
 
 interface DirPredictor#(type trainInfoT, type specInfoT);
     method Action nextPc(Vector#(SupSize,Maybe#(PredIn)) next);
-    method Action specRecover(specInfoT specInfo, Bool taken);
+    method Action specRecover(specInfoT specInfo, Bool taken, Bool nonBranch);
     //interface Vector#(SupSize, DirPred#(trainInfoT, specInfoT)) pred;
     method Action update(Bool taken, trainInfoT train, Bool mispred);
     method Action confirmPred(Bit#(SupSize) results, SupCnt count); // By decode stage, for speculative history and end_pointer update
