@@ -306,6 +306,7 @@ function InstrFromFetch2 fetch2s_2_inst(Fetch2ToDecode inHi, Fetch2ToDecode inLo
    else if (isValid(inHi.cause)) ret.cause_second_half = True;
    ret.inst_kind = Inst_32b;
    ret.pc = inLo.pc; // The PC comes from the 1st fragment.
+   ret.pc.cap_mode = cap_mode;
 `ifdef RVFI_DII
    ret.dii_pid = inLo.dii_pid; // The dii_pid comes from the 1st fragment.
 `endif
@@ -445,7 +446,7 @@ module mkFetchStage(FetchStage);
 
     // PC compression structure holding an indexed set of PC blocks so that only indexes need be tracked.
     IndexedMultiset#(PcIdx, PcMSB, SupSizeX2) pcBlocks <- mkIndexedMultisetQueue;
-    function CapMem decompressPc(PcCompressed p) = {pcBlocks.lookup(p.idx),p.lsb};
+    function CapMem decompressPc(PcCompressed p) = setIntMode({pcBlocks.lookup(p.idx),p.lsb}, !p.cap_mode);
     // Epochs
     Ehr#(2, Bool) decode_epoch <- mkEhr(False);
     // fetch estimate of main epoch
@@ -772,10 +773,8 @@ module mkFetchStage(FetchStage);
 `ifdef KONATA
             kinfos[i] = Valid (tagged MergedFrag ( KMergedFrag{ puid: prev_frag.u_id, cuid: fromMaybe(?,frags[i]).u_id, pc: prev_frag.pc}));
 `endif
-            let inst = fetch2s_2_inst(frag, prev_frag, cap_mode);
-            new_pick = tagged Valid inst;
+            new_pick = tagged Valid fetch2s_2_inst(frag, prev_frag, cap_mode);
 
-            cap_mode = inst.ppc.cap_mode;
 
             /*if (!validValue(new_pick).mispred_first_half) begin
                doAssert(getAddr(decompressPc(prev_frag.pc))+2 == getAddr(decompressPc(frag.pc)), "Attached fragments with non-contigious PCs");
@@ -788,25 +787,26 @@ module mkFetchStage(FetchStage);
             kinfos[i] = Valid (tagged SingleFrag ( KSingleFrag{ cuid: fromMaybe(?,frags[i]).u_id}));
 `endif
             new_pick = tagged Valid fetch2_2_instC(frag,
-                                                   fv_decode_C (misa, misa_mxl_64, getFlags(decompressPc(frag.pc))==1, frag.inst_frag),
+                                                   fv_decode_C (misa, misa_mxl_64, frag.pc.cap_mode, frag.inst_frag),
                                                    zeroExtend(frag.inst_frag),
                                                    cap_mode);
          end
       end
       decodeIn[pick_count] = new_pick;
-      if (isValid(new_pick)) begin
+      if (new_pick matches tagged Valid .inst) begin
          //if (verbose)
          //    $display("Decode: picked instruction %d, next frag %d :", pick_count, i, fshow(decodeIn[pick_count]));
          pick_count = pick_count + truncate(8'b1);
          m_used_frag_count = tagged Valid fromInteger(i);
          prev_frag_available = False;
+         cap_mode = inst.ppc.cap_mode;
       end else prev_frag_available = isValid(frags[i]);
    end
    Bool anyReturns = False;
    Vector#(SupSize, DecodeResult) decodeResults = ?;
    for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
       CapMem pc = decompressPc(validValue(decodeIn[i]).pc);
-      decodeResults[i] = decode(validValue(decodeIn[i]).inst, getFlags(pc)==1); // Decode 32b inst, or 32b expansion of 16b inst
+      decodeResults[i] = decode(validValue(decodeIn[i]).inst, !getIntMode(pc)); // Decode 32b inst, or 32b expansion of 16b inst
       if (popInst(decodeResults[i])) anyReturns = True;
    end
 
@@ -958,6 +958,10 @@ module mkFetchStage(FetchStage);
                      end
                   end
                   trainInfo.ras <- ras.ras[i].pop(doPop);
+                  if (nextPc matches tagged Valid ._nextPc) begin
+                     // Override cap mode prediction
+                     nextPc = Valid (setIntMode(_nextPc, getIntMode(ppc)));
+                  end
                   if(verbose) begin
                      $display("Branch prediction: ", fshow(dInst.iType), " ; ", fshow(pc), " ; ",
                               fshow(ppc), " ; ", fshow(nextPc));
