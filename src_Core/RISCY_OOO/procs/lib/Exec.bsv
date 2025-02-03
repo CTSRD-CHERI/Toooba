@@ -258,6 +258,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
     let a_mut = setValidCap(a, isValidCap(a) && getKind(a) == UNSEALED);
     let b_mut = setValidCap(b, isValidCap(b) && getKind(b) == UNSEALED);
     match {.a_type, .a_res} = extractType(a);
+    match {.b_type, .b_res} = extractType(b);
     Bool sealPassthrough = !isValidCap(b) || getKind(a) != UNSEALED || !isInBounds(b, False) || getAddr(b) == otype_unsealed_ext;
 `ifdef ZCHERI
     Bool sealIllegal = getKind(b) != UNSEALED;
@@ -282,7 +283,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                       tagged EPC ._: nullWithAddr(getAddr(b));
                    endcase
             tagged SetAddr .addrSource    :
-                clearTagIf(setAddr(b_mut, (addrSource == Src1Type) ? a_type : getAddr(a) ).value, (addrSource == Src1Type) ? a_res : False);
+                clearTagIf(setAddr(a_mut, (addrSource == Src2Type) ? b_type : getAddr(b) ).value, (addrSource == Src2Type) ? b_res : False);
             tagged SealEntry              :
                 setKind(a_mut, SENTRY);
 `ifndef ZCHERI
