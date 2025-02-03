@@ -885,6 +885,7 @@ Bit#(7) opMSWInt     = 7'b0001010;
 Bit#(3) fnFENCE  = 3'b000;
 Bit#(3) fnFENCEI = 3'b001;
 Bit#(3) fnLC     = 3'b100;
+Bit#(3) fnLCxCheri = 3'b100;
 
 // System
 Bit#(3) fnPRIV   = 3'b000;

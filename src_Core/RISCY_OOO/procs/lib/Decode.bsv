@@ -108,7 +108,7 @@ function Maybe#(MemInst) decodeMemInst(Instruction inst, Bool cap_mode, RiscVISA
     end
 
     Bool capWidth = (mem_func != Ld && funct3 == f3_SQ)
-                 || (opcode   == opcMiscMem && funct3 == f3_LQ);
+                 || (opcode   == opcMiscMem && (funct3 == f3_LQ || funct3 == f3_LQ_xcheri));
 
     Bool illegalFP =    (opcode == opcStoreFp || opcode == opcLoadFp)
                      && !(   (funct3 == memW && isa.f)
@@ -932,7 +932,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                         dInst.execFunc = tagged Other;
                     end
                 end
-                fnLC: begin
+                fnLC, fnLCxCheri: begin
                     dInst.iType = Ld;
                     legalInst = isValid(mem_inst);
                     dInst.execFunc = tagged Mem mem_inst.Valid;
