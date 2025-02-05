@@ -399,14 +399,6 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
         // execution
         ExecResult exec_result = basicExec(x.dInst, x.rVal1, x.rVal2, cast(x.pc), cast(x.ppc), x.orig_inst);
 
-	CapPipe some = cast(x.pc);
-	CapPipe link_pcc = addPc(some, ((x.orig_inst [1:0] == 2'b11) ? 4 : 2));
-	let sentry = setKind(link_pcc, SENTRY);
-	$display("some: ", fshow(some));
-	$display("link_pcc: ", fshow(link_pcc));
-	$display("sentry: ", fshow(sentry));
-	$display ("AluExePipeline.doExeAlu: exec_result = ", fshow (exec_result));
-
         Bool link = (case (x.dInst.iType)
                 J, CJAL, CJALR, Jr: isValid(x.dst);
                 default: False;
@@ -547,8 +539,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
             doAssert(isValid(x.spec_tag), "mispredicted branch must have spec tag");
             inIfc.redirect(cast(x.controlFlow.nextPc), validValue(x.spec_tag), x.tag, exeToFin.spec_bits);
             // must be a branch, train branch predictor
-            $display("ASSERT iType: ", fshow(x.iType));
-            doAssert(x.iType == Jr || x.iType == CJALR || x.iType == CCall || x.iType == Br || x.iType == J || x.iType == CJAL, "only jr, br, cjalr, and ccall can mispredict ");
+            doAssert(x.iType == Jr || x.iType == CJALR || x.iType == CCall || x.iType == Br, "only jr, br, cjalr, and ccall can mispredict ");
             inIfc.fetch_train_predictors(ToSpecFifo {
                 data: FetchTrainBP {
                     pc: cast(x.controlFlow.pc),
