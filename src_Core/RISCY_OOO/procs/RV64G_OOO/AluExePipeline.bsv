@@ -539,7 +539,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
             doAssert(isValid(x.spec_tag), "mispredicted branch must have spec tag");
             inIfc.redirect(cast(x.controlFlow.nextPc), validValue(x.spec_tag), x.tag, exeToFin.spec_bits);
             // must be a branch, train branch predictor
-            doAssert(x.iType == Jr || x.iType == CJALR || x.iType == CCall || x.iType == Br, "only jr, br, cjalr, and ccall can mispredict ");
+            doAssert(x.iType == Jr || x.iType == CJALR || x.iType == CCall || x.iType == Br, "only jr, br, cjalr, and ccall can mispredict");
             inIfc.fetch_train_predictors(ToSpecFifo {
                 data: FetchTrainBP {
                     pc: cast(x.controlFlow.pc),
