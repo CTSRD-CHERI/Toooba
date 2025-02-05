@@ -70,7 +70,6 @@ import StatCounters::*;
 import DReg::*;
 `endif
 
-import Printf :: *;
 
 import Cur_Cycle :: *;
 
