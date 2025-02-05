@@ -352,7 +352,7 @@ typedef union tagged {
 } CapModifyFunc deriving(Bits, Eq, FShow);
 
 typedef union tagged {
-    void TestSubset;
+    SrcSelector TestSubset;
     void SetEqualExact;
     void CSub;
     void GetLen;

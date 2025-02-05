@@ -488,7 +488,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                         opSCHI   : Valid(CapModify(SetHigh));
                         opSCEQ   : Valid(CapInspect(SetEqualExact));
                         opCBLD   : Valid(CapModify(BuildCap));
-                        opSCSS   : Valid(CapInspect(TestSubset));
+                        opSCSS   : Valid(CapInspect(TestSubset(Src1)));
                         opSCMODE : Valid(CapModify(SetFlags));
                         default  : Invalid;
                     endcase;
@@ -1176,7 +1176,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             regs.src1 = Valid(tagged Gpr rs2);
                             regs.src2 = rs1 == 0 ? Invalid : Valid(tagged Gpr rs1);
                             dInst.scr = rs1 == 0 ? Valid (scrAddrDDC) : Invalid;
-                            dInst.capFunc = CapInspect (TestSubset);
+                            dInst.capFunc = CapInspect (TestSubset(Src2));
                         end
                         f7_cap_CSetEqualExact: begin
                             legalInst = True;
