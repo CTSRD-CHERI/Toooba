@@ -273,6 +273,12 @@ endfunction
 function InstrFromFetch2 fetch2_2_instC(Fetch2ToDecode in, Instruction inst, Bit#(32) orig_inst, Bool cap_mode);
    let new_pc = in.pc;
    new_pc.cap_mode = cap_mode;
+   let new_ppc = in.ppc;
+   if (new_ppc matches tagged Valid .ppc) begin
+       let ppc_mutable = ppc; // XXX bound variables in matches can't be modified?
+       ppc_mutable.cap_mode = cap_mode;
+       new_ppc = Valid(ppc_mutable);
+   end
    return InstrFromFetch2 {
       pc: new_pc,
 `ifdef RVFI_DII
@@ -282,7 +288,7 @@ function InstrFromFetch2 fetch2_2_instC(Fetch2ToDecode in, Instruction inst, Bit
       ppc: fromMaybe(PcCompressed{lsb: new_pc.lsb + 2,
                                   idx: new_pc.idx + ((new_pc.lsb == -2) ? 1:0), // If we move to a new page, we will move to the next index in the compressed PC table.
                                   cap_mode: new_pc.cap_mode},
-                     in.ppc),
+                     new_ppc),
       pred_jump: isValid(in.ppc),
       decode_epoch: in.decode_epoch,
       main_epoch: in.main_epoch,
