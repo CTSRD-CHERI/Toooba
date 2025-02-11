@@ -596,15 +596,17 @@ module mkTage(Tage#(numTables)) provisos(
                 (* split *)
                 if(mispred) (* nosplit *) begin
                     // Retrieve allocation information for next update.
+                    `ifdef DEBUG_TAGETEST
                     $display("TAGETEST Misprediction on %x, cycle %d\n", train.pc, cur_cycle);
+                    `endif
                     allocate(train, taken);
                     updateWithTrain(taken, train, mispred);
                 end
                 else (* nosplit *) begin
-                    updateWithTrain(taken, train, mispred);
                     `ifdef DEBUG_TAGETEST
                     $display("TAGETEST correct prediction on %x, cycle %d\n", train.pc, cur_cycle);
                     `endif
+                    updateWithTrain(taken, train, mispred);
                 end
             end
         endmethod

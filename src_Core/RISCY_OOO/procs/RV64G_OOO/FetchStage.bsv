@@ -704,7 +704,7 @@ module mkFetchStage(FetchStage);
 
                     if(in.predicted_branch) begin
                         let recieved <- dirPred.pred[branchCountRecieved].pred;
-                        let dir_pred = validValue(recieved);
+                        dir_pred = validValue(recieved);
 
                         likely_epoch_change = (dir_pred.taken != validValue(decodeIn[i]).pred_jump);
 
