@@ -23,9 +23,9 @@ export mkTageTest;
 typedef TageTrainInfo#(`NUM_TABLES) TageTestTrainInfo;
 typedef TageSpecInfo TageTestSpecInfo;
 
-module mkTageTest#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTestTrainInfo))) outInf)(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo));
+module mkTageTest(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo));
     Reg#(Bool) starting <- mkReg(True);
-    Tage#(7) tage <- mkTage(outInf);
+    Tage#(7) tage <- mkTage;
     Reg#(UInt#(64)) predCount <- mkReg(0);
     Reg#(UInt#(64)) misPredCount <- mkReg(0);
 
@@ -37,6 +37,9 @@ module mkTageTest#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTestTrainInfo
         
         tage.dirPredInterface.update(taken, train, mispred);
     endmethod
+
+    interface pred = tage.dirPredInterface.pred;
+    interface clearIfc = tage.dirPredInterface.clearIfc;
 
     method Action confirmPred(Bit#(SupSize) results, SupCnt count);
         tage.dirPredInterface.confirmPred(results, count);

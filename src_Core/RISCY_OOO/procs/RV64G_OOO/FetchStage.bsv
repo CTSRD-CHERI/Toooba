@@ -312,12 +312,11 @@ module mkFetchStage(FetchStage);
     
     // May be overkill
     SupFifo#(SupSizeX2, 4, PredIn) predInput <- mkUGSupFifo;
-    SupFifo#(SupSize, 6, GuardedResult#(DirPredTrainInfo)) predOutput <- mkUGSupFifo;
        // Can the fifo size be smaller?
 
     // Branch Predictors
     let             nextAddrPred <- mkBtb;
-    let             dirPred      <- mkDirPredictor(predOutput.enqS);
+    let             dirPred      <- mkDirPredictor;
     ReturnAddrStack ras          <- mkRas;
     // Wire to train next addr pred (NAP)
     RWire#(TrainNAP) napTrainByExe <- mkRWire;
@@ -592,17 +591,17 @@ module mkFetchStage(FetchStage);
          end
    endrule: doDecodeFlush
 
-   rule doDecodeFlushPred(predOutput.deqS[0].canDeq && !isCurrentPred(predOutput.deqS[0].first));
+   rule doDecodeFlushPred(dirPred.clearIfc[0].canDeq && !isCurrentPred(dirPred.clearIfc[0].first));
     for (Integer i = 0; i < valueOf(SupSize); i = i + 1)
-       if (predOutput.deqS[i].canDeq &&& !isCurrentPred(predOutput.deqS[i].first)) begin
-          predOutput.deqS[i].deq;
+       if (dirPred.clearIfc[i].canDeq &&& !isCurrentPred(dirPred.clearIfc[i].first)) begin
+        dirPred.clearIfc[i].deq;
        end
    endrule: doDecodeFlushPred
 
 
    function Bool isCurrentOrEmptyPred(Integer i); 
-        if(predOutput.deqS[i].canDeq) begin
-            let in = predOutput.deqS[i].first;
+        if(dirPred.clearIfc[i].canDeq) begin
+            let in = dirPred.clearIfc[i].first;
             return (in.main_epoch == f_main_epoch && in.decode_epoch == decode_epoch[0]);
         end
         else
@@ -621,13 +620,6 @@ module mkFetchStage(FetchStage);
       Maybe#(Bit#(TLog#(SupSizeX2))) m_used_frag_count = Invalid;
       Bit#(TLog#(SupSize)) pick_count = 0;
       Bool prev_frag_available = False;
-      
-      Vector#(SupSize, Maybe#(DirPredResult#(DirPredTrainInfo))) predResults = replicate(Invalid);
-      for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
-        if(predOutput.deqS[i].canDeq) begin
-            predResults[i] = tagged Valid predOutput.deqS[i].first.result;
-        end
-      end
       
       for (Integer i = 0; i < valueOf(SupSizeX2) && !isValid(decodeIn[valueOf(SupSize) - 1]); i = i + 1) begin
          Maybe#(InstrFromFetch2) new_pick = Invalid;
@@ -705,19 +697,22 @@ module mkFetchStage(FetchStage);
 
                     `ifdef DEBUG_TAGETEST
                     $display("DECODE PREDICT on %x %x\n", pc, last_x16_pc);
-                    if(predResults[branchCountRecieved] matches tagged Valid .res) begin
+                    /*if(predResults[branchCountRecieved] matches tagged Valid .res) begin
                         $display("DECODE PRED RESULTS %d on %x\n",branchCountRecieved, res.pc);
-                    end
+                    end*/
                     `endif
 
-                    if(predResults[branchCountRecieved] matches tagged Valid .res &&& in.predicted_branch) begin
-                        doAssert(res.pc == last_x16_pc, "Branch PC is inconsistent\n");
-                        dir_pred = res;
+                    if(in.predicted_branch) begin
+                        let recieved <- dirPred.pred[branchCountRecieved].pred;
+                        let dir_pred = validValue(recieved);
+
                         likely_epoch_change = (dir_pred.taken != validValue(decodeIn[i]).pred_jump);
 
                         branchResults[trueBranchCount] = pack(dir_pred.taken);
                         trueBranchCount = trueBranchCount + 1;
+                        
                         `ifdef DEBUG_TAGETEST
+                        doAssert(dir_pred.pc == last_x16_pc, "Branch PC is inconsistent\n");
                         $display("PREDICT with %x %x %d ID=%d %d\n", pc, dir_pred.pc, dir_pred.taken, dir_spec, dirPred.getSpec(trueBranchCount+1));
                         `endif
                     end
@@ -729,7 +724,7 @@ module mkFetchStage(FetchStage);
                end
 
                // Mispredict in one of the halves
-               if(predResults[branchCountRecieved] matches tagged Valid .res &&& in.predicted_branch)  begin
+               if(in.predicted_branch)  begin
                     $display("DECODE DEQUEUE on %x ", pc, fshow(decode_result.dInst.iType), "\n");
                     branchCountRecieved = branchCountRecieved+1;
                end
@@ -861,7 +856,7 @@ module mkFetchStage(FetchStage);
       end
       
       for(Integer i = 0; i < valueOf(SupSize) && fromInteger(i) < branchCountRecieved; i = i +1) begin
-        predOutput.deqS[i].deq;
+        dirPred.clearIfc[i].deq;
       end
 
       dirPred.confirmPred(branchResults, trueBranchCount);

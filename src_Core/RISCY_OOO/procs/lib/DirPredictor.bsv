@@ -73,7 +73,7 @@ typedef TageTestSpecInfo DirPredSpecInfo;
 `endif
 
 //(* synthesize *)
-module mkDirPredictor#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(DirPredTrainInfo))) in)(DirPredictor#(DirPredTrainInfo, DirPredSpecInfo));
+module mkDirPredictor(DirPredictor#(DirPredTrainInfo, DirPredSpecInfo));
 `ifdef DIR_PRED_BHT
 `ifdef SECURITY
     staticAssert(False, "BHT with flush methods is not implemented");
@@ -107,11 +107,11 @@ module mkDirPredictor#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(DirPredTrainI
     let m <- mkBimodal;
 `endif
 `ifdef DIR_PRED_TAGETEST
-    let m <- mkTageTest(in);
+    let m <- mkTageTest;
 `endif
 
 `ifdef DIR_PRED_TOUR_STAGED
-    let m <- mkTourPredStaged(in);
+    let m <- mkTourPredStaged;
 `endif
 
     return m;

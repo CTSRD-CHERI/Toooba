@@ -25,6 +25,7 @@ import Types::*;
 import ProcTypes::*;
 import EpochManager::*;
 import Vector::*;
+import Fifos::*;
 
 (* noinline *)
 function Maybe#(Addr) decodeBrPred( Addr pc, DecodedInst dInst, Bool histTaken, Bool is_32b_inst);
@@ -75,7 +76,7 @@ typedef struct {
 
 
 interface DirPred#(type trainInfoT);
-  method ActionValue#(Maybe#(GuardedResult#(trainInfoT))) pred;
+  method ActionValue#(Maybe#(DirPredResult#(trainInfoT))) pred;
 endinterface
 
 interface DirPredictor#(type trainInfoT, type specInfoT);
@@ -83,8 +84,16 @@ interface DirPredictor#(type trainInfoT, type specInfoT);
     method Action specRecover(specInfoT specInfo, Bool taken, Bool nonBranch);
     //interface Vector#(SupSize, DirPred#(trainInfoT, specInfoT)) pred;
     method Action update(Bool taken, trainInfoT train, Bool mispred);
+    
+    // Does it need to be tagged. Should always be able to provide a result when called
+    interface Vector#(SupSize, DirPred#(trainInfoT)) pred;
+    
     method Action confirmPred(Bit#(SupSize) results, SupCnt count); // By decode stage, for speculative history and end_pointer update
     
+    // Could instead be fully inside the predictor without exposing this interface, but still need to communicate 
+    // the current main_epoch and decode.epoch each cycle, also every predictor will need this added logic, sounds like a pain
+    interface Vector#(SupSize, SupFifoDeq#(GuardedResult#(trainInfoT))) clearIfc;
+
     method specInfoT getSpec(SupCnt i);
 
     method Action flush;

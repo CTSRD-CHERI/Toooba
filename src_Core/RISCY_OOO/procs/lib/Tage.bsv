@@ -154,7 +154,7 @@ endinterface
 
 */
 
-module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTables)))) outInf)(Tage#(numTables)) provisos(
+module mkTage(Tage#(numTables)) provisos(
     Bits#(TageTrainInfo#(numTables), a__),
     Add#(1, b__, TLog#(TAdd#(1, numTables))),
     Add#(c__, numTables, 20)
@@ -186,6 +186,7 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
 
     Vector#(SupSize, RWire#(PredIn)) predIn <- replicateM(mkRWire);
     Vector#(SupSize, Reg#(Maybe#(GuardedResult#(TageTrainInfo#(numTables))))) pred1ToPred2 <- replicateM(mkDReg(tagged Invalid));
+    SupFifo#(SupSize, 6, GuardedResult#(TageTrainInfo#(numTables))) pred2Topred3 <- mkUGSupFifo; // Check size
   
     function Bool useAlt;
         return unpack(pack(alt_on_na)[`METAPREDICTOR_CTR_SIZE-1]);
@@ -526,9 +527,9 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
         end
 
         for (Integer i = 0; fromInteger(i) < valueOf(SupSize) && fromInteger(i) < count; i = i + 1) begin
-            if(outInf[i].canEnq) begin
+            if(pred2Topred3.enqS[i].canEnq) begin
                     $display("Predict enqueue %x onto %d", results[i].result.pc, i);
-                    outInf[i].enq(results[i]);
+                    pred2Topred3.enqS[i].enq(results[i]);
             end
             else
                 doAssert(False, "FAIL TO ENQUEUE PRED2");
@@ -568,6 +569,25 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
         `CASE_ALL_TABLES(tab, (*/ return t.access_wrapped_entry(pc); /*))
     endmethod
     `endif
+    
+    Vector#(SupSize, DirPred#(TageTrainInfo#(numTables))) predIfc;
+    for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+        predIfc[i] = (interface DirPred;
+            method ActionValue#(Maybe#(DirPredResult#(TageTrainInfo#(numTables)))) pred;
+                if(pred2Topred3.deqS[i].canDeq) begin
+                    /* Do processing */
+                
+                    return tagged Valid pred2Topred3.deqS[i].first.result;
+                end
+                else begin
+                    `ifdef DEBUG_TAGETEST
+                    doAssert(False, "Failed to provide a prediction when expected\n");
+                    `endif
+                    return tagged Invalid;
+                end
+            endmethod
+        endinterface);
+    end
 
 
     interface  dirPredInterface = interface DirPredictor#(TageTrainInfo#(numTables), TageSpecInfo);
@@ -588,6 +608,9 @@ module mkTage#(Vector#(SupSize, SupFifoEnq#(GuardedResult#(TageTrainInfo#(numTab
                 end
             end
         endmethod
+
+        interface pred = predIfc;
+        interface clearIfc = pred2Topred3.deqS;
 
         // Recover histories before table writes
         method Action specRecover(TageSpecInfo specInfo, Bool taken, Bool nonBranch);
