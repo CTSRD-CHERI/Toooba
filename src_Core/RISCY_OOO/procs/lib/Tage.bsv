@@ -71,6 +71,10 @@ export mkTage;
 
 typedef 12 PCIndexSz;
 typedef Bit#(PCIndexSz) PCIndex;
+
+typedef 13 BimodalPredSz;
+typedef 11 BimodalHystSz;
+
 typedef Bit#(2) Entry;
 typedef Bit#(TLog#(numTables)) TableIndex#(numeric type numTables);
 
@@ -105,6 +109,11 @@ typedef struct{
     Bool confirmed;
 } TageTrainInfo#(numeric type numTables) deriving(Bits, Eq, FShow);
 
+//
+typedef struct {
+    BimodalInd#(BimodalPredSz, BimodalHystSz) ind;
+} TageFastTrainInfo deriving(Bits, Eq, FShow);
+
 typedef struct {
     Bool confirmed;    
     CircBuffIndex#(MaxSpecSize) ooIndex;
@@ -137,7 +146,7 @@ typedef union tagged {
 } TaggedEntrySizes deriving(Bits);
 
 interface Tage#(numeric type numTables);
-    interface DirPredictor#(TageTrainInfo#(numTables), TageSpecInfo) dirPredInterface;
+    interface DirPredictor#(TageTrainInfo#(numTables), TageSpecInfo, TageFastTrainInfo) dirPredInterface;
     
     `ifdef DEBUG
         method Action debugTables(Addr pc);
@@ -170,7 +179,7 @@ module mkTage(Tage#(numTables)) provisos(
     TaggedTable#(9,12,130)  t7 <- mkTaggedTable(global);
 
     
-    BimodalTable#(13, 11) bimodalTable <- mkBimodalTable(regInitFilenameBimodalPred, regInitFilenameBimodalHyst);
+    BimodalTable#(BimodalPredSz, BimodalHystSz) bimodalTable <- mkBimodalTable(regInitFilenameBimodalPred, regInitFilenameBimodalHyst);
     Vector#(7, ChosenTaggedTables) taggedTablesVector = cons(T_9_9_5(t1), cons(T_9_9_9(t2), cons(T_9_10_15(t3), cons(T_9_10_25(t4), cons(T_9_11_44(t5), cons(T_9_11_76(t6), cons(T_9_12_130(t7), nil)))))));
     Reg#(UInt#(`METAPREDICTOR_CTR_SIZE)) alt_on_na <- mkReg(1 << (`METAPREDICTOR_CTR_SIZE-1));
     CircBuff#(MaxSpecSize, Bool) ooBuff <- mkCircBuff;
@@ -184,7 +193,7 @@ module mkTage(Tage#(numTables)) provisos(
     LFSR#(Bit#(4)) lfsr <- mkLFSR_4;
     Reg#(Bool) starting <- mkReg(True);
 
-    Vector#(SupSize, RWire#(PredIn)) predIn <- replicateM(mkRWire);
+    Vector#(SupSize, RWire#(PredIn#(TageFastTrainInfo))) predIn <- replicateM(mkRWire);
     Vector#(SupSize, Reg#(Maybe#(GuardedResult#(TageTrainInfo#(numTables))))) pred1ToPred2 <- replicateM(mkDReg(tagged Invalid));
     SupFifo#(SupSize, 6, GuardedResult#(TageTrainInfo#(numTables))) pred2Topred3 <- mkUGSupFifo; // Check size
   
@@ -430,7 +439,8 @@ module mkTage(Tage#(numTables)) provisos(
         rule predStageOne(predIn[i].wget matches tagged Valid .in);
             $display("Prediction on %x\n", in.pc);
             TageTrainInfo#(numTables) ret = unpack(0);
-            Addr pc = offsetPc(in.pc, i);
+            // Addr pc = offsetPc(in.pc, i);
+            Addr pc = in.pc;
 
             `ifdef DEBUG_TAGETEST
                 $display("TAGETEST LFSR %d\n", lfsr.value);
@@ -477,7 +487,7 @@ module mkTage(Tage#(numTables)) provisos(
                 end
                 else begin
                     ret.alt_table = tagged Invalid;
-                    Bool bimodal_prediction = unpack(pack(bimodalTable.accessPrediction(pc)));
+                    Bool bimodal_prediction = in.fastTrainInfo.taken;
                     ret.alt_prediction = bimodal_prediction;
                     ret.use_alt = False;
                     ret.taken = prediction;
@@ -492,7 +502,7 @@ module mkTage(Tage#(numTables)) provisos(
                 ret.provider_info = tagged Invalid;
                 ret.use_alt = False;
                 // Maybe automatically trigger a read from bimodal table ever time nextPc is set?
-                Bool prediction = unpack(pack(bimodalTable.accessPrediction(pc)));
+                Bool prediction = in.fastTrainInfo.taken;
                 ret.provider_prediction = prediction;
                 ret.taken = prediction;
             end
@@ -589,7 +599,6 @@ module mkTage(Tage#(numTables)) provisos(
         endinterface);
     end
 
-
     interface  dirPredInterface = interface DirPredictor#(TageTrainInfo#(numTables), TageSpecInfo);
         method Action update(Bool taken, TageTrainInfo#(numTables) train, Bool mispred);
             if(train.confirmed) begin
@@ -609,6 +618,19 @@ module mkTage(Tage#(numTables)) provisos(
                     updateWithTrain(taken, train, mispred);
                 end
             end
+        endmethod
+
+        // Action value for flexibility, though I may not use it
+        method ActionValue#(Vector#(SupSizeX2, FastPredictResult#(TageFastTrainInfo))) fastPred(Addr pc); // No training
+            function FastPredictResult#(TageFastTrainInfo) bimodalPred(Addr pc, Integer i);
+                let addr = pc + fromInteger(i*2);
+                return FastPredictResult{
+                    taken: unpack(pack(bimodalTable.accessPrediction(addr))),
+                    train: TageFastTrainInfo{ind: bimodalTable.trainingInfo(addr)}
+                };
+            endfunction
+            
+            return genWith(bimodalPred(pc));
         endmethod
 
         interface pred = predIfc;
@@ -639,7 +661,6 @@ module mkTage(Tage#(numTables)) provisos(
                                 t.updateRecovered(pack(taken)); /*))
                         end 
                     end
-                //end
             end
         endmethod
 
@@ -656,7 +677,7 @@ module mkTage(Tage#(numTables)) provisos(
             predResults[0] <= results;
         endmethod
     
-        method Action nextPc(Vector#(SupSize,Maybe#(PredIn)) next);
+        method Action nextPc(Vector#(SupSize,Maybe#(PredIn#(TageFastTrainInfo))) next);
             for(Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
             if (next[i] matches tagged Valid .n)
                 predIn[i].wset(n);

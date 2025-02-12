@@ -63,6 +63,11 @@ typedef struct {
 } DirPredResult#(type trainInfoT) deriving(Bits, Eq, FShow);
 
 typedef struct {
+  Bool taken;
+  fastTrainInfoT train;
+} FastPredictResult#(type fastTrainInfoT) deriving(Bits, Eq, FShow);
+
+typedef struct {
     DirPredResult#(trainInfoT) result;
     Epoch main_epoch;
     Bool decode_epoch;
@@ -70,23 +75,25 @@ typedef struct {
 
 typedef struct {
   Addr pc;
+  FastPredictResult#(fastTrainInfoT) fastTrainInfo;
   Epoch main_epoch;
   Bool decode_epoch;
-} PredIn deriving(Bits, Eq, FShow);
+} PredIn#(type fastTrainInfoT) deriving(Bits, Eq, FShow);
 
 
 interface DirPred#(type trainInfoT);
   method ActionValue#(Maybe#(DirPredResult#(trainInfoT))) pred;
 endinterface
 
-interface DirPredictor#(type trainInfoT, type specInfoT);
-    method Action nextPc(Vector#(SupSize,Maybe#(PredIn)) next);
+interface DirPredictor#(type trainInfoT, type specInfoT, type fastTrainInfoT);
+    method Action nextPc(Vector#(SupSize,Maybe#(PredIn#(fastTrainInfoT))) next);
     method Action specRecover(specInfoT specInfo, Bool taken, Bool nonBranch);
     //interface Vector#(SupSize, DirPred#(trainInfoT, specInfoT)) pred;
     method Action update(Bool taken, trainInfoT train, Bool mispred);
     
     // Does it need to be tagged. Should always be able to provide a result when called
     interface Vector#(SupSize, DirPred#(trainInfoT)) pred;
+    method ActionValue#(Vector#(SupSizeX2, FastPredictResult#(fastTrainInfoT))) fastPred(Addr pc); // No training
     
     method Action confirmPred(Bit#(SupSize) results, SupCnt count); // By decode stage, for speculative history and end_pointer update
     

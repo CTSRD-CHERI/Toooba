@@ -311,7 +311,7 @@ module mkFetchStage(FetchStage);
     SupFifo#(SupSize, 3, FromFetchStage) out_fifo <- mkSupFifo;
     
     // May be overkill
-    SupFifo#(SupSizeX2, 4, PredIn) predInput <- mkUGSupFifo;
+    SupFifo#(SupSizeX2, 4, DirPredIn) predInput <- mkUGSupFifo;
        // Can the fifo size be smaller?
 
     // Branch Predictors
@@ -402,9 +402,12 @@ module mkFetchStage(FetchStage);
         // Grab a chain of predictions from the BTB, which predicts targets for the next
         // set of addresses based on the current PC.
         Vector#(SupSizeX2, Tuple2#(Maybe#(Addr), Bool)) pred_future_pc = nextAddrPred.pred;
+        let fastPredictions <- dirPred.fastPred(pc); //  Integrate more with the BTB
 
         // Next pc is the first nextPc that breaks the chain of pc+4 or
         // that is at the end of a cacheline.
+
+        //!(!tpl_2(pred_future_pc[i]) && isValid(tpl_1(pred_future_pc[i]))) && !(tpl_2(pred_future_pc[i]) && fastPredictions[i].taken);//
         Vector#(SupSizeX2,Integer) indexes = genVector;
         function Bool findNextPc(Addr in_pc, Integer i);
             Bool notLastInst = getLineInstOffset(in_pc + fromInteger(2*i)) != maxBound;
@@ -414,8 +417,8 @@ module mkFetchStage(FetchStage);
         Bit#(TLog#(SupSizeX2)) posLastSupX2 = fromInteger(fromMaybe(valueof(SupSizeX2) - 1, find(findNextPc(pc), indexes)));
         Maybe#(Addr) pred_next_pc = tpl_1(pred_future_pc[posLastSupX2]);
 
-        Vector#(SupSize, Maybe#(PredIn)) in = replicate(tagged Invalid);
-        Vector#(SupSizeX2, Maybe#(PredIn)) branches = replicate(tagged Invalid);
+        Vector#(SupSize, Maybe#(DirPredIn)) in = replicate(tagged Invalid);
+        Vector#(SupSizeX2, Maybe#(DirPredIn)) branches = replicate(tagged Invalid);
         Bit#(SupSizeX2) mask = 0;
         Bit#(TAdd#(TLog#(SupSizeX2),1)) count = 0;
         Bit#(TAdd#(TLog#(SupSizeX2),1)) enqCount = 0; // Because SpecFifo forces consecutive enqueues
@@ -423,7 +426,7 @@ module mkFetchStage(FetchStage);
         // How to do this efficiently??? !
         for(Integer i = 0; i < valueOf(SupSizeX2) && fromInteger(i) <= posLastSupX2; i = i + 1) begin
             if (tpl_2(pred_future_pc[i])) begin
-                branches[count] = tagged Valid PredIn{pc: pc + fromInteger(2*i), main_epoch: f_main_epoch, decode_epoch: decode_epoch[0]};
+                branches[count] = tagged Valid DirPredIn{pc: pc + fromInteger(2*i), fastTrainInfo: fastPredictions[i],  main_epoch: f_main_epoch, decode_epoch: decode_epoch[0]};
                 count = count + 1;
                 mask[i] = 1;
             end
@@ -503,7 +506,7 @@ module mkFetchStage(FetchStage);
                 if(isValid(branches[enqCount])) begin
                     if(predInput.enqS[i].canEnq) begin
                         `ifdef DEBUG_TAGETEST
-                        $display("Enqueue %d\n", i);
+                        $display("Enqueue %x %d\n", brances[enqCount], i);
                         `endif
                         predInput.enqS[i].enq(validValue(branches[enqCount]));
                         enqCount = enqCount + 1;
