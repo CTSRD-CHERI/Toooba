@@ -461,43 +461,46 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                 end
                 opCapInspect: begin
                     if (funct3 == 3'b000) begin
-                        Maybe#(CapFunc) mCapFunc = case(rs2)
-                            opGCTAG  : Valid(CapInspect(GetTag));
-                            opGCPERM : Valid(CapInspect(GetPerm));
-                            opGCTYPE : Valid(CapInspect(GetType));
-                            opGCMODE : Valid(CapInspect(GetFlags));
-                            opGCHI   : Valid(CapInspect(GetHigh));
-                            opGCBASE : Valid(CapInspect(GetBase));
-                            opGCLEN  : Valid(CapInspect(GetLen));
-                            opCRAM   : Valid(CapModify(SetBounds(CRAM)));
-                            opSENTRY : Valid(CapModify(SealEntry));
+                        Maybe#(Tuple2#(CapFunc, Bool)) mCapFunc = case(rs2)
+                            opGCTAG  : Valid(tuple2(CapInspect(GetTag),False));
+                            opGCPERM : Valid(tuple2(CapInspect(GetPerm),False));
+                            opGCTYPE : Valid(tuple2(CapInspect(GetType),False));
+                            opGCMODE : Valid(tuple2(CapInspect(GetFlags),False));
+                            opGCHI   : Valid(tuple2(CapInspect(GetHigh),False));
+                            opGCBASE : Valid(tuple2(CapInspect(GetBase),False));
+                            opGCLEN  : Valid(tuple2(CapInspect(GetLen),False));
+                            opCRAM   : Valid(tuple2(CapModify(SetBounds(CRAM)),True));
+                            opSENTRY : Valid(tuple2(CapModify(SealEntry),False));
                             default  : Invalid;
                         endcase;
-                        dInst.capFunc = mCapFunc.Valid;
+                        dInst.capFunc = tpl_1(mCapFunc.Valid);
+                        Bool swap = tpl_2(mCapFunc.Valid);
                         legalInst = isValid(mCapFunc);
                         dInst.iType = Cap;
                         regs.dst = Valid(tagged Gpr rd);
-                        regs.src1 = Valid(tagged Gpr rs1);
+                        regs.src1 = Valid(tagged Gpr (swap ? 0 : rs1));
+                        regs.src2 = swap ? Valid(tagged Gpr rs1) : Invalid;
                     end
                 end
                 opCapArith: begin
-                    Maybe#(CapFunc) mCapFunc = case(funct3)
-                        opCADD   : Valid(CapModify(rs2 == 0 ? Move : ModifyOffset(IncOffset)));
-                        opSCADDR : Valid(CapModify(SetAddr(Src2Addr)));
-                        opACPERM : Valid(CapModify(AndPerm));
-                        opSCHI   : Valid(CapModify(SetHigh));
-                        opSCEQ   : Valid(CapInspect(SetEqualExact));
-                        opCBLD   : Valid(CapModify(BuildCap));
-                        opSCSS   : Valid(CapInspect(TestSubset(Src1)));
-                        opSCMODE : Valid(CapModify(SetFlags));
+                    Maybe#(Tuple2#(CapFunc,Bool)) mCapFunc = case(funct3)
+                        opCADD   : Valid(tuple2(CapModify(rs2 == 0 ? Move : ModifyOffset(IncOffset)),False));
+                        opSCADDR : Valid(tuple2(CapModify(SetAddr(Src2Addr)),False));
+                        opACPERM : Valid(tuple2(CapModify(AndPerm),False));
+                        opSCHI   : Valid(tuple2(CapModify(SetHigh),False));
+                        opSCEQ   : Valid(tuple2(CapInspect(SetEqualExact),False));
+                        opCBLD   : Valid(tuple2(CapModify(BuildCap),True));
+                        opSCSS   : Valid(tuple2(CapInspect(TestSubset),True));
+                        opSCMODE : Valid(tuple2(CapModify(SetFlags),False));
                         default  : Invalid;
                     endcase;
-                    dInst.capFunc = mCapFunc.Valid;
+                    dInst.capFunc = tpl_1(mCapFunc.Valid);
                     legalInst = isValid(mCapFunc);
+                    Bool swap = tpl_2(mCapFunc.Valid);
                     dInst.iType = Cap;
                     regs.dst = Valid(tagged Gpr rd);
-                    regs.src1 = Valid(tagged Gpr rs1);
-                    regs.src2 = mCapFunc != Valid(CapModify(Move)) ? Valid(tagged Gpr rs2) : Invalid;
+                    regs.src1 = Valid(tagged Gpr (swap ? rs2 : rs1));
+                    regs.src2 = mCapFunc matches tagged Valid .f &&& tpl_1(f) == CapModify(Move) ? Invalid : Valid(tagged Gpr (swap ? rs1 : rs2));
                 end
                 opCapBounds: begin
                     Maybe#(CapFunc) mCapFunc = case(funct3)
@@ -1176,7 +1179,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             regs.src1 = Valid(tagged Gpr rs2);
                             regs.src2 = rs1 == 0 ? Invalid : Valid(tagged Gpr rs1);
                             dInst.scr = rs1 == 0 ? Valid (scrAddrDDC) : Invalid;
-                            dInst.capFunc = CapInspect (TestSubset(Src2));
+                            dInst.capFunc = CapInspect (TestSubset);
                         end
                         f7_cap_CSetEqualExact: begin
                             legalInst = True;
