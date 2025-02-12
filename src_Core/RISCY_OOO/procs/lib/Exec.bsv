@@ -321,14 +321,12 @@ endfunction
 (* noinline *)
 function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
     Data res = (case(func) matches
-               tagged TestSubset .src        : begin
-                   let auth = (src==Src1) ? a : b;
-                   let bits = (src==Src1) ? b : a;
+               tagged TestSubset              : begin
                    // TODO will be bad for timing. Would like to reuse bounds check
-                   zeroExtend(pack(   (isValidCap(auth) == isValidCap(bits))
-                                   && ((getPerms(bits) & getPerms(auth)) == getPerms(bits))
-                                   && (getBase(bits) >= getBase(auth))
-                                   && (getTop(bits) <= getTop(auth))));
+                   zeroExtend(pack(   (isValidCap(b) == isValidCap(a))
+                                   && ((getPerms(a) & getPerms(b)) == getPerms(a))
+                                   && (getBase(a) >= getBase(b))
+                                   && (getTop(a) <= getTop(b))));
                end
                tagged SetEqualExact          :
                    zeroExtend(pack(toMem(a) == toMem(b)));
