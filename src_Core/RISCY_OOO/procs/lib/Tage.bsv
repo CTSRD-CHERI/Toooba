@@ -436,11 +436,13 @@ module mkTage(Tage#(numTables)) provisos(
     endrule
 
     for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
+        (* no_implicit_conditions, fire_when_enabled *)
         rule predStageOne(predIn[i].wget matches tagged Valid .in);
             $display("Prediction on %x\n", in.pc);
             TageTrainInfo#(numTables) ret = unpack(0);
-            // Addr pc = offsetPc(in.pc, i);
+            
             Addr pc = in.pc;
+
 
             `ifdef DEBUG_TAGETEST
                 $display("TAGETEST LFSR %d\n", lfsr.value);
@@ -530,7 +532,7 @@ module mkTage(Tage#(numTables)) provisos(
         Bit#(TAdd#(TLog#(SupSize),1)) count = 0;
         for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
             if(pred1ToPred2[i] matches tagged Valid .in) begin
-                $display("Predict2 detected %x %d", results[i].result.pc, i);
+                $display("Predict2 detected %x %d %d", results[i].result.pc, i, cur_cycle);
                 results[count] = in;
                 count = count + 1;
             end
