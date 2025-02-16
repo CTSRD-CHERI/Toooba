@@ -102,6 +102,7 @@ interface DirPredictor#(type trainInfoT, type specInfoT, type fastTrainInfoT);
     interface Vector#(SupSize, SupFifoDeq#(GuardedResult#(trainInfoT))) clearIfc;
 
     method specInfoT getSpec(SupCnt i);
+    method Action updateSpec(Bit#(TAdd#(TLog#(SupSizeX2),1)) i);
 
     method Action flush;
     method Bool flush_done;

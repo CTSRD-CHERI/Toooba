@@ -247,7 +247,7 @@ module mkTage(Tage#(numTables)) provisos(
             `CASE_ALL_TABLES(tab, 
             (*/
                 // Could do this in one
-                match {.tag, .index}  = t.accessPredInfo[0].access(pc);
+                match {.tag, .index}  = t.accessPredInfo[numPred].access(pc);
                 let entry = t.access_wrapped_entry(pc, truncate(index));
                 replaceableEntries[j] = pack(entry.usefulCounter == 0);
                 
@@ -400,7 +400,7 @@ module mkTage(Tage#(numTables)) provisos(
         // Update history speculatively
             let num = numPred[valueOf(SupSize)];
             let results = predResults[valueOf(SupSize)];
-            ooBuff.specAssignConfirmed(num);
+            //ooBuff.specAssignConfirmed(num);
 
             
             if(num != 0) begin
@@ -450,7 +450,7 @@ module mkTage(Tage#(numTables)) provisos(
             `endif
 
             // Retrieve provider and alternative table
-            match {{.pred, .altpred}, .replaceableEntries, .indices, .tags} = find_pred_altpred(pc, 0);
+            match {{.pred, .altpred}, .replaceableEntries, .indices, .tags} = find_pred_altpred(pc, fromInteger(i));
             ret.replaceableEntries = replaceableEntries;
             ret.pc = pc;
             ret.indices = indices;
@@ -514,6 +514,13 @@ module mkTage(Tage#(numTables)) provisos(
             `ifdef DEBUG_TAGETEST   
                 $display("TAGETEST Prediction on: %x,%d, Taken: %d, cycle %d\n", in.pc , i, ret.taken, cur_cycle);
             `endif
+
+            numPred[i] <= numPred[i] + 1;
+            let results = predResults[i];
+            results[numPred[i]] = pack(in.fastTrainInfo.taken);
+            predResults[i] <= results;
+                
+            //let spec <- ooBuff.specAssign[i].specAssign; // Need action, but fragment should have corresponding original index
           
             pred1ToPred2[i] <= tagged Valid GuardedResult {
                 result: DirPredResult{
@@ -670,13 +677,15 @@ module mkTage(Tage#(numTables)) provisos(
             return TageSpecInfo{ooIndex: ooBuff.specAssignUnconfirmed(i), confirmed: True};
         endmethod
 
+        method Action updateSpec(Bit#(TAdd#(TLog#(SupSizeX2),1)) i);
+            ooBuff.specUpdate(i);
+        endmethod
+
         method Action confirmPred(Bit#(SupSize) results, SupCnt count);
             `ifdef DEBUG_TAGETEST
             if(count > 0)
                 $display("TAGETEST Confirm Pred %b %d\n", results, count);
             `endif
-            numPred[0] <= count;
-            predResults[0] <= results;
         endmethod
     
         method Action nextPc(Vector#(SupSize,Maybe#(PredIn#(TageFastTrainInfo))) next);

@@ -14,6 +14,7 @@ endinterface
 
 interface CircBuff#(numeric type size, type t);
     interface Vector#(SupSize, CircBuffAssign#(size)) specAssign;
+    method Action specUpdate(Bit#(TAdd#(TLog#(SupSizeX2),1)) count);
 
     method CircBuffIndex#(size) specAssignUnconfirmed(SupCnt count);
     method Action specAssignConfirmed(SupCnt count);
@@ -59,6 +60,13 @@ module mkCircBuff(CircBuff#(size, t)) provisos(Bits#(t, a__));
         endinterface);
     end
     interface specAssign = assignIfc;
+
+    method Action specUpdate(Bit#(TAdd#(TLog#(SupSizeX2),1)) count);
+        CircBuffIndex#(size) index = endSpecLast;
+        for(Integer i = 0; fromInteger(i) < count; i = i +1)
+            index = nextIndex(index);
+        endSpec[0] <= index;
+    endmethod
 
     method CircBuffIndex#(size) specAssignUnconfirmed(SupCnt count);
         CircBuffIndex#(size) index = endSpecLast;

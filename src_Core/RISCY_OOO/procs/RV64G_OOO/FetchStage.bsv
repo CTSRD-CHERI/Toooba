@@ -43,6 +43,8 @@ import EpochManager::*;
 import Performance::*;
 import Vector::*;
 import Assert::*;
+import ConfigReg::*;
+import RevertingVirtualReg :: * ;
 import Cntrs::*;
 import ConfigReg::*;
 import TlbTypes::*;
@@ -136,6 +138,7 @@ typedef struct {
     Bool decode_epoch;
     Epoch main_epoch;
     Bit#(SupSizeX2) branches_predicted;
+    Vector#(SupSizeX2,DirPredSpecInfo) recoverInfo;
 } Fetch1ToFetch2 deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -146,6 +149,7 @@ typedef struct {
     Bool decode_epoch;
     Epoch main_epoch;
     Bool predicted_branch;
+    DirPredSpecInfo recoverInfo;
 } Fetch2ToDecode deriving(Bits, Eq, FShow);
 
 // Used purely internally in doDecode.
@@ -162,6 +166,7 @@ typedef struct {
   Bool cause_second_half;
   Bool mispred_first_half;
   Bool predicted_branch;
+  DirPredSpecInfo recoverInfo;
 } InstrFromFetch2 deriving(Bits, Eq, FShow);
 
 function InstrFromFetch2 fetch2_2_instC(Fetch2ToDecode in, Instruction inst, Bit#(32) orig_inst) =
@@ -180,7 +185,8 @@ function InstrFromFetch2 fetch2_2_instC(Fetch2ToDecode in, Instruction inst, Bit
       cause: in.cause,
       cause_second_half: False,
       mispred_first_half: False,
-      predicted_branch: in.predicted_branch
+      predicted_branch: in.predicted_branch,
+      recoverInfo: in.recoverInfo
    };
 
 function InstrFromFetch2 fetch2s_2_inst(Fetch2ToDecode inHi, Fetch2ToDecode inLo);
@@ -192,7 +198,7 @@ function InstrFromFetch2 fetch2s_2_inst(Fetch2ToDecode inHi, Fetch2ToDecode inLo
    ret.pc = inLo.pc; // The PC comes from the 1st fragment.
    ret.mispred_first_half = isValid(inLo.ppc); // If we predicted a jump on the first half of the 32-bit instruction, we have erred.
    ret.predicted_branch = ret.predicted_branch || inLo.predicted_branch; // Want to detect misprediction in the first half
-   
+   ret.recoverInfo = inLo.recoverInfo; // Replace inHi value
    return ret;
 endfunction
 
@@ -296,12 +302,14 @@ module mkFetchStage(FetchStage);
     Integer decode_pc_redirect_port = valueOf(SupSize);
     Integer decode_pc_final_port = valueOf(SupSize) + 1;
 
+    Reg#(Bool) virtualReg <- mkRevertingVirtualReg(True); // Force redirect to block doDecode
+
     // PC compression structure holding an indexed set of PC blocks so that only indexes need be tracked.
     IndexedMultiset#(PcIdx, PcMSB, SupSizeX2) pcBlocks <- mkIndexedMultisetQueue;
     function Addr decompressPc(PcCompressed p) = {pcBlocks.lookup(p.idx),p.lsb};
     // Epochs
     Ehr#(2, Bool) decode_epoch <- mkEhr(False);
-    Reg#(Epoch) f_main_epoch <- mkReg(0); // fetch estimate of main epoch
+    Reg#(Epoch) f_main_epoch <- mkConfigReg(0); // fetch estimate of main epoch
 
     // Pipeline Stage FIFOs
     Fifo#(1, Addr) translateAddress <- mkCFFifo;
@@ -468,7 +476,9 @@ module mkFetchStage(FetchStage);
         Bit#(SupSizeX2) mask = 0;
         
         // How to do this efficiently??? !
+        Vector#(SupSizeX2, DirPredSpecInfo) recoverInfo = replicate(unpack(0));
         for(Integer i = 0; i < valueOf(SupSizeX2) && fromInteger(i) <= posLastSupX2; i = i + 1) begin
+            recoverInfo[i] = dirPred.getSpec(truncate(count)); //Inefficient, just use counter
             if (tpl_2(pred_future_pc[i])) begin
                 branches[count] = tagged Valid DirPredIn{pc: pc + fromInteger(2*i), fastTrainInfo: fastPredictions[i],  main_epoch: f_main_epoch, decode_epoch: decode_epoch[0]};
                 count = count + 1;
@@ -476,7 +486,6 @@ module mkFetchStage(FetchStage);
             end
         end
         
-
         `ifdef DEBUG_TAGETEST
         $display("FETCH1 %x, Cycle: %d last inst: %d branch count: %d", pc, cur_cycle, posLastSupX2, count);
         `endif
@@ -516,6 +525,7 @@ module mkFetchStage(FetchStage);
             
             newBranchesCount <= count;
             newBranches <= branches;
+            dirPred.updateSpec(count);
         
 
             let out = Fetch1ToFetch2 {
@@ -527,7 +537,8 @@ module mkFetchStage(FetchStage);
                 access_mmio: access_mmio,
                 decode_epoch: decode_epoch[0],
                 main_epoch: f_main_epoch,
-                branches_predicted: mask
+                branches_predicted: mask,
+                recoverInfo: recoverInfo
             };
             fetch1toFetch2.enq(out);
 
@@ -591,7 +602,8 @@ module mkFetchStage(FetchStage);
                cause: fetch2In.cause,
                decode_epoch: fetch2In.decode_epoch,
                main_epoch: fetch2In.main_epoch,
-               predicted_branch: unpack(fetch2In.branches_predicted[i])
+               predicted_branch: unpack(fetch2In.branches_predicted[i]),
+               recoverInfo: fetch2In.recoverInfo[i]
            });
         end
     endrule: doFetch2
@@ -626,6 +638,7 @@ module mkFetchStage(FetchStage);
    Vector#(SupSize,Integer) indices = genVector;
 
    rule doDecode(f2d.deqS[0].canDeq && isCurrent(f2d.deqS[0].first)/*( && all(isCurrentOrEmptyPred, indices)*/);
+      virtualReg <= False;
       Vector#(SupSize, Maybe#(InstrFromFetch2)) decodeIn = replicate(Invalid);
       // Express the incoming fragments as a vector of maybes.
       Vector#(SupSizeX2, Maybe#(Fetch2ToDecode)) frags;
@@ -669,6 +682,7 @@ module mkFetchStage(FetchStage);
 
       Maybe#(Addr) redirectPc = Invalid; // next pc redirect by branch predictor
       Maybe#(TrainNAP) trainNAP = Invalid; // training data sent to next addr pred
+      Maybe#(Tuple3#(DirPredSpecInfo, Bool, Bool)) recover = Invalid;
       Bool decode_epoch_local = decode_epoch[0]; // next value for decode epoch
 `ifdef PERF_COUNT
       // performance counter: inst being redirect by decode stage
@@ -704,7 +718,7 @@ module mkFetchStage(FetchStage);
                trainNAP = Valid (TrainNAP {pc: pc, nextPc: pc + 2, branch: False});
             end else if (in.decode_epoch == decode_epoch_local) begin   
                DirPredResult#(DirPredTrainInfo) dir_pred = DirPredResult{taken: False, train: unpack(0), pc: ?};
-               DirPredSpecInfo dir_spec = dirPred.getSpec(trueBranchCount);
+               DirPredSpecInfo dir_spec = in.recoverInfo;
                if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
                     // So it compiles - REMOVE LATER!
                     Bit#(1) took <- dummy(1);
@@ -826,12 +840,15 @@ module mkFetchStage(FetchStage);
                      `ifdef DEBUG_TAGETEST
                      $display("DECODE NAP TRAIN %x\n", last_x16_pc);
                      `endif
-                     if(decode_result.dInst.iType != Br)
+                     if(decode_result.dInst.iType != Br) begin
                         trainNAP = Valid (TrainNAP {pc: last_x16_pc, nextPc: decode_pred_next_pc, branch: False});
-                    else begin
+                        recover = tagged Valid tuple3(dir_spec, False, True);
+                     end
+                     else begin
                         let next = validValue(decodeBrPred(pc, decode_result.dInst, True, (validValue(decodeIn[i]).inst_kind == Inst_32b)));
                         trainNAP = Valid (TrainNAP {pc: last_x16_pc, nextPc: next, branch: True});
-                    end
+                        recover = tagged Valid tuple3(dir_spec, dir_pred.taken, False);
+                     end
 `ifdef PERF_COUNT
                      // performance stats: record decode redirect
                      doAssert(redirectInst == Invalid, "at most 1 decode redirect per cycle");
@@ -877,13 +894,19 @@ module mkFetchStage(FetchStage);
       if (trainNAP matches tagged Valid .x) begin
          napTrainByDecQ.enq(x);
       end
+
+      (*split*)
+      if(recover matches tagged Valid {.spec, .taken, .notBranch})  begin
+        dirPred.specRecover(spec, taken, notBranch);
+      end
+      (* nosplit *)
       
       for(Integer i = 0; i < valueOf(SupSize) && fromInteger(i) < branchCountRecieved; i = i +1) begin
         if(dirPred.clearIfc[i].canDeq) // Should not be needed
             dirPred.clearIfc[i].deq;
       end
 
-      dirPred.confirmPred(branchResults, trueBranchCount);
+      //dirPred.confirmPred(branchResults, trueBranchCount);
 `ifdef PERF_COUNT
       // performance counter: check whether redirect happens
       if(redirectInst matches tagged Valid .iType &&& doStats) begin
@@ -950,6 +973,9 @@ module mkFetchStage(FetchStage);
     endmethod
     method Action redirect(Addr new_pc);
         if (verbose) $display("Redirect: newpc %h, old f_main_epoch %d, new f_main_epoch %d",new_pc,f_main_epoch,f_main_epoch+1);
+        virtualReg <= virtualReg;
+        $display("%b\n",virtualReg);
+
         pc_reg[pc_redirect_port] <= new_pc;
         f_main_epoch <= (f_main_epoch == fromInteger(valueOf(NumEpochs)-1)) ? 0 : f_main_epoch + 1;
         // redirect comes, stop stalling for redirect

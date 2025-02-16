@@ -64,6 +64,10 @@ module mkTageTest(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo, TageT
         return tage.dirPredInterface.getSpec(i);
     endmethod
 
+    method Action updateSpec(Bit#(TAdd#(TLog#(SupSizeX2),1)) i);
+        tage.dirPredInterface.updateSpec(i);
+    endmethod
+
     method flush = noAction;
     method flush_done = True;
 endmodule
