@@ -401,8 +401,9 @@ module mkFetchStage(FetchStage);
         if (verbosity >= 2) $display ("%d Fetch Translate: pc: %x, ", cur_cycle, translateAddress.first, fshow (tr));
     endrule
 
+    function Bool isCurrentPredInput(DirPredIn in) = (in.main_epoch == f_main_epoch && in.decode_epoch == decode_epoch[0]);
     (* fire_when_enabled, no_implicit_conditions *)
-    rule feedPredictor;
+    rule feedPredictor(!predInput.deqS[0].canDeq || isCurrentPredInput(predInput.deqS[0].first)); //Dodgy
         // Set up branch prediction
         // Nicer to have a FIFO which handles the bypass, but complications
         Bit#(TAdd#(TLog#(SupSizeX2),1)) enqCount = 0; // Because SpecFifo forces consecutive enqueues
@@ -441,6 +442,7 @@ module mkFetchStage(FetchStage);
                     doAssert(False, "Failed to enqueue to predIn\n");
             end
         end
+        
         // Trigger branch predictor
         dirPred.nextPc(in);
     endrule
@@ -625,6 +627,14 @@ module mkFetchStage(FetchStage);
         dirPred.clearIfc[i].deq;
        end
    endrule: doDecodeFlushPred
+
+   (* fire_when_enabled, no_implicit_conditions *)
+   rule doDecodeFlushPredInput(predInput.deqS[0].canDeq && !isCurrentPredInput(predInput.deqS[0].first));
+    for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1)
+       if (predInput.deqS[i].canDeq &&& !isCurrentPredInput(predInput.deqS[i].first)) begin
+            predInput.deqS[i].deq;
+       end
+   endrule
 
 
    function Bool isCurrentOrEmptyPred(Integer i); 
@@ -895,11 +905,10 @@ module mkFetchStage(FetchStage);
          napTrainByDecQ.enq(x);
       end
 
-      (*split*)
       if(recover matches tagged Valid {.spec, .taken, .notBranch})  begin
         dirPred.specRecover(spec, taken, notBranch);
+        dirPred.flush;//Might not be necessary at all
       end
-      (* nosplit *)
       
       for(Integer i = 0; i < valueOf(SupSize) && fromInteger(i) < branchCountRecieved; i = i +1) begin
         if(dirPred.clearIfc[i].canDeq) // Should not be needed
@@ -975,6 +984,7 @@ module mkFetchStage(FetchStage);
         if (verbose) $display("Redirect: newpc %h, old f_main_epoch %d, new f_main_epoch %d",new_pc,f_main_epoch,f_main_epoch+1);
         virtualReg <= virtualReg;
         $display("%b\n",virtualReg);
+        dirPred.flush;//Might not be necessary at all
 
         pc_reg[pc_redirect_port] <= new_pc;
         f_main_epoch <= (f_main_epoch == fromInteger(valueOf(NumEpochs)-1)) ? 0 : f_main_epoch + 1;

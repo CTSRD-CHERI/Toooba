@@ -196,6 +196,8 @@ module mkTage(Tage#(numTables)) provisos(
     Vector#(SupSize, RWire#(PredIn#(TageFastTrainInfo))) predIn <- replicateM(mkRWire);
     Vector#(SupSize, Reg#(Maybe#(GuardedResult#(TageTrainInfo#(numTables))))) pred1ToPred2 <- replicateM(mkDReg(tagged Invalid));
     SupFifo#(SupSize, 6, GuardedResult#(TageTrainInfo#(numTables))) pred2Topred3 <- mkUGSupFifo; // Check size
+
+    PulseWire recovered <- mkPulseWire;
   
     function Bool useAlt;
         return unpack(pack(alt_on_na)[`METAPREDICTOR_CTR_SIZE-1]);
@@ -395,7 +397,7 @@ module mkTage(Tage#(numTables)) provisos(
     //rule updateHistory(!mispredictWire); NOT SURE ABOUT THIS -------------------------------------
     
     (* no_implicit_conditions, fire_when_enabled *)
-    rule updateHistory;
+    rule updateHistory(!recovered);
         //if(!mispredictWire) begin
         // Update history speculatively
             let num = numPred[valueOf(SupSize)];
@@ -695,7 +697,9 @@ module mkTage(Tage#(numTables)) provisos(
             end
         endmethod
     
-        method flush = noAction;
+        method Action flush;
+            recovered.send; //Therefore do not update hisotry this cycle
+        endmethod
         method flush_done = True;
     endinterface;
 endmodule
