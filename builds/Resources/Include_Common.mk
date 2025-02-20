@@ -75,6 +75,15 @@ run_example:
 	./exe_HW_sim  $(VERBOSITY)  +exit
 
 # ================================================================
+# Generate konata output
+
+.PHONY: generate_konata
+generate_konata:
+	grep "KONATA" output.txt > koutput.txt
+	cut -c7- koutput.txt > klog.txt
+	./../Resources/parse_pre_kanata.py klog.txt > k.log
+
+# ================================================================
 # Test: run the executable on the standard RISCV ISA test specified in TEST
 
 TESTS_DIR ?= $(REPO)/Tests
