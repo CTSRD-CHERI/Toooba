@@ -47,6 +47,7 @@ import TageTest::*;
 export DirPredTrainInfo(..);
 export DirPredSpecInfo(..);
 export DirPredFastTrainInfo(..);
+export DirPred2toPred3Info(..);
 export DirPredIn;
 export mkDirPredictor;
 
@@ -74,11 +75,12 @@ typedef BimodalTrainInfo DirPredTrainInfo;
 typedef TageTestTrainInfo DirPredTrainInfo;
 typedef TageTestSpecInfo DirPredSpecInfo;
 typedef TageTestFastTrainInfo DirPredFastTrainInfo;
+typedef TageTestPred2ToPred3Info DirPred2toPred3Info;
 `endif
 
 typedef PredIn#(DirPredFastTrainInfo) DirPredIn;
 //(* synthesize *)
-module mkDirPredictor(DirPredictor#(DirPredTrainInfo, DirPredSpecInfo, DirPredFastTrainInfo));
+module mkDirPredictor(DirPredictor#(DirPredTrainInfo, DirPredSpecInfo, DirPredFastTrainInfo, DirPred2toPred3Info));
 `ifdef DIR_PRED_BHT
 `ifdef SECURITY
     staticAssert(False, "BHT with flush methods is not implemented");

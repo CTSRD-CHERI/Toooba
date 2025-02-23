@@ -28,7 +28,7 @@ typedef struct {
 typedef Tuple2#(Bit#(pIndex), Bit#(hIndex)) BimodalInd#(numeric type pIndex, numeric type hIndex);
 
 interface BimodalTable#(numeric type predIndexSize, numeric type hystIndexSize);
-    method BimodalPredictionEntry accessPrediction(Addr pc);
+    method BimodalTableEntry accessPrediction(Addr pc);
     method BimodalInd#(predIndexSize, hystIndexSize) trainingInfo(Addr pc); // To be used in training    
     
     // No need to drag along the indices, as entry will always be the same
@@ -53,8 +53,9 @@ module mkBimodalTable#(String predInitFile, String hystInitFile)(BimodalTable#(p
         return tuple2(truncate(combined), truncate(combined >> valueOf(TSub#(predIndexSize, hystIndexSize))));
     endfunction
 
-    method BimodalPredictionEntry accessPrediction(Addr pc);
-        return predTable.sub(tpl_1(pcToIndex(pc)));
+    method BimodalTableEntry accessPrediction(Addr pc);
+        match {.ind1, .ind2} = pcToIndex(pc);
+        return BimodalTableEntry{pred: predTable.sub(ind1), hyst: hystTable.sub(ind2)};
     endmethod
 
     method BimodalInd#(predIndexSize, hystIndexSize) trainingInfo(Addr pc); // To be used in training    

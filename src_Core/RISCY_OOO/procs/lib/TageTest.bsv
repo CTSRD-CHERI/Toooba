@@ -15,6 +15,7 @@ import Cur_Cycle :: *;
 export TageTestTrainInfo;
 export TageTestSpecInfo;
 export TageTestFastTrainInfo;
+export TageTestPred2ToPred3Info;
 export Entry;
 export PCIndex;
 export PCIndexSz;
@@ -24,8 +25,9 @@ export mkTageTest;
 typedef TageTrainInfo#(`NUM_TABLES) TageTestTrainInfo;
 typedef TageSpecInfo TageTestSpecInfo;
 typedef TageFastTrainInfo TageTestFastTrainInfo;
+typedef TagePred2ToPred3Data#(`NUM_TABLES) TageTestPred2ToPred3Info;
 
-module mkTageTest(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo, TageTestFastTrainInfo));
+module mkTageTest(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo, TageTestFastTrainInfo, TageTestPred2ToPred3Info));
     Reg#(Bool) starting <- mkReg(True);
     Tage#(7) tage <- mkTage;
     Reg#(UInt#(64)) predCount <- mkReg(0);
