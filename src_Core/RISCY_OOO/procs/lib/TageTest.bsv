@@ -43,9 +43,9 @@ module mkTageTest(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo, TageT
     interface pred = tage.dirPredInterface.pred;
     interface clearIfc = tage.dirPredInterface.clearIfc;
 
-    method Action confirmPred(Bit#(SupSize) results, SupCnt count);
+    /*method Action confirmPred(Bit#(SupSize) results, SupCnt count);
         tage.dirPredInterface.confirmPred(results, count);
-    endmethod
+    endmethod*/
 
     method Action nextPc(Vector#(SupSize,Maybe#(PredIn#(TageFastTrainInfo))) next);
         tage.dirPredInterface.nextPc(next);

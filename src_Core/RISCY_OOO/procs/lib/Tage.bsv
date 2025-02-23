@@ -10,7 +10,7 @@ import Types::*;
 import BrPred::*;
 import BranchParams::*;
 import BimodalTable::*;
-import TaggedTable::*;
+import TaggedTableBRAM::*;
 import GlobalBranchHistory::*;
 import Ehr::*;
 import Util::*;
@@ -80,7 +80,6 @@ typedef Bit#(TLog#(numTables)) TableIndex#(numeric type numTables);
 
 typedef Tuple2#(Maybe#(Tuple3#(Bit#(TLog#(num)), TaggedTableEntry#(`MAX_TAGGED), Bit#(`MAX_INDEX_SIZE))), Maybe#(Tuple2#(Bit#(TLog#(num)), TaggedTableEntry#(`MAX_TAGGED)))) PredictionTableInfo#(numeric type num);
 
-
 typedef struct {
     Bit#(TLog#(numTables)) provider_table;
     Bit#(`MAX_INDEX_SIZE) index;
@@ -93,9 +92,10 @@ typedef struct{
     Bool alt_prediction; // prediction of the alternative table
     Bool taken; // Outcome
 
-    // Not a fan, also could be improved
-    Vector#(numTables, Bit#(`MAX_INDEX_SIZE)) indices;
+    // Not a fan, also could be improved with a table
+    Vector#(numTables, Bit#(`MAX_INDEX_SIZE)) indices; //These two are necessary for allocate (avoid need for history)
     Vector#(numTables, Bit#(`MAX_TAGGED)) tags;
+    Vector#(numTables, UsefulCtr) usefulCounters; // Add 14 bits
 
 
     Maybe#(ProviderTrainInfo#(numTables)) provider_info;
@@ -125,17 +125,20 @@ typedef struct {
     Bool taken;
 } UpdateInfo#(numeric type numTables) deriving(Bits, Eq, FShow);
 
+typedef struct {
+    GuardedResult#(TageTrainInfo#(numTables)) res;
+    FastPredictResult#(TageFastTrainInfo) fastTrain;
+} Pred1ToPred2Data#(numeric type numTables) deriving(Bits, Eq, FShow);
 
 // Abolutely terrible, is there an easier way to parametrise this?
-
 typedef union tagged {
-    TaggedTable#(9,9,5) T_9_9_5;
-    TaggedTable#(9,9,9) T_9_9_9;
-    TaggedTable#(9,10,15) T_9_10_15;
-    TaggedTable#(9,10,25) T_9_10_25;
-    TaggedTable#(9,11,44) T_9_11_44;
-    TaggedTable#(9,11,76) T_9_11_76;
-    TaggedTable#(9,12, 130) T_9_12_130;
+    TaggedTableBRAM#(9,9,5) T_9_9_5;
+    TaggedTableBRAM#(9,9,9) T_9_9_9;
+    TaggedTableBRAM#(9,10,15) T_9_10_15;
+    TaggedTableBRAM#(9,10,25) T_9_10_25;
+    TaggedTableBRAM#(9,11,44) T_9_11_44;
+    TaggedTableBRAM#(9,11,76) T_9_11_76;
+    TaggedTableBRAM#(9,12, 130) T_9_12_130;
 } ChosenTaggedTables deriving(Bits);
 
 typedef union tagged {
@@ -170,21 +173,18 @@ module mkTage(Tage#(numTables)) provisos(
 );
     GlobalBranchHistory#(GlobalHistoryLength) global <- mkGlobalBranchHistory;
 
-    TaggedTable#(9,9,5)     t1 <- mkTaggedTable(global);
-    TaggedTable#(9,9,9)     t2 <- mkTaggedTable(global);
-    TaggedTable#(9,10,15)   t3 <- mkTaggedTable(global);
-    TaggedTable#(9,10,25)   t4 <- mkTaggedTable(global);
-    TaggedTable#(9,11,44)   t5 <- mkTaggedTable(global);
-    TaggedTable#(9,11,76)   t6 <- mkTaggedTable(global);
-    TaggedTable#(9,12,130)  t7 <- mkTaggedTable(global);
+    TaggedTableBRAM#(9,9,5)     t1 <- mkTaggedTableBRAM(global);
+    TaggedTableBRAM#(9,9,9)     t2 <- mkTaggedTableBRAM(global);
+    TaggedTableBRAM#(9,10,15)   t3 <- mkTaggedTableBRAM(global);
+    TaggedTableBRAM#(9,10,25)   t4 <- mkTaggedTableBRAM(global);
+    TaggedTableBRAM#(9,11,44)   t5 <- mkTaggedTableBRAM(global);
+    TaggedTableBRAM#(9,11,76)   t6 <- mkTaggedTableBRAM(global);
+    TaggedTableBRAM#(9,12,130)  t7 <- mkTaggedTableBRAM(global);
 
-    
     BimodalTable#(BimodalPredSz, BimodalHystSz) bimodalTable <- mkBimodalTable(regInitFilenameBimodalPred, regInitFilenameBimodalHyst);
     Vector#(7, ChosenTaggedTables) taggedTablesVector = cons(T_9_9_5(t1), cons(T_9_9_9(t2), cons(T_9_10_15(t3), cons(T_9_10_25(t4), cons(T_9_11_44(t5), cons(T_9_11_76(t6), cons(T_9_12_130(t7), nil)))))));
     Reg#(UInt#(`METAPREDICTOR_CTR_SIZE)) alt_on_na <- mkReg(1 << (`METAPREDICTOR_CTR_SIZE-1));
     CircBuff#(MaxSpecSize, Bool) ooBuff <- mkCircBuff;
-
-    PulseWire mispredictWire <- mkPulseWire;
 
     Ehr#(TAdd#(1, SupSize), SupCnt) numPred <- mkEhr(0);
     Ehr#(TAdd#(1, SupSize), Bit#(SupSize)) predResults <- mkEhr(0);
@@ -194,7 +194,7 @@ module mkTage(Tage#(numTables)) provisos(
     Reg#(Bool) starting <- mkReg(True);
 
     Vector#(SupSize, RWire#(PredIn#(TageFastTrainInfo))) predIn <- replicateM(mkRWire);
-    Vector#(SupSize, Reg#(Maybe#(GuardedResult#(TageTrainInfo#(numTables))))) pred1ToPred2 <- replicateM(mkDReg(tagged Invalid));
+    Vector#(SupSize, Ehr#(2, Maybe#(Pred1ToPred2Data#(numTables)))) pred1ToPred2 <- replicateM(mkEhr(tagged Invalid));
     SupFifo#(SupSize, 6, GuardedResult#(TageTrainInfo#(numTables))) pred2Topred3 <- mkUGSupFifo; // Check size
 
     PulseWire recovered <- mkPulseWire;
@@ -234,30 +234,27 @@ module mkTage(Tage#(numTables)) provisos(
         end
     endfunction
 
-    function Tuple4#(PredictionTableInfo#(numTables), Bit#(numTables), Vector#(numTables, Bit#(`MAX_INDEX_SIZE)), Vector#(numTables, Bit#(`MAX_TAGGED))) find_pred_altpred(Addr pc, Bit#(TLog#(SupSize)) numPred);
+    function Tuple3#(PredictionTableInfo#(numTables), Bit#(numTables), Vector#(numTables, UsefulCtr)) find_pred_altpred(Addr pc, Bit#(TLog#(SupSize)) numPred, TageTrainInfo#(numTables) train);
         Vector#(numTables,Maybe#(Bit#(TLog#(numTables)))) entries_compare = replicate(tagged Invalid);
         Vector#(numTables,Maybe#(Bit#(TLog#(numTables)))) altpred_compare = replicate(tagged Invalid);
+        Vector#(numTables,UsefulCtr) usefulCounters = replicate(0);
         Bit#(numTables) replaceableEntries = 0;
         
         Vector#(numTables,TaggedTableEntry#(`MAX_TAGGED)) entries = replicate(TaggedTableEntry{tag:0, predictionCounter:0, usefulCounter:0});
-        Vector#(numTables,Bit#(`MAX_INDEX_SIZE)) indices = replicate(0);
-        Vector#(numTables,Bit#(`MAX_TAGGED)) tags = replicate(0);
-
+        let indices = train.indices;
+        let tags = train.tags;
         
         for(Integer j = 0; j < valueOf(numTables); j=j+1) begin
             ChosenTaggedTables tab = taggedTablesVector[j];    
             `CASE_ALL_TABLES(tab, 
             (*/
                 // Could do this in one
-                match {.tag, .index}  = t.accessPredInfo[numPred].access(pc);
-                let entry = t.access_wrapped_entry(pc, truncate(index));
+                let entry = t.taggedTableRead[numPred].read;
                 replaceableEntries[j] = pack(entry.usefulCounter == 0);
-                
-                indices[j] = index;
-                tags[j] = tag;
+                usefulCounters[j] = entry.usefulCounter;
 
                 entries[j] = entry;
-                if (tag == entry.tag) begin
+                if (tags[j] == entry.tag) begin
                     entries_compare[j] = tagged Valid fromInteger(j);
                 end
                 /*)
@@ -276,7 +273,7 @@ module mkTage(Tage#(numTables)) provisos(
             else
                 ret = tuple2(tagged Valid tuple3(x, entries[x], indices[x]), tagged Invalid);
         
-        return tuple4(ret, replaceableEntries, indices, tags);
+        return tuple3(ret, replaceableEntries, usefulCounters);
     endfunction
 
     // WARNING - REMOVE ACTIONVALUE AFTER DEBUG
@@ -305,7 +302,7 @@ module mkTage(Tage#(numTables)) provisos(
                     if  (fromInteger(i) >= start) begin
                         let tab = taggedTablesVector[i];
                         let index = train.indices[i];
-                        `CASE_ALL_TABLES(tab, (*/ t.decrementUsefulCounter(truncate(index)); /*))
+                        `CASE_ALL_TABLES(tab, (*/ t.decrementUsefulCounter(truncate(index), train.usefulCounters[i]); /*))
                     end
                 end
             end
@@ -366,7 +363,7 @@ module mkTage(Tage#(numTables)) provisos(
                 u = DECREMENT;
 
             ChosenTaggedTables providerTable = taggedTablesVector[info.provider_table];
-            `CASE_ALL_TABLES(providerTable, (*/ t.updateEntry(info.index, entry.tag, taken, u); /*))
+            `CASE_ALL_TABLES(providerTable, (*/ t.updateEntry(info.index, entry, taken, u); /*))
 
             // ALT_ON_NA
             `ifdef DEBUG_TAGETEST
@@ -404,7 +401,6 @@ module mkTage(Tage#(numTables)) provisos(
             let results = predResults[valueOf(SupSize)];
             //ooBuff.specAssignConfirmed(num);
 
-            
             if(num != 0) begin
                 `ifdef DEBUG_TAGETEST   
                 $display("TAGETEST Update history, cycle %d\n", cur_cycle);
@@ -440,11 +436,55 @@ module mkTage(Tage#(numTables)) provisos(
     for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
         (* no_implicit_conditions, fire_when_enabled *)
         rule predStageOne(predIn[i].wget matches tagged Valid .in);
-            $display("Prediction on %x\n", in.pc);
+            Vector#(numTables,Bit#(`MAX_INDEX_SIZE)) indices = replicate(0);
+            Vector#(numTables,Bit#(`MAX_TAGGED)) tags = replicate(0);
+
+            for(Integer j = 0; j < valueOf(SupSize); j = j + 1) begin
+                let tab = taggedTablesVector[j];
+                `CASE_ALL_TABLES(tab, (*/
+                    match {.tag, .index} <- t.taggedTableRead[i].lookupStart(in.pc);
+                    indices[j] = index;
+                    tags[j] = tag;
+                /*)
+                )
+            end
+            
+            $display("Pred1 on %x\n", in.pc);
             TageTrainInfo#(numTables) ret = unpack(0);
             
             Addr pc = in.pc;
+            ret.pc = pc;
+            ret.indices = indices;
+            ret.tags = tags;
+            ret.confirmed = True;
 
+            numPred[i] <= numPred[i] + 1;
+            let results = predResults[i];
+            results[numPred[i]] = pack(in.fastTrainInfo.taken);
+            predResults[i] <= results;
+                
+            //let spec <- ooBuff.specAssign[i].specAssign; // Need action, but fragment should have corresponding original index
+          
+            pred1ToPred2[i][1] <= tagged Valid Pred1ToPred2Data{
+                    res: GuardedResult {
+                        result: DirPredResult{
+                            taken: ret.taken,
+                            train: ret,
+                            pc: in.pc
+                        },
+                        main_epoch: in.main_epoch,
+                        decode_epoch: in.decode_epoch
+                    },
+                    fastTrain: in.fastTrainInfo
+            };
+        endrule
+    end
+
+    for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
+        (* no_implicit_conditions, fire_when_enabled *)
+        rule predStageTwo(pred1ToPred2[i][0] matches tagged Valid .in);
+            let ret = in.res.result.train;
+            $display("Pred2 on %x\n", ret.pc);
 
             `ifdef DEBUG_TAGETEST
                 $display("TAGETEST LFSR %d\n", lfsr.value);
@@ -452,14 +492,10 @@ module mkTage(Tage#(numTables)) provisos(
             `endif
 
             // Retrieve provider and alternative table
-            match {{.pred, .altpred}, .replaceableEntries, .indices, .tags} = find_pred_altpred(pc, fromInteger(i));
+            match {{.pred, .altpred}, .replaceableEntries, .usefulCounters} = find_pred_altpred(ret.pc, fromInteger(i), ret);
             ret.replaceableEntries = replaceableEntries;
-            ret.pc = pc;
-            ret.indices = indices;
-            ret.tags = tags;
-            ret.confirmed = True;
-
-            
+            ret.usefulCounters = usefulCounters;
+                
             if(pred matches tagged Valid {.pred_index, .pred_entry, .pred_table_index}) begin 
                 Bool prediction = takenFromCounter(pred_entry.predictionCounter);
                 ret.provider_prediction = prediction;
@@ -491,7 +527,7 @@ module mkTage(Tage#(numTables)) provisos(
                 end
                 else begin
                     ret.alt_table = tagged Invalid;
-                    Bool bimodal_prediction = in.fastTrainInfo.taken;
+                    Bool bimodal_prediction = in.fastTrain.taken;
                     ret.alt_prediction = bimodal_prediction;
                     ret.use_alt = False;
                     ret.taken = prediction;
@@ -506,37 +542,39 @@ module mkTage(Tage#(numTables)) provisos(
                 ret.provider_info = tagged Invalid;
                 ret.use_alt = False;
                 // Maybe automatically trigger a read from bimodal table ever time nextPc is set?
-                Bool prediction = in.fastTrainInfo.taken;
+                Bool prediction = in.fastTrain.taken;
                 ret.provider_prediction = prediction;
                 ret.taken = prediction;
             end
 
-            //let ooIndex = ooBuff.specAssignUnconfirmed;
-
-            `ifdef DEBUG_TAGETEST   
-                $display("TAGETEST Prediction on: %x,%d, Taken: %d, cycle %d\n", in.pc , i, ret.taken, cur_cycle);
-            `endif
-
-            numPred[i] <= numPred[i] + 1;
-            let results = predResults[i];
-            results[numPred[i]] = pack(in.fastTrainInfo.taken);
-            predResults[i] <= results;
-                
-            //let spec <- ooBuff.specAssign[i].specAssign; // Need action, but fragment should have corresponding original index
-          
-            pred1ToPred2[i] <= tagged Valid GuardedResult {
+            let result = GuardedResult {
                 result: DirPredResult{
                     taken: ret.taken,
                     train: ret,
-                    pc: in.pc
+                    pc: ret.pc
                 },
-                main_epoch: in.main_epoch,
-                decode_epoch: in.decode_epoch
+                main_epoch: in.res.main_epoch,
+                decode_epoch: in.res.decode_epoch
             };
+
+            `ifdef DEBUG_TAGETEST   
+                $display("TAGETEST Prediction on: %x,%d, Taken: %d, cycle %d\n", ret.pc , i, ret.taken, cur_cycle);
+            `endif
+
+            pred1ToPred2[i][0] <= tagged Invalid;
+            if(pred2Topred3.enqS[i].canEnq) begin
+                    $display("Predict2 enqueue %x onto %d", in.res.result.pc, i);
+                    pred2Topred3.enqS[i].enq(result);
+            end
+            else
+                doAssert(False, "FAIL TO ENQUEUE PRED2");
         endrule
+
+        
     end
 
-    rule predStageTwo;
+    /*
+    rule predStageTwo(!decrementConflict);
         Vector#(SupSize, GuardedResult#(TageTrainInfo#(numTables))) results = replicate(unpack(0));
         Bit#(TAdd#(TLog#(SupSize),1)) count = 0;
         for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
@@ -555,7 +593,7 @@ module mkTage(Tage#(numTables)) provisos(
             else
                 doAssert(False, "FAIL TO ENQUEUE PRED2");
         end
-    endrule
+    endrule*/
 
     `ifdef DEBUG
     method Action debugTables(Addr pc);
@@ -597,6 +635,7 @@ module mkTage(Tage#(numTables)) provisos(
             method ActionValue#(Maybe#(DirPredResult#(TageTrainInfo#(numTables)))) pred;
                 if(pred2Topred3.deqS[i].canDeq) begin
                     /* Do processing */
+                    $display("Pred3 on %x\n", pred2Topred3.deqS[i].first.result.pc);
                 
                     return tagged Valid pred2Topred3.deqS[i].first.result;
                 end
@@ -683,12 +722,10 @@ module mkTage(Tage#(numTables)) provisos(
             ooBuff.specUpdate(i);
         endmethod
 
-        method Action confirmPred(Bit#(SupSize) results, SupCnt count);
-            `ifdef DEBUG_TAGETEST
-            if(count > 0)
-                $display("TAGETEST Confirm Pred %b %d\n", results, count);
-            `endif
-        endmethod
+        /*
+        method Bool stillUpdating;
+            return decrementConflict;
+        endmethod*/
     
         method Action nextPc(Vector#(SupSize,Maybe#(PredIn#(TageFastTrainInfo))) next);
             for(Integer i = 0; i < valueOf(SupSize); i = i + 1) begin

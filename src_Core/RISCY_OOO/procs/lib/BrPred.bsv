@@ -95,8 +95,6 @@ interface DirPredictor#(type trainInfoT, type specInfoT, type fastTrainInfoT);
     interface Vector#(SupSize, DirPred#(trainInfoT)) pred;
     method ActionValue#(Vector#(SupSizeX2, FastPredictResult#(fastTrainInfoT))) fastPred(Addr pc); // No training
     
-    method Action confirmPred(Bit#(SupSize) results, SupCnt count); // By decode stage, for speculative history and end_pointer update
-    
     // Could instead be fully inside the predictor without exposing this interface, but still need to communicate 
     // the current main_epoch and decode.epoch each cycle, also every predictor will need this added logic, sounds like a pain
     interface Vector#(SupSize, SupFifoDeq#(GuardedResult#(trainInfoT))) clearIfc;
