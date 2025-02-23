@@ -298,7 +298,10 @@ module mkTage(Tage#(numTables)) provisos(
             Bit#(numTables) tabsReplaceable = (train.replaceableEntries >> start) << start;
             if(tabsReplaceable == 0) begin
                 // Decrement all counters as in original TAGE, worried about the circuitry there
-                for(Integer i = 0; i < valueOf(numTables); i = i + 1) begin
+                `ifdef DEBUG_TAGETEST
+                    $display("TAGETEST DECREMENT ENTRIES FOR %x %b %d\n",train.pc, train.replaceableEntries, start);
+                `endif
+                for(Integer i = 0; i < valueOf(numTables); i = i + 1) begin    
                     if  (fromInteger(i) >= start) begin
                         let tab = taggedTablesVector[i];
                         let index = train.indices[i];
@@ -337,7 +340,7 @@ module mkTage(Tage#(numTables)) provisos(
                     Bit#(`MAX_TAGGED) tag = 0;
                     let tab = taggedTablesVector[ind];
                     //`CASE_ALL_TABLES(tab, (*/ index = zeroExtend(tpl_2(t.trainingInfo(train.pc, AFTER_RECOVERY))); tag = zeroExtend(tpl_1(t.trainingInfo(train.pc, AFTER_RECOVERY))); /*))
-                    $display("TAGETEST ALLOCATE FOR %d %d %d %d\n",train.pc, ind, train.indices[ind], train.tags[ind]);
+                    $display("TAGETEST ALLOCATE FOR %x %d %d %d\n",train.pc, ind, train.indices[ind], train.tags[ind]);
                 `endif
 
                 `CASE_ALL_TABLES(taggedTablesVector[ind], (*/ t.allocateEntry(truncate(train.indices[ind]), truncate(train.tags[ind]), taken); /*))
@@ -439,7 +442,7 @@ module mkTage(Tage#(numTables)) provisos(
             Vector#(numTables,Bit#(`MAX_INDEX_SIZE)) indices = replicate(0);
             Vector#(numTables,Bit#(`MAX_TAGGED)) tags = replicate(0);
 
-            for(Integer j = 0; j < valueOf(SupSize); j = j + 1) begin
+            for(Integer j = 0; j < valueOf(numTables); j = j + 1) begin
                 let tab = taggedTablesVector[j];
                 `CASE_ALL_TABLES(tab, (*/
                     match {.tag, .index} <- t.taggedTableRead[i].lookupStart(in.pc);
@@ -449,7 +452,10 @@ module mkTage(Tage#(numTables)) provisos(
                 )
             end
             
-            $display("Pred1 on %x\n", in.pc);
+            `ifdef DEBUG_TAGETEST
+            $display("TAGETEST Pred1 on %x\n", in.pc);
+            `endif
+
             TageTrainInfo#(numTables) ret = unpack(0);
             
             Addr pc = in.pc;
@@ -484,7 +490,10 @@ module mkTage(Tage#(numTables)) provisos(
         (* no_implicit_conditions, fire_when_enabled *)
         rule predStageTwo(pred1ToPred2[i][0] matches tagged Valid .in);
             let ret = in.res.result.train;
-            $display("Pred2 on %x\n", ret.pc);
+            
+            `ifdef DEBUG_TAGETEST
+            $display("TAGETEST Pred2 on %x\n", ret.pc);
+            `endif
 
             `ifdef DEBUG_TAGETEST
                 $display("TAGETEST LFSR %d\n", lfsr.value);
@@ -635,7 +644,9 @@ module mkTage(Tage#(numTables)) provisos(
             method ActionValue#(Maybe#(DirPredResult#(TageTrainInfo#(numTables)))) pred;
                 if(pred2Topred3.deqS[i].canDeq) begin
                     /* Do processing */
+                    `ifdef DEBUG_TAGETEST
                     $display("Pred3 on %x\n", pred2Topred3.deqS[i].first.result.pc);
+                    `endif
                 
                     return tagged Valid pred2Topred3.deqS[i].first.result;
                 end

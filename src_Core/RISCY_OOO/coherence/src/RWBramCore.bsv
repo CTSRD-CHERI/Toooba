@@ -31,6 +31,32 @@ interface RWBramCore#(type addrT, type dataT);
     method Action deqRdResp;
 endinterface
 
+module mkRWBramCoreUGLoaded#(String fileName)(RWBramCore#(addrT, dataT)) provisos(
+    Bits#(addrT, addrSz), Bits#(dataT, dataSz)
+);
+    BRAM_DUAL_PORT#(addrT, dataT) bram <- mkBRAMCore2Load(valueOf(TExp#(addrSz)), False, fileName, False);
+    BRAM_PORT#(addrT, dataT) wrPort = bram.a;
+    BRAM_PORT#(addrT, dataT) rdPort = bram.b;
+
+    method Action wrReq(addrT a, dataT d);
+        wrPort.put(True, a, d);
+    endmethod
+
+    method Action rdReq(addrT a);
+        rdPort.put(False, a, ?);
+    endmethod
+
+    method dataT rdResp;
+        return rdPort.read;
+    endmethod
+
+    method rdRespValid = True;
+
+    method Action deqRdResp;
+        noAction;
+    endmethod
+endmodule
+
 module mkRWBramCore(RWBramCore#(addrT, dataT)) provisos(
     Bits#(addrT, addrSz), Bits#(dataT, dataSz)
 );
