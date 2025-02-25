@@ -338,8 +338,10 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                 fnAND: Valid(And);
                 fnOR: Valid(Or);
                 fnXOR: Valid(Xor);
-                fnSLL: Valid(Sll);
-                fnSR: Valid(immI[10] == 0 ? Srl : Sra);
+                fnSLL: (immI[11:6] == 6'b000000 ? Valid(Sll) : Invalid);
+                fnSR: (immI[11:6] == 6'b000000 ? Valid(Srl) :
+                       immI[11:6] == 6'b010000 ? Valid(Sra) :
+                       Invalid);
                 default: Invalid;
             endcase;
             legalInst = isValid(mAluFunc);
@@ -355,8 +357,10 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
             dInst.iType = Alu;
             Maybe#(AluFunc) mAluFunc = case (funct3)
                 fnADD: Valid(Addw);
-                fnSLL: Valid(Sllw);
-                fnSR: Valid(immI[10] == 0 ? Srlw : Sraw);
+                fnSLL: (immI[11:5] == 7'b0000000 ? Valid(Sllw) : Invalid);
+                fnSR: (immI[11:5] == 7'b0000000 ? Valid(Srlw) :
+                       immI[11:5] == 7'b0100000 ? Valid(Sraw) :
+                       Invalid);
                 default: Invalid;
             endcase;
             legalInst = isValid(mAluFunc);
@@ -519,14 +523,15 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
         end
 
         opcJal: begin
+            legalInst = True;
+
             if (cap_mode) begin
                 dInst.iType = CJAL;
             end
             else begin
                 dInst.iType = J;
             end
-
-            legalInst = True;
+            
             regs.dst  = Valid(tagged Gpr rd);
             regs.src1 = Invalid;
             regs.src2 = Invalid;
@@ -1156,6 +1161,14 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             regs.src2 = Valid(tagged Gpr rs2);
                             dInst.execFunc = Alu (Sub);
                         end
+                        f7_cap_CSetHigh: begin
+                            legalInst = True;
+                            dInst.iType = Cap;
+                            regs.dst = Valid(tagged Gpr rd);
+                            regs.src1 = Valid(tagged Gpr rs1);
+                            regs.src2 = Valid(tagged Gpr rs2);
+                            dInst.capFunc = CapModify (SetHigh);
+                        end
                         f7_cap_CBuildCap: begin
                             legalInst = True;
                             // Swap arguments so SCR possibly goes in RS2
@@ -1326,6 +1339,13 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.dst = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capFunc = CapInspect (GetType);
+                                end
+                                f5rs2_cap_CGetHigh: begin
+                                    legalInst = True;
+                                    dInst.iType = Cap;
+                                    regs.dst = Valid(tagged Gpr rd);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    dInst.capFunc = CapInspect (GetHigh);
                                 end
                                 f5rs2_cap_CLoadTags: begin
                                     legalInst = True;

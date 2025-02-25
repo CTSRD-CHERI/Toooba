@@ -200,19 +200,19 @@ endfunction
 
 (* noinline *)
 function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWFunc scrType);
-    function csrOp (oldOffset, val, f) =
+    function csrOp (oldAddr, val, f) =
         case (f)
             Write: val;
-            Set: (oldOffset | val);
-            Clear: (oldOffset & ~val);
+            Set: (oldAddr | val);
+            Clear: (oldAddr & ~val);
         endcase;
-    let offset = getOffset(cap);
-    let oldOffset = getOffset(oldCap);
+    let addr = getAddr(cap);
+    let oldAddr = getAddr(oldCap);
     CapPipe res = (case (scrType) matches
-        tagged TVEC .csrf: update_scr_via_csr(oldCap, csrOp(oldOffset, getAddr(cap), csrf) & ~64'h2, False);
-        tagged EPC .csrf: update_scr_via_csr(oldCap, csrOp(oldOffset, getAddr(cap), csrf) & ~64'h1, False);
-        tagged TCC: update_scr_via_csr(cap, offset & ~64'h2, False); // Mask out bit 1
-        tagged EPCC: update_scr_via_csr(cap, offset & ~64'h1, offset[0] == 1'b0); // Mask out bit 0
+        tagged TVEC .csrf: update_scr_via_csr(oldCap, csrOp(oldAddr, getAddr(cap), csrf) & ~64'h2, False);
+        tagged EPC .csrf: update_scr_via_csr(oldCap, csrOp(oldAddr, getAddr(cap), csrf) & ~64'h1, False);
+        tagged TCC: update_scr_via_csr(cap, addr & ~64'h2, False); // Mask out bit 1
+        tagged EPCC: update_scr_via_csr(cap, addr & ~64'h1, addr[0] == 1'b0); // Mask out bit 0
         tagged Normal: cap;
     endcase);
     return res;
@@ -237,6 +237,8 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
     match {.a_type, .a_res} = extractType(a);
     Bool sealPassthrough = !isValidCap(b) || getKind(a) != UNSEALED || !isInBounds(b, False) || getAddr(b) == otype_unsealed_ext;
     Bool sealIllegal = getKind(b) != UNSEALED || !getHardPerms(b).permitSeal || !validAsType(b, getAddr(b));
+    let new_hard_perms = getHardPerms(a);
+    new_hard_perms.global = new_hard_perms.global && getHardPerms(b).global;
     Bool unsealIllegal = !isValidCap(b) || getKind(a) != UNSEALED || getKind(b) == UNSEALED || a_res || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
     Bool buildCapIllegal = !isValidCap(b) || getKind(b) != UNSEALED || !isDerivable(a) || (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b); // XXX needs optimisation
     CapPipe res = (case(func) matches
@@ -249,8 +251,8 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                       tagged TCC: b;
                       tagged EPCC: b;
                       tagged Normal: b;
-                      tagged TVEC ._: nullWithAddr(getOffset(b));
-                      tagged EPC ._: nullWithAddr(getOffset(b));
+                      tagged TVEC ._: nullWithAddr(getAddr(b));
+                      tagged EPC ._: nullWithAddr(getAddr(b));
                    endcase
             tagged SetAddr .addrSource    :
                 clearTagIf(setAddr(b_mut, (addrSource == Src1Type) ? a_type : getAddr(a) ).value, (addrSource == Src1Type) ? a_res : False);
@@ -263,13 +265,15 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 (sealPassthrough ? a :
                      clearTagIf(setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b)))), sealIllegal));
             tagged Unseal .src            :
-                clearTagIf(setKind(((src == Src1) ? a:b), UNSEALED), (src == Src1) && sealIllegal);
+                clearTagIf(setHardPerms(setKind(((src == Src1) ? a:b), UNSEALED), new_hard_perms), (src == Src1) && unsealIllegal);
             tagged AndPerm                :
                 setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
             tagged SetFlags               :
                 setFlags(a_mut, truncate(getAddr(b)));
             tagged FromPtr                :
-                (getAddr(a) == 0 ? nullCap : setOffset(b_mut, getAddr(a)).value);
+                (getAddr(a) == 0 ? nullCap : setAddr(b_mut, getAddr(a)).value);
+            tagged SetHigh:
+                fromMem(tuple2(False, {getAddr(b), getAddr(a)}));
             tagged BuildCap               :
                 setKind(setValidCap(a_mut, !buildCapIllegal), getKind(a)==SENTRY ? SENTRY : UNSEALED);
             tagged Move                   :
@@ -308,6 +312,8 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                    zeroExtend(getFlags(a));
                tagged GetPerm                :
                    zeroExtend(getPerms(a));
+               tagged GetHigh                :
+                   zeroExtend(tpl_2(toMem(a))[127:64]);
                tagged GetType                :
                    tpl_1(extractType(a));
                tagged ToPtr                  :
@@ -361,7 +367,9 @@ function CapPipe brAddrCalc(CapPipe pc, CapPipe val, IType iType, Data imm, Bool
           doInc = False;
         end
     end
-    CapPipe targetAddr = modifyOffset(nextPc, offset, doInc).value;
+    CapPipe targetAddr = ?;
+    if(doInc) targetAddr = modifyOffset(nextPc, offset, doInc).value;
+    else targetAddr = setAddr(nextPc, offset).value;
     // jumpTarget.address[0] = 1'b0;
     targetAddr = setAddrUnsafe(targetAddr, {truncateLSB(getAddr(targetAddr)), 1'b0});
     targetAddr = setKind(targetAddr, UNSEALED); // It is checked elsewhere that we have an unsealed cap already, or sentry if permitted
@@ -428,12 +436,12 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
             St          : rVal2;
             Sc          : rVal2;
             Amo         : rVal2;
-            J           : nullWithAddr(getOffset(link_pcc));
+            J           : nullWithAddr(getAddr(link_pcc));
             CJAL        : setKind(link_pcc, SENTRY);
             CCall       : cap_alu_result;
             CJALR       : setKind(link_pcc, SENTRY);
-            Jr          : nullWithAddr(getOffset(link_pcc));
-            Auipc       : nullWithAddr(getOffset(pcc) + getDInstImm(dInst).Valid);
+            Jr          : nullWithAddr(getAddr(link_pcc));
+            Auipc       : nullWithAddr(getAddr(pcc) + getDInstImm(dInst).Valid);
             Auipcc      : incOffset(pcc, getDInstImm(dInst).Valid).value; // could be computed with alu
             Csr         : rVal1;
             Scr         : cap_alu_result;

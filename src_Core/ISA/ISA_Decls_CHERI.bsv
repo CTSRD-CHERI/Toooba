@@ -92,7 +92,7 @@ function SCR unpackSCR(Bit#(5) addr);
 endfunction
 
 function CapPipe update_scr_via_csr (CapPipe old_scr, WordXL new_csr, Bool allow_sealed);
-    let new_scr = setOffset(old_scr, new_csr);
+    let new_scr = setAddr(old_scr, new_csr);
     let ret = new_scr.value;
     if (!new_scr.exact || (getKind(old_scr) != UNSEALED && !allow_sealed)) begin
         ret = setValidCap(ret, False);
@@ -138,7 +138,9 @@ Bit #(7) f7_cap_CIncOffset      = 7'h11;
 Bit #(7) f7_cap_CToPtr          = 7'h12;
 Bit #(7) f7_cap_CFromPtr        = 7'h13;
 Bit #(7) f7_cap_CSub            = 7'h14;
-// 7'h15-7'h1c unused
+// 7'h15 unused
+Bit #(7) f7_cap_CSetHigh        = 7'h16;
+// 7'h17-7'h1c unused
 Bit #(7) f7_cap_CBuildCap       = 7'h1d;
 Bit #(7) f7_cap_CCopyType       = 7'h1e;
 Bit #(7) f7_cap_CCSeal          = 7'h1f;
@@ -186,7 +188,9 @@ Bit #(5) f5rs2_cap_CSealEntry  = 5'h11;
 Bit #(5) f5rs2_cap_CLoadTags   = 5'h12;
 // 5'h13 unused
 Bit #(5) f5rs2_cap_JALR_PCC    = 5'h14;
-// 5'h15-5'h1f unused (5'h1f reserved for 1-reg instructions)
+// 5'h15-5'h16 unused
+Bit #(5) f5rs2_cap_CGetHigh    = 5'h17;
+// 5'h18-5'h1f unused (5'h1f reserved for 1-reg instructions)
 
 // ================================================================
 // f7_cap_{Load, Store} opcode subdivision
