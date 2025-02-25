@@ -84,7 +84,7 @@ interface DirPred#(type trainInfoT);
   method ActionValue#(Maybe#(DirPredResult#(trainInfoT))) pred;
 endinterface
 
-interface DirPredictor#(type trainInfoT, type specInfoT, type fastTrainInfoT, type pred2toPred3InfoT); //Exposed types
+interface DirPredictor#(type trainInfoT, type specInfoT, type fastTrainInfoT); //Exposed types
     method Action nextPc(Vector#(SupSize,Maybe#(PredIn#(fastTrainInfoT))) next);
     method Action specRecover(specInfoT specInfo, Bool taken, Bool nonBranch);
     //interface Vector#(SupSize, DirPred#(trainInfoT, specInfoT)) pred;
@@ -96,7 +96,7 @@ interface DirPredictor#(type trainInfoT, type specInfoT, type fastTrainInfoT, ty
     
     // Could instead be fully inside the predictor without exposing this interface, but still need to communicate 
     // the current main_epoch and decode.epoch each cycle, also every predictor will need this added logic, sounds like a pain
-    interface Vector#(SupSize, SupFifoDeq#(GuardedResult#(pred2toPred3InfoT))) clearIfc;
+    interface Vector#(SupSize, SupFifoDeq#(GuardedResult#(DirPredResult#(trainInfoT)))) clearIfc;
 
     method specInfoT getSpec(SupCnt i);
     method Action updateSpec(Bit#(TAdd#(TLog#(SupSizeX2),1)) i);

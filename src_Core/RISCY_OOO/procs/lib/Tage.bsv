@@ -126,15 +126,19 @@ typedef struct {
     Bool taken;
 } UpdateInfo#(numeric type numTables) deriving(Bits, Eq, FShow);
 
-typedef struct {
-    GuardedResult#(Tuple2#(TageTrainInfo#(numTables), Addr)) res;
-} Pred1ToPred2Data#(numeric type numTables) deriving(Bits, Eq, FShow);
 
 typedef struct {
     TageTrainInfo#(numTables) train;
     PredictionTableInfo#(numTables) predInfo;
     Addr pc; // Only for debugging
-} TagePred2ToPred3Data#(numeric type numTables) deriving(Bits, Eq, FShow);
+    Bool alt_use;
+} Pred2ToPred3#(numeric type numTables) deriving(Bits, Eq, FShow);
+
+typedef struct {
+    GuardedResult#(Tuple2#(TageTrainInfo#(numTables), Addr)) res;
+} Pred1ToPred2Data#(numeric type numTables) deriving(Bits, Eq, FShow);
+
+typedef GuardedResult#(Pred2ToPred3#(numTables)) Pred2ToPred3Data#(numeric type numTables);
 
 // Abolutely terrible, is there an easier way to parametrise this?
 typedef union tagged {
@@ -155,7 +159,7 @@ typedef union tagged {
 } TaggedEntrySizes deriving(Bits);
 
 interface Tage#(numeric type numTables);
-    interface DirPredictor#(TageTrainInfo#(numTables), TageSpecInfo, TageFastTrainInfo, TagePred2ToPred3Data#(numTables)) dirPredInterface;
+    interface DirPredictor#(TageTrainInfo#(numTables), TageSpecInfo, TageFastTrainInfo) dirPredInterface;
     
     `ifdef DEBUG
         method Action debugTables(Addr pc);
@@ -200,8 +204,16 @@ module mkTage(Tage#(numTables)) provisos(
     Reg#(Bool) starting <- mkReg(True);
 
     Vector#(SupSize, RWire#(PredIn#(TageFastTrainInfo))) predIn <- replicateM(mkRWire);
-    Vector#(SupSize, Ehr#(2, Maybe#(Pred1ToPred2Data#(numTables)))) pred1ToPred2 <- replicateM(mkEhr(tagged Invalid));
-    SupFifo#(SupSize, 6, GuardedResult#(TagePred2ToPred3Data#(numTables))) pred2Topred3 <- mkUGSupFifo; // Check size
+    // Could be DREGs
+    Vector#(SupSize, Reg#(Maybe#(Pred1ToPred2Data#(numTables)))) pred1ToPred2 <- replicateM(mkDReg(tagged Invalid));
+    Vector#(SupSize, Reg#(Maybe#(Pred2ToPred3Data#(numTables)))) pred2ToPred3 <- replicateM(mkDReg(tagged Invalid));
+    
+    Vector#(SupSize, RWire#(GuardedResult#(DirPredResult#(TageTrainInfo#(numTables))))) bypassPred <- replicateM(mkRWire);
+    
+    SupFifo#(SupSize, 6, GuardedResult#(DirPredResult#(TageTrainInfo#(numTables)))) resultFifo <- mkUGSupFifo; // Check size
+    Ehr#(TAdd#(SupSize,1), SupCnt) bypassedCount <- mkEhr(0);
+    //Vector#(SupSize, PulseWire) usedPred <- replicateM(mkUnsafePulseWireOR);
+    Ehr#(TAdd#(SupSize,1), Bit#(SupSize)) enqMask <- mkEhr(0);// Can't use a pulse wire :( scheduling conflict in same rule,   usedPred[bypassCount[i]].send
 
     PulseWire recovered <- mkPulseWire;
   
@@ -439,6 +451,8 @@ module mkTage(Tage#(numTables)) provisos(
 
             numPred[valueOf(SupSize)] <= 0;
             predResults[valueOf(SupSize)] <= 0;
+            bypassedCount[valueof(SupSize)] <= 0;
+            enqMask[valueOf(SupSize)] <= 0;
         end
     endrule
 
@@ -477,8 +491,7 @@ module mkTage(Tage#(numTables)) provisos(
             predResults[i] <= results;
                 
             //let spec <- ooBuff.specAssign[i].specAssign; // Need action, but fragment should have corresponding original index
-          
-            pred1ToPred2[i][1] <= tagged Valid Pred1ToPred2Data{
+            pred1ToPred2[i] <= tagged Valid Pred1ToPred2Data{
                 res: GuardedResult{
                     result: tuple2(ret, in.pc), //Passing of the PC is all for debugging
                     main_epoch: in.main_epoch,
@@ -490,7 +503,7 @@ module mkTage(Tage#(numTables)) provisos(
 
     for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
         (* no_implicit_conditions, fire_when_enabled *)
-        rule predStageTwo(pred1ToPred2[i][0] matches tagged Valid .in);
+        rule predStageTwo(pred1ToPred2[i] matches tagged Valid .in);
             match {.ret, .pc} = in.res.result;
             
             `ifdef DEBUG_TAGETEST
@@ -508,28 +521,125 @@ module mkTage(Tage#(numTables)) provisos(
             ret.usefulCounters = usefulCounters;
                 
             let result = GuardedResult {
-                result: TagePred2ToPred3Data{
+                result: Pred2ToPred3{
                     train: ret,
                     predInfo: predInfo,
-                    pc: pc
+                    pc: pc,
+                    alt_use: useAlt
                 },
                 main_epoch: in.res.main_epoch,
                 decode_epoch: in.res.decode_epoch
             };
 
+            pred2ToPred3[i] <= tagged Valid result;
+        endrule      
+    end
+
+    for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
+        (* no_implicit_conditions, fire_when_enabled *)
+        rule predStageThree(pred2ToPred3[i] matches tagged Valid .in);
+            let entry = in;
+            let result = entry.result;
+            let ret = result.train;
+            match {.predInfo, .altpred} = result.predInfo;
+            if(predInfo matches tagged Valid {.pred_index, .pred_entry, .pred_table_index}) begin 
+                Bool prediction = takenFromCounter(pred_entry.predictionCounter);
+                ret.provider_prediction = prediction;
+
+                `ifdef DEBUG_TAGETEST
+                    $display("TAGETEST TABLE INDEX %d %d %d\n",pred_index, pred_table_index, pred_entry.tag);
+                `endif
+                
+                // Get the index to avoid recomputing on update (not possible unless mispredict)
+                ret.provider_info = tagged Valid ProviderTrainInfo{index: pred_table_index, provider_table: pred_index, provider_entry: pred_entry};
+                if (altpred matches tagged Valid {.alt_index, .alt_entry}) begin
+                    ret.alt_table = tagged Valid alt_index;
+
+                    `ifdef DEBUG_TAGETEST
+                    $display("TAGETEST ALT ENTRY %d tag:%d\n", alt_index, alt_entry.tag);
+                    `endif
+                    
+                    Bool alt_prediction = takenFromCounter(alt_entry.predictionCounter);                 
+                    ret.alt_prediction = alt_prediction;
+
+                    if(pred_entry.usefulCounter == 0 && weakCounter(pred_entry.predictionCounter) && result.alt_use) begin
+                        ret.taken = alt_prediction;
+                        ret.use_alt = True;
+                    end
+                    else begin
+                        ret.use_alt = False;
+                        ret.taken = prediction;
+                    end
+                end
+                else begin
+                    ret.alt_table = tagged Invalid;
+                    Bool bimodal_prediction = unpack(pack(ret.bimodal_prediction.pred));
+                    ret.alt_prediction = bimodal_prediction;
+                    ret.use_alt = False;
+                    ret.taken = prediction;
+                end
+            end
+            else begin
+                `ifdef DEBUG_TAGETEST
+                    $display("TAGETEST USE BIMODAL\n");
+                `endif
+                ret.alt_table = tagged Invalid;
+                ret.provider_info = tagged Invalid;
+                ret.use_alt = False;
+                // Maybe automatically trigger a read from bimodal table ever time nextPc is set?
+                Bool prediction = unpack(pack(ret.bimodal_prediction.pred));
+                ret.provider_prediction = prediction;
+                ret.taken = prediction;
+            end
+
             `ifdef DEBUG_TAGETEST   
                 $display("TAGETEST Prediction on: %x,%d, Taken: %d, cycle %d\n", ret.pc , i, ret.taken, cur_cycle);
             `endif
 
-            pred1ToPred2[i][0] <= tagged Invalid;
-            if(pred2Topred3.enqS[i].canEnq) begin
-                    $display("Predict2 enqueue %x onto %d", pc, i);
-                    pred2Topred3.enqS[i].enq(result);
-            end
-            else
-                doAssert(False, "FAIL TO ENQUEUE PRED2");
+            let res =  GuardedResult{
+                result: DirPredResult{
+                    taken: ret.taken,
+                    train: ret,
+                    pc: result.pc
+                },
+                main_epoch: in.main_epoch,
+                decode_epoch: in.decode_epoch
+            };
+
+            `ifdef DEBUG_TAGETEST
+            $display("Pred3 on %x\n", result.pc);
+            `endif
+            
+            bypassPred[i].wset(res);
         endrule      
     end
+
+    
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule enqWithoutBypass;
+        SupCnt count = 0;
+        Vector#(SupSize, Maybe#(GuardedResult#(DirPredResult#(TageTrainInfo#(numTables))))) toEnq = replicate(tagged Invalid);
+        for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
+            if(bypassPred[i].wget matches tagged Valid .res &&& !unpack(enqMask[valueOf(SupSize)][i])) begin
+                toEnq[count] = tagged Valid res;
+                count = count + 1;
+            end
+        end
+
+        for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
+            if(toEnq[i] matches tagged Valid .res) begin
+                if(resultFifo.enqS[i].canEnq) begin
+                    resultFifo.enqS[i].enq(res);
+                    `ifdef DEBUG_TAGETEST
+                    $display("TAGETEST Enqueued on %x, port %d\n", res.result.pc, i);
+                    `endif
+                end
+                else
+                    doAssert(False, "Cannot enqueue prediction");
+            end
+        end
+    endrule      
+
 
     `ifdef DEBUG
     method Action debugTables(Addr pc);
@@ -569,80 +679,25 @@ module mkTage(Tage#(numTables)) provisos(
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         predIfc[i] = (interface DirPred;
             method ActionValue#(Maybe#(DirPredResult#(TageTrainInfo#(numTables)))) pred;
-                if(pred2Topred3.deqS[i].canDeq) begin
-                    /* Do processing */
-                    let entry = pred2Topred3.deqS[i].first;
-                    let result = entry.result;
-                    let ret = result.train;
-                    match {.predInfo, .altpred} = result.predInfo;
-                    if(predInfo matches tagged Valid {.pred_index, .pred_entry, .pred_table_index}) begin 
-                        Bool prediction = takenFromCounter(pred_entry.predictionCounter);
-                        ret.provider_prediction = prediction;
-
-                        `ifdef DEBUG_TAGETEST
-                            $display("TAGETEST TABLE INDEX %d %d %d\n",pred_index, pred_table_index, pred_entry.tag);
-                        `endif
-                        
-                        // Get the index to avoid recomputing on update (not possible unless mispredict)
-                        ret.provider_info = tagged Valid ProviderTrainInfo{index: pred_table_index, provider_table: pred_index, provider_entry: pred_entry};
-                        if (altpred matches tagged Valid {.alt_index, .alt_entry}) begin
-                            ret.alt_table = tagged Valid alt_index;
-
-                            `ifdef DEBUG_TAGETEST
-                            $display("TAGETEST ALT ENTRY %d tag:%d\n", alt_index, alt_entry.tag);
-                            `endif
-                            
-                            Bool alt_prediction = takenFromCounter(alt_entry.predictionCounter);                 
-                            ret.alt_prediction = alt_prediction;
-
-                            if(pred_entry.usefulCounter == 0 && weakCounter(pred_entry.predictionCounter) && useAlt) begin
-                                ret.taken = alt_prediction;
-                                ret.use_alt = True;
-                            end
-                            else begin
-                                ret.use_alt = False;
-                                ret.taken = prediction;
-                            end
-                        end
-                        else begin
-                            ret.alt_table = tagged Invalid;
-                            Bool bimodal_prediction = unpack(pack(ret.bimodal_prediction.pred));
-                            ret.alt_prediction = bimodal_prediction;
-                            ret.use_alt = False;
-                            ret.taken = prediction;
-                        end
+                DirPredResult#(TageTrainInfo#(numTables)) result = unpack(0);
+                if(!resultFifo.deqS[i].canDeq) begin
+                    if(bypassPred[bypassedCount[i]].wget matches tagged Valid .res) begin
+                        result = res.result;
+                        enqMask[i] <= enqMask[i] | (1 << bypassedCount[i]);
+                        bypassedCount[i] <= bypassedCount[i]+1;
                     end
                     else begin
-                        `ifdef DEBUG_TAGETEST
-                            $display("TAGETEST USE BIMODAL\n");
-                        `endif
-                        ret.alt_table = tagged Invalid;
-                        ret.provider_info = tagged Invalid;
-                        ret.use_alt = False;
-                        // Maybe automatically trigger a read from bimodal table ever time nextPc is set?
-                        Bool prediction = unpack(pack(ret.bimodal_prediction.pred));
-                        ret.provider_prediction = prediction;
-                        ret.taken = prediction;
+                        doAssert(False, "No prediction supplied when required\n");
                     end
-
-                    let res =  DirPredResult{
-                            taken: ret.taken,
-                            train: ret,
-                            pc: result.pc
-                    };
-
-                    `ifdef DEBUG_TAGETEST
-                    $display("Pred3 on %x\n", pred2Topred3.deqS[i].first.result.pc);
-                    `endif
-                
-                    return tagged Valid res;
                 end
-                else begin
-                    `ifdef DEBUG_TAGETEST
-                    doAssert(False, "Failed to provide a prediction when expected\n");
-                    `endif
-                    return tagged Invalid;
-                end
+                else
+                    result = resultFifo.deqS[i].first.result;
+
+                `ifdef DEBUG_TAGETEST
+                $display("TAGETEST Pred called on %x, Taken: %d, Cycle:%d\n", result.pc, result.taken, cur_cycle);
+                `endif
+
+                return tagged Valid result;
             endmethod
         endinterface);
     end
@@ -654,7 +709,7 @@ module mkTage(Tage#(numTables)) provisos(
                 if(mispred) (* nosplit *) begin
                     // Retrieve allocation information for next update.
                     `ifdef DEBUG_TAGETEST
-                    $display("TAGETEST Misprediction on %x, cycle %d\n", train.pc, cur_cycle);
+                    $display("TAGETEST Misprediction on %x, Actual: %d, Predicted:%d, cycle %d\n", train.pc, cur_cycle, taken, train.taken);
                     `endif
                     allocate(train, taken);
                     updateWithTrain(taken, train, mispred);
@@ -683,7 +738,7 @@ module mkTage(Tage#(numTables)) provisos(
         endmethod
 
         interface pred = predIfc;
-        interface clearIfc = pred2Topred3.deqS;
+        interface clearIfc = resultFifo.deqS;
 
         // Recover histories before table writes
         method Action specRecover(TageSpecInfo specInfo, Bool taken, Bool nonBranch);

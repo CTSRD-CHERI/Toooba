@@ -611,7 +611,7 @@ module mkFetchStage(FetchStage);
     endrule: doFetch2
 
    function Bool isCurrent(Fetch2ToDecode in) = (in.main_epoch == f_main_epoch && in.decode_epoch == decode_epoch[0]);
-   function Bool isCurrentPred(GuardedResult#(DirPred2toPred3Info) in) = (in.main_epoch == f_main_epoch && in.decode_epoch == decode_epoch[0]);
+   function Bool isCurrentPred(GuardedResult#(DirPredResult#(DirPredTrainInfo)) in) = (in.main_epoch == f_main_epoch && in.decode_epoch == decode_epoch[0]);
 
    rule doDecodeFlush(f2d.deqS[0].canDeq && !isCurrent(f2d.deqS[0].first));
       for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1)
@@ -727,23 +727,24 @@ module mkFetchStage(FetchStage);
                redirectPc = Valid (pc); // record redirect to the first PC in this bundle.
                trainNAP = Valid (TrainNAP {pc: pc, nextPc: pc + 2, branch: False});
             end else if (in.decode_epoch == decode_epoch_local) begin   
-               DirPredResult#(DirPredTrainInfo) dir_pred = DirPredResult{taken: False, train: unpack(0), pc: ?};
-               DirPredSpecInfo dir_spec = in.recoverInfo;
-               if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
-                    // So it compiles - REMOVE LATER!
-                    Bit#(1) took <- dummy(1);
-                    dir_pred.taken = unpack(took);
-                    let last_x16_pc = pc + ((in.inst_kind == Inst_32b) ? 2 : 0);
+                DirPredResult#(DirPredTrainInfo) dir_pred = DirPredResult{taken: False, train: unpack(0), pc: ?};
+                DirPredSpecInfo dir_spec = in.recoverInfo;
 
-                    `ifdef DEBUG_TAGETEST
-                    $display("DECODE PREDICT on %x %x\n", pc, last_x16_pc);
-                    /*if(predResults[branchCountRecieved] matches tagged Valid .res) begin
-                        $display("DECODE PRED RESULTS %d on %x\n",branchCountRecieved, res.pc);
-                    end*/
-                    `endif
+                let last_x16_pc = pc + ((in.inst_kind == Inst_32b) ? 2 : 0);
+                // Ridiculous, if I put these worthless two lines inside the next if statement compilation fails. But is fine for correctness thanks to decodeBrPred
+                Bit#(1) took <- dummy(1);
+                dir_pred.taken = unpack(took);
 
-                    if(in.predicted_branch) begin
-                        let recieved <- dirPred.pred[branchCountRecieved].pred;
+                if(in.predicted_branch) begin
+                    let recieved <- dirPred.pred[branchCountRecieved].pred; 
+                    $display("DECODE DEQUEUE on %x ", pc, fshow(decode_result.dInst.iType), "\n");
+                    
+                    if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
+                        // So it compiles - REMOVE LATER! 
+                        `ifdef DEBUG_TAGETEST
+                        $display("DECODE PREDICT on %x %x\n", pc, last_x16_pc);
+                        `endif
+
                         if(isValid(recieved)) begin
                             dir_pred = validValue(recieved);
 
@@ -753,23 +754,18 @@ module mkFetchStage(FetchStage);
                             trueBranchCount = trueBranchCount + 1;
                             
                             `ifdef DEBUG_TAGETEST
-                            $display("PREDICT with %x %x %d ID=%d %d\n", pc, dir_pred.pc, dir_pred.taken, dir_spec, dirPred.getSpec(trueBranchCount+1));
                             doAssert(dir_pred.pc == last_x16_pc, "Branch PC is inconsistent\n");
                             `endif
                         end
                     end
-                    else begin
-                        let next = decodeBrPred(pc, decode_result.dInst, True, (validValue(decodeIn[i]).inst_kind == Inst_32b));
-                        trainNAP = Valid (TrainNAP {pc: last_x16_pc, nextPc: validValue(next), branch: decode_result.dInst.iType == Br});
-                        dir_spec = unpack(0);
-                    end
-               end
-
-               // Mispredict in one of the halves
-               if(in.predicted_branch)  begin
-                    $display("DECODE DEQUEUE on %x ", pc, fshow(decode_result.dInst.iType), "\n");
-                    branchCountRecieved = branchCountRecieved+1;
-               end
+                branchCountRecieved = branchCountRecieved+1;
+                end   
+                else if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
+                    //dir_pred.taken = True; // ? 
+                    let next = decodeBrPred(pc, decode_result.dInst, True, (validValue(decodeIn[i]).inst_kind == Inst_32b));
+                    trainNAP = Valid (TrainNAP {pc: last_x16_pc, nextPc: validValue(next), branch: decode_result.dInst.iType == Br});
+                    dir_spec = unpack(0);
+                end
 
                Maybe#(Addr) dir_ppc = decodeBrPred(pc, decode_result.dInst, dir_pred.taken, (validValue(decodeIn[i]).inst_kind == Inst_32b));
                doAssert(in.main_epoch == f_main_epoch, "main epoch must match");
