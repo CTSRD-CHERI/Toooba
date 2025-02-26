@@ -65,16 +65,16 @@ CSR_XCapCause noCapCause = CSR_XCapCause {cheri_exc_code: cheriExcNone,
 
 typedef struct { Bit#(5) addr; } SCR deriving(Bits, Eq);
 
-`define SCR(n, v) SCR scrAddr``n = SCR { addr: v };
+`define SCR(n, v, a_, b_) SCR scrAddr``n = SCR { addr: v };
 `include "SCRs.bsvi"
 // As with CSRs, SCR that catches all unimplemented SCRs
-`SCR(None, 5'd10)
+`SCR(None, 5'd10, 12'h000, False)
 `undef SCR
 
 instance FShow#(SCR);
     function Fmt fshow(SCR scr);
         return (case(scr.addr)
-`define SCR(n, v) v: $format(`"``scrAddr``n```");
+`define SCR(n, v, a_, b_) v : $format(`"``scrAddr``n```");
 `include "SCRs.bsvi"
 `undef SCR
             default: $format("scrAddrNone");
@@ -84,10 +84,19 @@ endinstance
 
 function SCR unpackSCR(Bit#(5) addr);
     return (case(addr)
-`define SCR(n, v) v: scrAddr``n;
+`define SCR(n, v, a_, b_) v: scrAddr``n;
 `include "SCRs.bsvi"
 `undef SCR
         default: scrAddrNone;
+    endcase);
+endfunction
+
+function Maybe#(SCR) csrToScr(Bit#(12) addr);
+    return (case (addr) matches
+`define SCR(name, scr_addr, csr_addr, exists_as_csr) csr_addr &&& exists_as_csr : Valid(scrAddr``name);
+`include "SCRs.bsvi"
+`undef SCR
+        default: Invalid;
     endcase);
 endfunction
 
