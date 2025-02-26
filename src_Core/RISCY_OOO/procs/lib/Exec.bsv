@@ -218,7 +218,7 @@ function CapPipe setBoundsALU(CapPipe cap, Data len, SetBoundsFunc boundsOp);
 endfunction
 
 (* noinline *)
-function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWFunc scrType);
+function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWAccess scrAccess);
     function csrOp (oldAddr, val, f) =
         case (f)
             Write: val;
@@ -227,14 +227,14 @@ function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWFunc scrType
         endcase;
     let addr = getAddr(cap);
     let oldAddr = getAddr(oldCap);
-    CapPipe res = (case (scrType) matches
-        tagged TVEC .csrf: update_scr_via_csr(oldCap, csrOp(oldAddr, getAddr(cap), csrf) & ~64'h2, False);
-        tagged EPC .csrf: update_scr_via_csr(oldCap, csrOp(oldAddr, getAddr(cap), csrf) & ~64'h1, False);
-        tagged TCC: update_scr_via_csr(cap, addr & ~64'h2, False); // Mask out bit 1
-        tagged EPCC: update_scr_via_csr(cap, addr & ~64'h1, addr[0] == 1'b0); // Mask out bit 0
-        tagged Normal: cap;
-    endcase);
-    return res;
+    let baseCap = scrAccess.capAccess && scrAccess.accessFunc == Write ? cap : oldCap;
+    let mask = case (scrAccess.scrType)
+                   TVEC: 64'h2;
+                   EPC: 64'h1;
+                   Normal: 64'h0;
+               endcase;
+    let allowSealed = scrAccess.scrType == EPC ? addr[0] == 1'b0 : False;
+    return update_scr_via_csr(baseCap, csrOp(oldAddr, addr, scrAccess.accessFunc) & ~mask, allowSealed);
 endfunction
 
 function Tuple2#(Data, Bool) extractType(CapPipe a);
@@ -274,14 +274,8 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 modifyOffset(a_mut, getAddr(b), offsetOp == IncOffset).value;
             tagged SetBounds .boundsOp    :
                 setBoundsALU(a_mut, getAddr(b), boundsOp);
-            tagged SpecialRW .scrType     :
-                case (scrType) matches
-                      tagged TCC: b;
-                      tagged EPCC: b;
-                      tagged Normal: b;
-                      tagged TVEC ._: nullWithAddr(getAddr(b));
-                      tagged EPC ._: nullWithAddr(getAddr(b));
-                   endcase
+            tagged SpecialRW .scrAccess   :
+                (scrAccess.capAccess ? b : nullWithAddr(getAddr(b)));
             tagged SetAddr .addrSource    :
                 clearTagIf(setAddr(a_mut, (addrSource == Src2Type) ? b_type : getAddr(b) ).value, (addrSource == Src2Type) ? b_res : False);
             tagged SealEntry              :

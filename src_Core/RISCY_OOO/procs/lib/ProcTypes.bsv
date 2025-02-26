@@ -317,13 +317,15 @@ typedef enum {
     Write, Set, Clear
 } CSRAccessFunc deriving(Bits, Eq, FShow);
 
-typedef union tagged {
-    CSRAccessFunc TVEC;
-    CSRAccessFunc EPC;
-    void TCC;
-    void EPCC;
-    void Normal;
-} SpecialRWFunc deriving(Bits, Eq, FShow);
+typedef enum {
+    TVEC, EPC, Normal
+} SCRType deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Bool capAccess;
+    CSRAccessFunc accessFunc;
+    SCRType scrType;
+} SpecialRWAccess deriving (Bits, Eq, FShow);
 
 typedef enum {
     Src2Type, Src2Addr
@@ -336,7 +338,7 @@ typedef enum {
 typedef union tagged {
     ModifyOffsetFunc ModifyOffset;
     SetBoundsFunc SetBounds;
-    SpecialRWFunc SpecialRW;
+    SpecialRWAccess SpecialRW;
     AddrSource SetAddr;
     void Seal;
     void CSeal;

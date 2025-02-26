@@ -976,7 +976,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                 dInst.imm = Invalid;
             end
             else begin // fnCSRRWI, fnCSRRW, fnCSRRSI, fnCSRRS, fnCSRRCI, fnCSRRC
-                if (truncate(immI) == pack(csrAddrMTVEC) || truncate(immI) == pack(csrAddrMEPC) || truncate(immI) == pack(csrAddrSTVEC) || truncate(immI) == pack(csrAddrSEPC)) begin
+                if (csrToScr(truncate(immI)) matches tagged Valid .scr) begin
                     Bool shouldWrite = (funct3 == fnCSRRWI || funct3 == fnCSRRW) || rs1 != 0;
                     dInst.iType = shouldWrite ? Scr : Cap;
                     regs.dst = Valid(tagged Gpr rd);
@@ -993,27 +993,18 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
 
                     legalInst = isValid(mAccessFunc); // Non-existent CSRs are checked for later
 
-                    let scrType = ?;
-                    case (truncate(immI))
-                        pack(csrAddrMEPC): begin
-                            scrType = EPC (mAccessFunc.Valid);
-                            dInst.scr = Valid (scrAddrMEPCC);
-                        end
-                        pack(csrAddrMTVEC): begin
-                            scrType = TVEC (mAccessFunc.Valid);
-                            dInst.scr = Valid (scrAddrMTCC);
-                        end
-                        pack(csrAddrSEPC): begin
-                            scrType = EPC (mAccessFunc.Valid);
-                            dInst.scr = Valid (scrAddrSEPCC);
-                        end
-                        pack(csrAddrSTVEC): begin
-                            scrType = TVEC (mAccessFunc.Valid);
-                            dInst.scr = Valid (scrAddrSTCC);
-                        end
-                    endcase
+                    SpecialRWAccess access = ?;
+                    access.accessFunc = mAccessFunc.Valid;
+                    access.capAccess = cap_mode;
 
-                    dInst.capFunc = CapModify (SpecialRW (scrType));
+                    dInst.scr = Valid (scr);
+                    access.scrType = case (scr)
+                        scrAddrMEPCC, scrAddrSEPCC: EPC;
+                        scrAddrMTCC, scrAddrSTCC  : TVEC;
+                        default                   : Normal;
+                    endcase;
+
+                    dInst.capFunc = CapModify (SpecialRW (access));
                 end else begin
                     dInst.iType = Csr;
                     Maybe#(AluFunc) mAluFunc = case (funct3)
@@ -1062,11 +1053,15 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
 
                             let scr = unpackSCR(rs2);
 
-                            let scrType = case (rs2[1:0])
-                                              0: TCC;
-                                              3: EPCC;
-                                              default: Normal;
-                                          endcase;
+                            SpecialRWAccess access = ?;
+                            access.accessFunc = Write;
+                            access.capAccess = True;
+
+                            access.scrType = case (rs2[1:0])
+                                                 0: TVEC;
+                                                 3: EPC;
+                                                 default: Normal;
+                                             endcase;
 
                             // Decode SCR read to PCC as AUIPCC 0
                             if (scr == scrAddrPCC) begin
@@ -1076,7 +1071,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             end
 
                             dInst.scr = Valid (scr);
-                            dInst.capFunc = CapModify (SpecialRW (scrType));
+                            dInst.capFunc = CapModify (SpecialRW (access));
                         end
                         f7_cap_CSetBounds: begin
                             legalInst = True;
