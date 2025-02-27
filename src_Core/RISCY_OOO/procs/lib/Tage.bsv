@@ -126,6 +126,11 @@ typedef struct {
     Bool taken;
 } UpdateInfo#(numeric type numTables) deriving(Bits, Eq, FShow);
 
+typedef struct {
+    TageSpecInfo specInfo;
+    Bool taken;
+    Bool nonBranch;
+} SpecUpdateInfo deriving(Bits, Eq, FShow);
 
 typedef struct {
     TageTrainInfo#(numTables) train;
@@ -175,7 +180,6 @@ endinterface
     Recover spec more urgent than update history - should be fine
 
 */
-
 module mkTage(Tage#(numTables)) provisos(
     Bits#(TageTrainInfo#(numTables), a__),
     Add#(1, b__, TLog#(TAdd#(1, numTables))),
@@ -215,7 +219,8 @@ module mkTage(Tage#(numTables)) provisos(
     //Vector#(SupSize, PulseWire) usedPred <- replicateM(mkUnsafePulseWireOR);
     Ehr#(TAdd#(SupSize,1), Bit#(SupSize)) enqMask <- mkEhr(0);// Can't use a pulse wire :( scheduling conflict in same rule,   usedPred[bypassCount[i]].send
 
-    PulseWire recovered <- mkPulseWire;
+    PulseWire recovered <- mkPulseWireOR;
+    RWire#(SpecUpdateInfo) specInfoUpdate <- mkRWire;
   
     function Bool useAlt;
         return unpack(pack(alt_on_na)[`METAPREDICTOR_CTR_SIZE-1]);
@@ -435,6 +440,32 @@ module mkTage(Tage#(numTables)) provisos(
                 end
             end
       //  end
+    endrule
+
+    (* no_implicit_conditions, fire_when_enabled *)
+    rule recoverSpecHistory(recovered &&& specInfoUpdate.wget matches tagged Valid .specUpdate);
+        let numBits <- ooBuff.handleMispred(specUpdate.specInfo.ooIndex, !specUpdate.nonBranch);
+        if(!(specUpdate.nonBranch && numBits == 0)) begin
+            if(specUpdate.nonBranch)
+                numBits = numBits - 1;
+            // Recover histories first, then update bit
+            let recoverNumber = numBits;
+            global.recoverFrom[recoverNumber].undo;
+
+            if(!specUpdate.nonBranch)
+                global.updateRecoveredHistory(pack(specUpdate.taken));
+
+            `ifdef DEBUG_TAGETEST   
+                $display("TAGETEST Recovery by %d Misprediction on %d, cycle %d %d\n", numBits, specInfo.ooIndex, cur_cycle, nonBranch);
+            `endif
+            for (Integer i = 0; i < valueOf(numTables); i = i +1) begin
+                let tab = taggedTablesVector[i];
+                `CASE_ALL_TABLES(tab, (*/ 
+                t.recoverHistory(recoverNumber); 
+                if(!specUpdate.nonBranch)
+                    t.updateRecovered(pack(specUpdate.taken)); /*))
+            end 
+        end
     endrule
 
     (* no_implicit_conditions, fire_when_enabled *)
@@ -740,36 +771,25 @@ module mkTage(Tage#(numTables)) provisos(
         interface pred = predIfc;
         interface clearIfc = resultFifo.deqS;
 
+        
+        
         // Recover histories before table writes
         method Action specRecover(TageSpecInfo specInfo, Bool taken, Bool nonBranch);
+            (* split *)
             if(specInfo.confirmed) begin
-                let numBits <- ooBuff.handleMispred(specInfo.ooIndex, !nonBranch);
-                    if(!(nonBranch && numBits == 0)) begin
-                        if(nonBranch)
-                            numBits = numBits - 1;
-                        // Recover histories first, then update bit
-                        let recoverNumber = numBits;
-                        global.recoverFrom[recoverNumber].undo;
-
-                        if(!nonBranch)
-                            global.updateRecoveredHistory(pack(taken));
-
-                        `ifdef DEBUG_TAGETEST   
-                            $display("TAGETEST Recovery by %d Misprediction on %d, cycle %d %d\n", numBits, specInfo.ooIndex, cur_cycle, nonBranch);
-                        `endif
-                        for (Integer i = 0; i < valueOf(numTables); i = i +1) begin
-                            let tab = taggedTablesVector[i];
-                            `CASE_ALL_TABLES(tab, (*/ 
-                            t.recoverHistory(recoverNumber); 
-                            if(!nonBranch)
-                                t.updateRecovered(pack(taken)); /*))
-                        end 
-                    end
+                recovered.send;
+                specInfoUpdate.wset(SpecUpdateInfo{specInfo: specInfo, taken: taken, nonBranch: nonBranch});
             end
         endmethod
 
-        method TageSpecInfo getSpec(SupCnt i);
-            return TageSpecInfo{ooIndex: ooBuff.specAssignUnconfirmed(i), confirmed: True};
+        method Vector#(SupSizeX2, TageSpecInfo) getSpec(Bit#(SupSizeX2) mask);
+            let indices = ooBuff.specAssignUnconfirmed(mask);
+            
+            function TageSpecInfo form (Integer j);
+                return TageSpecInfo{ooIndex: indices[j], confirmed: True};
+            endfunction
+            Vector#(SupSizeX2, TageSpecInfo) ret = genWith(form);
+            return ret;
         endmethod
 
         method Action updateSpec(Bit#(TAdd#(TLog#(SupSizeX2),1)) i);
@@ -788,9 +808,8 @@ module mkTage(Tage#(numTables)) provisos(
             end
         endmethod
     
-        method Action flush;
-            recovered.send; //Therefore do not update hisotry this cycle
-        endmethod
+        method Action flush = noAction;
+
         method flush_done = True;
     endinterface;
 endmodule

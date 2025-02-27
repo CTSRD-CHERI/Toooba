@@ -231,6 +231,12 @@ typedef struct {
     Bool branch;
 } TrainNAP deriving(Bits, Eq, FShow);
 
+typedef struct {
+    DirPredSpecInfo specInfo;
+    Bool taken;
+    Bool nonBranch;
+} SpecRecoverInfo deriving(Bits, Eq, FShow);
+
 // "micro-TLB" size (buffer of past few translations)
 typedef 2 PageBuffSize;
 
@@ -320,6 +326,13 @@ module mkFetchStage(FetchStage);
     
     Wire#(Vector#(SupSizeX2, Maybe#(DirPredIn))) newBranches <- mkDWire(replicate(tagged Invalid));
     Wire#(Bit#(TAdd#(TLog#(SupSizeX2),1))) newBranchesCount <- mkDWire(0);
+
+    // To resolve conflict, probably a better way
+    RWire#(SpecRecoverInfo) decodeSpecRecover <- mkRWire;
+    RWire#(SpecRecoverInfo) aluSpecRecover <- mkRWire;
+
+
+
     // May be overkill
     SupFifo#(SupSizeX2, 4, DirPredIn) predInput <- mkUGSupFifo;
        // Can the fifo size be smaller?
@@ -478,15 +491,15 @@ module mkFetchStage(FetchStage);
         Bit#(SupSizeX2) mask = 0;
         
         // How to do this efficiently??? !
-        Vector#(SupSizeX2, DirPredSpecInfo) recoverInfo = replicate(unpack(0));
         for(Integer i = 0; i < valueOf(SupSizeX2) && fromInteger(i) <= posLastSupX2; i = i + 1) begin
-            recoverInfo[i] = dirPred.getSpec(truncate(count)); //Inefficient, just use counter
             if (tpl_2(pred_future_pc[i])) begin
                 branches[count] = tagged Valid DirPredIn{pc: pc + fromInteger(2*i), fastTrainInfo: fastPredictions[i],  main_epoch: f_main_epoch, decode_epoch: decode_epoch[0]};
                 count = count + 1;
                 mask[i] = 1;
             end
         end
+
+        Vector#(SupSizeX2, DirPredSpecInfo) recoverInfo = dirPred.getSpec(mask);
         
         `ifdef DEBUG_TAGETEST
         $display("FETCH1 %x, Cycle: %d last inst: %d branch count: %d", pc, cur_cycle, posLastSupX2, count);
@@ -759,15 +772,17 @@ module mkFetchStage(FetchStage);
                         end
                     end
                 branchCountRecieved = branchCountRecieved+1;
-                end   
-                else if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
+                end
+                
+                Maybe#(Addr) dir_ppc = decodeBrPred(pc, decode_result.dInst, dir_pred.taken, (validValue(decodeIn[i]).inst_kind == Inst_32b));
+                if(decode_result.dInst.iType == Br && !likely_epoch_change && !in.predicted_branch) begin
                     //dir_pred.taken = True; // ? 
-                    let next = decodeBrPred(pc, decode_result.dInst, True, (validValue(decodeIn[i]).inst_kind == Inst_32b));
-                    trainNAP = Valid (TrainNAP {pc: last_x16_pc, nextPc: validValue(next), branch: decode_result.dInst.iType == Br});
+                    //let next = decodeBrPred(pc, decode_result.dInst, True, (validValue(decodeIn[i]).inst_kind == Inst_32b));
+                    trainNAP = Valid (TrainNAP {pc: last_x16_pc, nextPc: validValue(dir_ppc), branch: decode_result.dInst.iType == Br});
                     dir_spec = unpack(0);
                 end
 
-               Maybe#(Addr) dir_ppc = decodeBrPred(pc, decode_result.dInst, dir_pred.taken, (validValue(decodeIn[i]).inst_kind == Inst_32b));
+               
                doAssert(in.main_epoch == f_main_epoch, "main epoch must match");
 
                let decode_result = decode(in.inst);    // Decode 32b inst, or 32b expansion of 16b inst
@@ -902,8 +917,8 @@ module mkFetchStage(FetchStage);
       end
 
       if(recover matches tagged Valid {.spec, .taken, .notBranch})  begin
-        dirPred.specRecover(spec, taken, notBranch);
-        dirPred.flush;//Might not be necessary at all
+        decodeSpecRecover.wset(SpecRecoverInfo{specInfo: spec, taken: taken, nonBranch: notBranch});
+        //dirPred.flush;//Might not be necessary at all
       end
       
       for(Integer i = 0; i < valueOf(SupSize) && fromInteger(i) < branchCountRecieved; i = i +1) begin
@@ -950,6 +965,12 @@ module mkFetchStage(FetchStage);
         nextAddrPred.update(train.pc, train.nextPc, train.nextPc != train.pc + 2, train.branch);
     endrule
 
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule doSpecRecover(isValid(decodeSpecRecover.wget) || isValid(aluSpecRecover.wget));
+        SpecRecoverInfo update = fromMaybe(validValue(decodeSpecRecover.wget), aluSpecRecover.wget);
+        dirPred.specRecover(update.specInfo, update.taken, update.nonBranch);
+    endrule
+
     // Security: we can flush when front end is empty, i.e.
     // (1) Fetch1 is stalled for waiting flush
     // (2) all internal FIFOs are empty (the output sup fifo needs not to be
@@ -978,9 +999,9 @@ module mkFetchStage(FetchStage);
     endmethod
     method Action redirect(Addr new_pc);
         if (verbose) $display("Redirect: newpc %h, old f_main_epoch %d, new f_main_epoch %d",new_pc,f_main_epoch,f_main_epoch+1);
-        virtualReg <= virtualReg;
-        $display("%b\n",virtualReg);
-        dirPred.flush;//Might not be necessary at all
+        //virtualReg <= virtualReg;
+        //$display("%b\n",virtualReg);
+        //dirPred.flush;//Might not be necessary at all
 
         pc_reg[pc_redirect_port] <= new_pc;
         f_main_epoch <= (f_main_epoch == fromInteger(valueOf(NumEpochs)-1)) ? 0 : f_main_epoch + 1;
@@ -1012,7 +1033,8 @@ module mkFetchStage(FetchStage);
     endmethod
 
     method Action recover_spec(DirPredSpecInfo dpSpec, Bool taken, Bool nonBranch);
-        dirPred.specRecover(dpSpec, taken, nonBranch);
+        //dirPred.specRecover(dpSpec, taken, nonBranch);
+        aluSpecRecover.wset(SpecRecoverInfo{specInfo: dpSpec, taken:taken, nonBranch: nonBranch});
     endmethod
 
     method Action train_predictors(

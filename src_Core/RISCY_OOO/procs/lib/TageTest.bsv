@@ -26,6 +26,7 @@ typedef TageSpecInfo TageTestSpecInfo;
 typedef TageFastTrainInfo TageTestFastTrainInfo;
 //typedef TagePred2ToPred3Data#(`NUM_TABLES) TageTestPred2ToPred3Info;
 
+(* synthesize *)
 module mkTageTest(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo, TageTestFastTrainInfo));
     Reg#(Bool) starting <- mkReg(True);
     Tage#(7) tage <- mkTage;
@@ -63,8 +64,8 @@ module mkTageTest(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo, TageT
         tage.dirPredInterface.specRecover(specInfo, taken, nonBranch);
     endmethod
 
-    method TageSpecInfo getSpec(SupCnt i);
-        return tage.dirPredInterface.getSpec(i);
+    method Vector#(SupSizeX2, TageSpecInfo) getSpec(Bit#(SupSizeX2) mask);
+        return tage.dirPredInterface.getSpec(mask);
     endmethod
 
     method Action updateSpec(Bit#(TAdd#(TLog#(SupSizeX2),1)) i);
