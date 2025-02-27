@@ -661,7 +661,6 @@ module mkFetchStage(FetchStage);
    Vector#(SupSize,Integer) indices = genVector;
 
    rule doDecode(f2d.deqS[0].canDeq && isCurrent(f2d.deqS[0].first)/*( && all(isCurrentOrEmptyPred, indices)*/);
-      virtualReg <= False;
       Vector#(SupSize, Maybe#(InstrFromFetch2)) decodeIn = replicate(Invalid);
       // Express the incoming fragments as a vector of maybes.
       Vector#(SupSizeX2, Maybe#(Fetch2ToDecode)) frags;

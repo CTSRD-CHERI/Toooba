@@ -456,7 +456,7 @@ module mkTage(Tage#(numTables)) provisos(
                 global.updateRecoveredHistory(pack(specUpdate.taken));
 
             `ifdef DEBUG_TAGETEST   
-                $display("TAGETEST Recovery by %d Misprediction on %d, cycle %d %d\n", numBits, specInfo.ooIndex, cur_cycle, nonBranch);
+                $display("TAGETEST Recovery by %d Misprediction on %d, cycle %d %d\n", numBits, specUpdate.specInfo.ooIndex, cur_cycle, specUpdate.nonBranch);
             `endif
             for (Integer i = 0; i < valueOf(numTables); i = i +1) begin
                 let tab = taggedTablesVector[i];
