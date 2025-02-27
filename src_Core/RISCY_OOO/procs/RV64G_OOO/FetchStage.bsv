@@ -748,7 +748,7 @@ module mkFetchStage(FetchStage);
                 dir_pred.taken = unpack(took);
 
                 if(in.predicted_branch) begin
-                    let recieved <- dirPred.pred[branchCountRecieved].pred; 
+                    let recieved <- dirPred.pred[i].pred; 
                     $display("DECODE DEQUEUE on %x ", pc, fshow(decode_result.dInst.iType), "\n");
                     
                     if(decode_result.dInst.iType == Br && !likely_epoch_change) begin
@@ -781,7 +781,6 @@ module mkFetchStage(FetchStage);
                     dir_spec = unpack(0);
                 end
 
-               
                doAssert(in.main_epoch == f_main_epoch, "main epoch must match");
 
                let decode_result = decode(in.inst);    // Decode 32b inst, or 32b expansion of 16b inst

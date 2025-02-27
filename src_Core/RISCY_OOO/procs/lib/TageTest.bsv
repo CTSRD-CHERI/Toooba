@@ -26,6 +26,7 @@ typedef TageSpecInfo TageTestSpecInfo;
 typedef TageFastTrainInfo TageTestFastTrainInfo;
 //typedef TagePred2ToPred3Data#(`NUM_TABLES) TageTestPred2ToPred3Info;
 
+(* synthesize *)
 module mkTageTest(DirPredictor#(TageTrainInfo#(`NUM_TABLES), TageSpecInfo, TageTestFastTrainInfo));
     Reg#(Bool) starting <- mkReg(True);
     Tage#(7) tage <- mkTage;

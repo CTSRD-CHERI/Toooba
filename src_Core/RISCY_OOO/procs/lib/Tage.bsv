@@ -218,6 +218,7 @@ module mkTage(Tage#(numTables)) provisos(
     Ehr#(TAdd#(SupSize,1), SupCnt) bypassedCount <- mkEhr(0);
     //Vector#(SupSize, PulseWire) usedPred <- replicateM(mkUnsafePulseWireOR);
     Ehr#(TAdd#(SupSize,1), Bit#(SupSize)) enqMask <- mkEhr(0);// Can't use a pulse wire :( scheduling conflict in same rule,   usedPred[bypassCount[i]].send
+    Ehr#(TAdd#(SupSize,1), Bit#(TLog#(SupSize))) currentPred <- mkEhr(0);
 
     PulseWire recovered <- mkPulseWireOR;
     RWire#(SpecUpdateInfo) specInfoUpdate <- mkRWire;
@@ -484,6 +485,7 @@ module mkTage(Tage#(numTables)) provisos(
             predResults[valueOf(SupSize)] <= 0;
             bypassedCount[valueof(SupSize)] <= 0;
             enqMask[valueOf(SupSize)] <= 0;
+            currentPred[valueOf(SupSize)] <= 0;
         end
     endrule
 
@@ -711,7 +713,7 @@ module mkTage(Tage#(numTables)) provisos(
         predIfc[i] = (interface DirPred;
             method ActionValue#(Maybe#(DirPredResult#(TageTrainInfo#(numTables)))) pred;
                 DirPredResult#(TageTrainInfo#(numTables)) result = unpack(0);
-                if(!resultFifo.deqS[i].canDeq) begin
+                if(!resultFifo.deqS[currentPred[i]].canDeq) begin
                     if(bypassPred[bypassedCount[i]].wget matches tagged Valid .res) begin
                         result = res.result;
                         enqMask[i] <= enqMask[i] | (1 << bypassedCount[i]);
@@ -722,7 +724,9 @@ module mkTage(Tage#(numTables)) provisos(
                     end
                 end
                 else
-                    result = resultFifo.deqS[i].first.result;
+                    result = resultFifo.deqS[currentPred[i]].first.result;
+                
+                currentPred[i] <= currentPred[i]+1;
 
                 `ifdef DEBUG_TAGETEST
                 $display("TAGETEST Pred called on %x, Taken: %d, Cycle:%d\n", result.pc, result.taken, cur_cycle);
