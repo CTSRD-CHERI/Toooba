@@ -16,7 +16,7 @@ interface CircBuff#(numeric type size, type t);
     interface Vector#(SupSize, CircBuffAssign#(size)) specAssign;
     method Action specUpdate(Bit#(TAdd#(TLog#(SupSizeX2),1)) count);
 
-    method CircBuffIndex#(size) specAssignUnconfirmed(SupCnt count);
+    method Vector#(SupSizeX2, CircBuffIndex#(size)) specAssignUnconfirmed(Bit#(SupSizeX2) mask);
     method Action specAssignConfirmed(SupCnt count);
     // Seperate actions so only slow for updates after a misprediction? critical path?
     method Action enqueue(t data, CircBuffIndex#(size) index);
@@ -68,12 +68,15 @@ module mkCircBuff(CircBuff#(size, t)) provisos(Bits#(t, a__));
         endSpec[0] <= index;
     endmethod
 
-    method CircBuffIndex#(size) specAssignUnconfirmed(SupCnt count);
+    method Vector#(SupSizeX2, CircBuffIndex#(size)) specAssignUnconfirmed(Bit#(SupSizeX2) mask);
         CircBuffIndex#(size) index = endSpecLast;
-        for(Integer i = 0; fromInteger(i) < count; i = i +1)
-            index = nextIndex(index);
-
-        return index;
+        Vector#(SupSizeX2, CircBuffIndex#(size)) indices = replicate(index);
+        for(Integer i = 0; i < valueOf(SupSizeX2); i = i +1) begin
+            indices[i] = index;
+            if(unpack(mask[i]))
+                index = nextIndex(index);
+        end
+        return indices;
     endmethod
 
     method Action specAssignConfirmed(SupCnt count);

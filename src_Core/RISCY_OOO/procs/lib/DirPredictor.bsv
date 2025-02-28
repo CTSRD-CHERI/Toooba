@@ -75,7 +75,7 @@ typedef TageTestFastTrainInfo DirPredFastTrainInfo;
 `endif
 
 typedef PredIn#(DirPredFastTrainInfo) DirPredIn;
-//(* synthesize *)
+(* synthesize *)
 module mkDirPredictor(DirPredictor#(DirPredTrainInfo, DirPredSpecInfo, DirPredFastTrainInfo));
 `ifdef DIR_PRED_BHT
 `ifdef SECURITY

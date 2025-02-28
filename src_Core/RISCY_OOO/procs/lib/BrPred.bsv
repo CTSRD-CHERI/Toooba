@@ -27,7 +27,7 @@ import EpochManager::*;
 import Vector::*;
 import Fifos::*;
 
-(* noinline *)
+//(* noinline *)
 function Maybe#(Addr) decodeBrPred( Addr pc, DecodedInst dInst, Bool histTaken, Bool is_32b_inst);
   Addr pcPlusN = pc + (is_32b_inst ? 4 : 2);
   Data imm_val = fromMaybe(?, getDInstImm(dInst));
@@ -98,7 +98,7 @@ interface DirPredictor#(type trainInfoT, type specInfoT, type fastTrainInfoT); /
     // the current main_epoch and decode.epoch each cycle, also every predictor will need this added logic, sounds like a pain
     interface Vector#(SupSize, SupFifoDeq#(GuardedResult#(DirPredResult#(trainInfoT)))) clearIfc;
 
-    method specInfoT getSpec(SupCnt i);
+    method Vector#(SupSizeX2, specInfoT) getSpec(Bit#(SupSizeX2) mask);
     method Action updateSpec(Bit#(TAdd#(TLog#(SupSizeX2),1)) i);
 
     method Action flush;
