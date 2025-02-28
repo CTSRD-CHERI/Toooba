@@ -7,7 +7,7 @@
 // Ports:
 // Name                         I/O  size props
 // RDY_write_enq                  O     1 const
-// read_deq                       O   426
+// read_deq                       O   354
 // RDY_read_deq                   O     1 const
 // RDY_setLSQAtCommitNotified     O     1 const
 // RDY_setExecuted_deqLSQ         O     1 const
@@ -15,7 +15,6 @@
 // RDY_setExecuted_doFinishAlu_1_set  O     1 const
 // RDY_setExecuted_doFinishFpuMulDiv_0_set  O     1 const
 // RDY_setExecuted_doFinishMem    O     1 const
-// RDY_setExecuted_doFinishMem_RegData  O     1 const
 // getOrigPC                      O    64 reg
 // RDY_getOrigPC                  O     1 const
 // getOrigPredPC                  O    64
@@ -27,7 +26,7 @@
 // RDY_correctSpeculation         O     1 const
 // CLK                            I     1 clock
 // RST_N                          I     1 reset
-// write_enq_x                    I   426
+// write_enq_x                    I   354
 // setExecuted_deqLSQ_cause       I     5
 // setExecuted_deqLSQ_ld_killed   I     3
 // setExecuted_doFinishAlu_0_set_dst_data  I    64
@@ -39,11 +38,10 @@
 // setExecuted_doFinishFpuMulDiv_0_set_dst_data  I    64
 // setExecuted_doFinishFpuMulDiv_0_set_fflags  I     5
 // setExecuted_doFinishMem_vaddr  I    64
-// setExecuted_doFinishMem_store_data  I    64 reg
-// setExecuted_doFinishMem_store_data_BE  I     8 reg
+// setExecuted_doFinishMem_store_data  I    64 unused
+// setExecuted_doFinishMem_store_data_BE  I     8 unused
 // setExecuted_doFinishMem_access_at_commit  I     1
 // setExecuted_doFinishMem_non_mmio_st_done  I     1
-// setExecuted_doFinishMem_RegData_dst_data  I    64
 // dependsOn_wrongSpec_tag        I     4
 // correctSpeculation_mask        I    12
 // EN_write_enq                   I     1
@@ -53,7 +51,6 @@
 // EN_setExecuted_doFinishAlu_1_set  I     1
 // EN_setExecuted_doFinishFpuMulDiv_0_set  I     1
 // EN_setExecuted_doFinishMem     I     1
-// EN_setExecuted_doFinishMem_RegData  I     1
 // EN_correctSpeculation          I     1
 //
 // Combinational paths from inputs to outputs:
@@ -117,10 +114,6 @@ module mkRobRowSynth(CLK,
 		     EN_setExecuted_doFinishMem,
 		     RDY_setExecuted_doFinishMem,
 
-		     setExecuted_doFinishMem_RegData_dst_data,
-		     EN_setExecuted_doFinishMem_RegData,
-		     RDY_setExecuted_doFinishMem_RegData,
-
 		     getOrigPC,
 		     RDY_getOrigPC,
 
@@ -141,12 +134,12 @@ module mkRobRowSynth(CLK,
   input  RST_N;
 
   // action method write_enq
-  input  [425 : 0] write_enq_x;
+  input  [353 : 0] write_enq_x;
   input  EN_write_enq;
   output RDY_write_enq;
 
   // value method read_deq
-  output [425 : 0] read_deq;
+  output [353 : 0] read_deq;
   output RDY_read_deq;
 
   // action method setLSQAtCommitNotified
@@ -188,11 +181,6 @@ module mkRobRowSynth(CLK,
   input  EN_setExecuted_doFinishMem;
   output RDY_setExecuted_doFinishMem;
 
-  // action method setExecuted_doFinishMem_RegData
-  input  [63 : 0] setExecuted_doFinishMem_RegData_dst_data;
-  input  EN_setExecuted_doFinishMem_RegData;
-  output RDY_setExecuted_doFinishMem_RegData;
-
   // value method getOrigPC
   output [63 : 0] getOrigPC;
   output RDY_getOrigPC;
@@ -216,7 +204,7 @@ module mkRobRowSynth(CLK,
   output RDY_correctSpeculation;
 
   // signals for module outputs
-  wire [425 : 0] read_deq;
+  wire [353 : 0] read_deq;
   wire [63 : 0] getOrigPC, getOrigPredPC;
   wire [31 : 0] getOrig_Inst;
   wire RDY_correctSpeculation,
@@ -230,7 +218,6 @@ module mkRobRowSynth(CLK,
        RDY_setExecuted_doFinishAlu_1_set,
        RDY_setExecuted_doFinishFpuMulDiv_0_set,
        RDY_setExecuted_doFinishMem,
-       RDY_setExecuted_doFinishMem_RegData,
        RDY_setLSQAtCommitNotified,
        RDY_write_enq,
        dependsOn_wrongSpec;
@@ -312,16 +299,6 @@ module mkRobRowSynth(CLK,
   reg [6 : 0] m_rg_dst_reg;
   wire [6 : 0] m_rg_dst_reg$D_IN;
   wire m_rg_dst_reg$EN;
-
-  // register m_rg_store_data
-  reg [63 : 0] m_rg_store_data;
-  wire [63 : 0] m_rg_store_data$D_IN;
-  wire m_rg_store_data$EN;
-
-  // register m_rg_store_data_BE
-  reg [7 : 0] m_rg_store_data_BE;
-  wire [7 : 0] m_rg_store_data_BE$D_IN;
-  wire m_rg_store_data_BE$EN;
 
   // register m_rob_inst_state_rl
   reg m_rob_inst_state_rl;
@@ -498,7 +475,6 @@ module mkRobRowSynth(CLK,
        CAN_FIRE_setExecuted_doFinishAlu_1_set,
        CAN_FIRE_setExecuted_doFinishFpuMulDiv_0_set,
        CAN_FIRE_setExecuted_doFinishMem,
-       CAN_FIRE_setExecuted_doFinishMem_RegData,
        CAN_FIRE_setLSQAtCommitNotified,
        CAN_FIRE_write_enq,
        WILL_FIRE_RL_m_fflags_canon,
@@ -518,7 +494,6 @@ module mkRobRowSynth(CLK,
        WILL_FIRE_setExecuted_doFinishAlu_1_set,
        WILL_FIRE_setExecuted_doFinishFpuMulDiv_0_set,
        WILL_FIRE_setExecuted_doFinishMem,
-       WILL_FIRE_setExecuted_doFinishMem_RegData,
        WILL_FIRE_setLSQAtCommitNotified,
        WILL_FIRE_write_enq;
 
@@ -531,19 +506,19 @@ module mkRobRowSynth(CLK,
 	      CASE_write_enq_x_BITS_165_TO_162_0_write_enq_x_ETC__q5,
 	      CASE_write_enq_x_BITS_165_TO_162_0_write_enq_x_ETC__q6;
   reg [1 : 0] CASE_write_enq_x_BITS_97_TO_96_0_write_enq_x_B_ETC__q7;
-  wire [189 : 0] m_rg_store_data_BE_92_CONCAT_m_csr_93_BIT_12_9_ETC___d691;
-  wire [168 : 0] m_claimed_phy_reg_86_CONCAT_m_trap_dummy2_0_re_ETC___d690;
-  wire [65 : 0] IF_NOT_m_ppc_vaddr_csrData_dummy2_0_read__01_0_ETC___d635;
+  wire [245 : 0] m_rg_dst_data_90_CONCAT_m_csr_91_BIT_12_92_CON_ETC___d689;
+  wire [168 : 0] m_claimed_phy_reg_84_CONCAT_m_trap_dummy2_0_re_ETC___d688;
+  wire [65 : 0] IF_NOT_m_ppc_vaddr_csrData_dummy2_0_read__01_0_ETC___d633;
   wire [63 : 0] IF_m_ppc_vaddr_csrData_dummy2_0_read__01_AND_m_ETC___d316,
 		IF_m_ppc_vaddr_csrData_lat_1_whas__83_THEN_m_p_ETC___d215,
 		IF_m_ppc_vaddr_csrData_lat_3_whas__75_THEN_m_p_ETC___d217,
-		x__h28118;
+		x__h27027;
   wire [11 : 0] IF_m_spec_bits_lat_1_whas__93_THEN_m_spec_bits_ETC___d299,
-		bs__h35208,
-		sb__h35243,
-		upd__h18114;
+		bs__h33065,
+		sb__h33100,
+		upd__h18045;
   wire [4 : 0] IF_m_trap_lat_2_whas_THEN_m_trap_lat_2_wget_BI_ETC___d162,
-	       x_read_deq_fflags__h26124;
+	       x_read_deq_fflags__h26042;
   wire [3 : 0] IF_IF_m_trap_lat_2_whas_THEN_NOT_m_trap_lat_2__ETC___d161,
 	       IF_IF_m_trap_lat_2_whas_THEN_m_trap_lat_2_wget_ETC___d131,
 	       IF_IF_m_trap_lat_2_whas_THEN_m_trap_lat_2_wget_ETC___d132,
@@ -576,8 +551,8 @@ module mkRobRowSynth(CLK,
        IF_m_trap_lat_2_whas_THEN_m_trap_lat_2_wget_BI_ETC___d81,
        IF_m_trap_lat_2_whas_THEN_m_trap_lat_2_wget_BI_ETC___d95,
        NOT_m_ppc_vaddr_csrData_dummy2_0_read__01_02_O_ETC___d311,
-       m_rob_inst_state_dummy2_0_read__41_AND_m_rob_i_ETC___d652,
-       m_trap_dummy2_0_read__87_AND_m_trap_dummy2_1_r_ETC___d592;
+       m_rob_inst_state_dummy2_0_read__39_AND_m_rob_i_ETC___d650,
+       m_trap_dummy2_0_read__85_AND_m_trap_dummy2_1_r_ETC___d590;
 
   // action method write_enq
   assign RDY_write_enq = 1'd1 ;
@@ -590,9 +565,7 @@ module mkRobRowSynth(CLK,
 	       m_orig_inst,
 	       m_iType,
 	       m_rg_dst_reg,
-	       m_rg_dst_data,
-	       m_rg_store_data,
-	       m_rg_store_data_BE_92_CONCAT_m_csr_93_BIT_12_9_ETC___d691 } ;
+	       m_rg_dst_data_90_CONCAT_m_csr_91_BIT_12_92_CON_ETC___d689 } ;
   assign RDY_read_deq = 1'd1 ;
 
   // action method setLSQAtCommitNotified
@@ -628,12 +601,6 @@ module mkRobRowSynth(CLK,
   assign CAN_FIRE_setExecuted_doFinishMem = 1'd1 ;
   assign WILL_FIRE_setExecuted_doFinishMem = EN_setExecuted_doFinishMem ;
 
-  // action method setExecuted_doFinishMem_RegData
-  assign RDY_setExecuted_doFinishMem_RegData = 1'd1 ;
-  assign CAN_FIRE_setExecuted_doFinishMem_RegData = 1'd1 ;
-  assign WILL_FIRE_setExecuted_doFinishMem_RegData =
-	     EN_setExecuted_doFinishMem_RegData ;
-
   // value method getOrigPC
   assign getOrigPC = m_pc ;
   assign RDY_getOrigPC = 1'd1 ;
@@ -651,7 +618,7 @@ module mkRobRowSynth(CLK,
   assign RDY_getOrig_Inst = 1'd1 ;
 
   // value method dependsOn_wrongSpec
-  assign dependsOn_wrongSpec = bs__h35208[dependsOn_wrongSpec_tag] ;
+  assign dependsOn_wrongSpec = bs__h33065[dependsOn_wrongSpec_tag] ;
   assign RDY_dependsOn_wrongSpec = 1'd1 ;
 
   // action method correctSpeculation
@@ -944,7 +911,7 @@ module mkRobRowSynth(CLK,
   assign m_fflags_rl$EN = 1'd1 ;
 
   // register m_iType
-  assign m_iType$D_IN = write_enq_x[329:325] ;
+  assign m_iType$D_IN = write_enq_x[257:253] ;
   assign m_iType$EN = EN_write_enq ;
 
   // register m_ldKilled_rl
@@ -977,11 +944,11 @@ module mkRobRowSynth(CLK,
   assign m_nonMMIOStDone_rl$EN = 1'd1 ;
 
   // register m_orig_inst
-  assign m_orig_inst$D_IN = write_enq_x[361:330] ;
+  assign m_orig_inst$D_IN = write_enq_x[289:258] ;
   assign m_orig_inst$EN = EN_write_enq ;
 
   // register m_pc
-  assign m_pc$D_IN = write_enq_x[425:362] ;
+  assign m_pc$D_IN = write_enq_x[353:290] ;
   assign m_pc$EN = EN_write_enq ;
 
   // register m_ppc_vaddr_csrData_rl
@@ -1000,9 +967,7 @@ module mkRobRowSynth(CLK,
 	  EN_setExecuted_doFinishAlu_1_set or
 	  setExecuted_doFinishAlu_1_set_dst_data or
 	  EN_setExecuted_doFinishAlu_0_set or
-	  setExecuted_doFinishAlu_0_set_dst_data or
-	  EN_setExecuted_doFinishMem_RegData or
-	  setExecuted_doFinishMem_RegData_dst_data)
+	  setExecuted_doFinishAlu_0_set_dst_data)
   case (1'b1)
     EN_setExecuted_doFinishFpuMulDiv_0_set:
 	m_rg_dst_data$D_IN = setExecuted_doFinishFpuMulDiv_0_set_dst_data;
@@ -1010,28 +975,17 @@ module mkRobRowSynth(CLK,
 	m_rg_dst_data$D_IN = setExecuted_doFinishAlu_1_set_dst_data;
     EN_setExecuted_doFinishAlu_0_set:
 	m_rg_dst_data$D_IN = setExecuted_doFinishAlu_0_set_dst_data;
-    EN_setExecuted_doFinishMem_RegData:
-	m_rg_dst_data$D_IN = setExecuted_doFinishMem_RegData_dst_data;
     default: m_rg_dst_data$D_IN =
 		 64'hAAAAAAAAAAAAAAAA /* unspecified value */ ;
   endcase
   assign m_rg_dst_data$EN =
 	     EN_setExecuted_doFinishAlu_0_set ||
 	     EN_setExecuted_doFinishAlu_1_set ||
-	     EN_setExecuted_doFinishFpuMulDiv_0_set ||
-	     EN_setExecuted_doFinishMem_RegData ;
+	     EN_setExecuted_doFinishFpuMulDiv_0_set ;
 
   // register m_rg_dst_reg
-  assign m_rg_dst_reg$D_IN = write_enq_x[324:318] ;
+  assign m_rg_dst_reg$D_IN = write_enq_x[252:246] ;
   assign m_rg_dst_reg$EN = EN_write_enq ;
-
-  // register m_rg_store_data
-  assign m_rg_store_data$D_IN = setExecuted_doFinishMem_store_data ;
-  assign m_rg_store_data$EN = EN_setExecuted_doFinishMem ;
-
-  // register m_rg_store_data_BE
-  assign m_rg_store_data_BE$D_IN = setExecuted_doFinishMem_store_data_BE ;
-  assign m_rg_store_data_BE$EN = EN_setExecuted_doFinishMem ;
 
   // register m_rob_inst_state_rl
   assign m_rob_inst_state_rl$D_IN =
@@ -1044,7 +998,7 @@ module mkRobRowSynth(CLK,
   // register m_spec_bits_rl
   assign m_spec_bits_rl$D_IN =
 	     EN_correctSpeculation ?
-	       upd__h18114 :
+	       upd__h18045 :
 	       IF_m_spec_bits_lat_1_whas__93_THEN_m_spec_bits_ETC___d299 ;
   assign m_spec_bits_rl$EN = 1'd1 ;
 
@@ -1284,7 +1238,7 @@ module mkRobRowSynth(CLK,
 	       (IF_m_trap_lat_2_whas_THEN_m_trap_lat_2_wget_BI_ETC___d67 ?
 		  4'd3 :
 		  IF_IF_m_trap_lat_2_whas_THEN_m_trap_lat_2_wget_ETC___d157) ;
-  assign IF_NOT_m_ppc_vaddr_csrData_dummy2_0_read__01_0_ETC___d635 =
+  assign IF_NOT_m_ppc_vaddr_csrData_dummy2_0_read__01_0_ETC___d633 =
 	     (NOT_m_ppc_vaddr_csrData_dummy2_0_read__01_02_O_ETC___d311 ||
 	      m_ppc_vaddr_csrData_rl[65:64] == 2'd0) ?
 	       { 2'd0,
@@ -1306,7 +1260,7 @@ module mkRobRowSynth(CLK,
 		  m_ldKilled_rl[1:0]) ;
   assign IF_m_memAccessAtCommit_lat_1_whas__69_THEN_m_m_ETC___d275 =
 	     EN_write_enq ?
-	       write_enq_x[329:325] == 5'd14 :
+	       write_enq_x[257:253] == 5'd14 :
 	       (EN_setExecuted_doFinishMem ?
 		  setExecuted_doFinishMem_access_at_commit :
 		  m_memAccessAtCommit_rl) ;
@@ -1425,23 +1379,23 @@ module mkRobRowSynth(CLK,
 	     !m_ppc_vaddr_csrData_dummy2_1$Q_OUT ||
 	     !m_ppc_vaddr_csrData_dummy2_2$Q_OUT ||
 	     !m_ppc_vaddr_csrData_dummy2_3$Q_OUT ;
-  assign bs__h35208 =
+  assign bs__h33065 =
 	     (m_spec_bits_dummy2_0$Q_OUT && m_spec_bits_dummy2_1$Q_OUT &&
 	      m_spec_bits_dummy2_2$Q_OUT) ?
 	       m_spec_bits_rl :
 	       12'd0 ;
-  assign m_claimed_phy_reg_86_CONCAT_m_trap_dummy2_0_re_ETC___d690 =
+  assign m_claimed_phy_reg_84_CONCAT_m_trap_dummy2_0_re_ETC___d688 =
 	     { m_claimed_phy_reg,
-	       m_trap_dummy2_0_read__87_AND_m_trap_dummy2_1_r_ETC___d592,
+	       m_trap_dummy2_0_read__85_AND_m_trap_dummy2_1_r_ETC___d590,
 	       m_trap_rl[4],
 	       m_trap_rl[4] ?
 		 CASE_m_trap_rl_BITS_3_TO_0_0_m_trap_rl_BITS_3__ETC__q1 :
 		 CASE_m_trap_rl_BITS_3_TO_0_0_m_trap_rl_BITS_3__ETC__q2,
-	       x__h28118,
-	       IF_NOT_m_ppc_vaddr_csrData_dummy2_0_read__01_0_ETC___d635,
-	       x_read_deq_fflags__h26124,
+	       x__h27027,
+	       IF_NOT_m_ppc_vaddr_csrData_dummy2_0_read__01_0_ETC___d633,
+	       x_read_deq_fflags__h26042,
 	       m_will_dirty_fpu_state,
-	       m_rob_inst_state_dummy2_0_read__41_AND_m_rob_i_ETC___d652,
+	       m_rob_inst_state_dummy2_0_read__39_AND_m_rob_i_ETC___d650,
 	       m_lsqTag,
 	       m_ldKilled_dummy2_0$Q_OUT && m_ldKilled_dummy2_1$Q_OUT &&
 	       m_ldKilled_rl[2],
@@ -1457,13 +1411,13 @@ module mkRobRowSynth(CLK,
 	       m_nonMMIOStDone_dummy2_1$Q_OUT &&
 	       m_nonMMIOStDone_rl,
 	       m_epochIncremented,
-	       bs__h35208 } ;
-  assign m_rg_store_data_BE_92_CONCAT_m_csr_93_BIT_12_9_ETC___d691 =
-	     { m_rg_store_data_BE,
+	       bs__h33065 } ;
+  assign m_rg_dst_data_90_CONCAT_m_csr_91_BIT_12_92_CON_ETC___d689 =
+	     { m_rg_dst_data,
 	       m_csr[12],
 	       CASE_m_csr_BITS_11_TO_0_1_m_csr_BITS_11_TO_0_2_ETC__q3,
-	       m_claimed_phy_reg_86_CONCAT_m_trap_dummy2_0_re_ETC___d690 } ;
-  assign m_rob_inst_state_dummy2_0_read__41_AND_m_rob_i_ETC___d652 =
+	       m_claimed_phy_reg_84_CONCAT_m_trap_dummy2_0_re_ETC___d688 } ;
+  assign m_rob_inst_state_dummy2_0_read__39_AND_m_rob_i_ETC___d650 =
 	     m_rob_inst_state_dummy2_0$Q_OUT &&
 	     m_rob_inst_state_dummy2_1$Q_OUT &&
 	     m_rob_inst_state_dummy2_2$Q_OUT &&
@@ -1471,21 +1425,21 @@ module mkRobRowSynth(CLK,
 	     m_rob_inst_state_dummy2_4$Q_OUT &&
 	     m_rob_inst_state_dummy2_5$Q_OUT &&
 	     m_rob_inst_state_rl ;
-  assign m_trap_dummy2_0_read__87_AND_m_trap_dummy2_1_r_ETC___d592 =
+  assign m_trap_dummy2_0_read__85_AND_m_trap_dummy2_1_r_ETC___d590 =
 	     m_trap_dummy2_0$Q_OUT && m_trap_dummy2_1$Q_OUT &&
 	     m_trap_dummy2_2$Q_OUT &&
 	     m_trap_rl[5] ;
-  assign sb__h35243 =
+  assign sb__h33100 =
 	     m_spec_bits_dummy2_2$Q_OUT ?
 	       IF_m_spec_bits_lat_1_whas__93_THEN_m_spec_bits_ETC___d299 :
 	       12'd0 ;
-  assign upd__h18114 = sb__h35243 & correctSpeculation_mask ;
-  assign x__h28118 =
+  assign upd__h18045 = sb__h33100 & correctSpeculation_mask ;
+  assign x__h27027 =
 	     (m_tval_dummy2_0$Q_OUT && m_tval_dummy2_1$Q_OUT &&
 	      m_tval_dummy2_2$Q_OUT) ?
 	       m_tval_rl :
 	       64'd0 ;
-  assign x_read_deq_fflags__h26124 =
+  assign x_read_deq_fflags__h26042 =
 	     (m_fflags_dummy2_0$Q_OUT && m_fflags_dummy2_1$Q_OUT) ?
 	       m_fflags_rl :
 	       5'd0 ;
@@ -1741,10 +1695,6 @@ module mkRobRowSynth(CLK,
       m_rg_dst_data <= `BSV_ASSIGNMENT_DELAY m_rg_dst_data$D_IN;
     if (m_rg_dst_reg$EN)
       m_rg_dst_reg <= `BSV_ASSIGNMENT_DELAY m_rg_dst_reg$D_IN;
-    if (m_rg_store_data$EN)
-      m_rg_store_data <= `BSV_ASSIGNMENT_DELAY m_rg_store_data$D_IN;
-    if (m_rg_store_data_BE$EN)
-      m_rg_store_data_BE <= `BSV_ASSIGNMENT_DELAY m_rg_store_data_BE$D_IN;
     if (m_will_dirty_fpu_state$EN)
       m_will_dirty_fpu_state <= `BSV_ASSIGNMENT_DELAY
 	  m_will_dirty_fpu_state$D_IN;
@@ -1770,8 +1720,6 @@ module mkRobRowSynth(CLK,
     m_ppc_vaddr_csrData_rl = 66'h2AAAAAAAAAAAAAAAA;
     m_rg_dst_data = 64'hAAAAAAAAAAAAAAAA;
     m_rg_dst_reg = 7'h2A;
-    m_rg_store_data = 64'hAAAAAAAAAAAAAAAA;
-    m_rg_store_data_BE = 8'hAA;
     m_rob_inst_state_rl = 1'h0;
     m_spec_bits_rl = 12'hAAA;
     m_trap_rl = 6'h2A;
@@ -1797,7 +1745,7 @@ module mkRobRowSynth(CLK,
 	$fdisplay(32'h80000002, "\n%m: ASSERT FAIL!!");
     if (RST_N != `BSV_RESET_VALUE)
       if (EN_setExecuted_deqLSQ &&
-	  m_trap_dummy2_0_read__87_AND_m_trap_dummy2_1_r_ETC___d592)
+	  m_trap_dummy2_0_read__85_AND_m_trap_dummy2_1_r_ETC___d590)
 	$fdisplay(32'h80000002, "\n%m: ASSERT FAIL!!");
     if (RST_N != `BSV_RESET_VALUE)
       if (EN_setExecuted_doFinishMem &&

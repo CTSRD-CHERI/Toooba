@@ -669,15 +669,15 @@ module mkMemLoader(CLK_portalClk,
 		x_addr__h43806,
 		x_wget__h7793;
   wire [47 : 0] IF_mmio_req_wrBE_BIT_7_32_THEN_mmio_req_wrData_ETC___d865;
-  wire [31 : 0] IF_hostWrAddrQ_q_rRdPtr_rsCounter_1_BIT_0_8_XO_ETC___d41,
+  wire [31 : 0] IF_hostStartQ_q_rRdPtr_rsCounter_77_BIT_0_84_X_ETC___d187,
+		IF_hostWrAddrQ_q_rRdPtr_rsCounter_1_BIT_0_8_XO_ETC___d41,
 		IF_hostWrDataQ_q_rWrPtr_rsCounter_4_BIT_0_1_XO_ETC___d84,
 		IF_hostWrDoneQ_q_rWrPtr_rsCounter_20_BIT_0_27__ETC___d230,
 		IF_mmio_req_wrBE_BIT_7_32_THEN_mmio_req_wrData_ETC___d858,
 		x__h10090,
 		x__h1111,
 		x__h4676,
-		x__h6528,
-		x__h7383;
+		x__h6528;
   wire [7 : 0] IF_reqSel_65_EQ_0_72_THEN_hostWrDataQ_q_wDataO_ETC___d476,
 	       IF_reqSel_65_EQ_1_93_THEN_hostWrDataQ_q_wDataO_ETC___d495,
 	       IF_reqSel_65_EQ_2_12_THEN_hostWrDataQ_q_wDataO_ETC___d514,
@@ -1314,7 +1314,7 @@ module mkMemLoader(CLK_portalClk,
   assign MUX_writing$write_1__SEL_2 =
 	     WILL_FIRE_RL_doStResp && pendStCnt == 8'd1 && !expectWrData ;
   assign MUX_hostStartQ_q_rRdPtr_rsCounter$write_1__VAL_1 =
-	     (~hostStartQ_q_rRdPtr_rsCounter[x__h7383[0]]) ?
+	     (~hostStartQ_q_rRdPtr_rsCounter[IF_hostStartQ_q_rRdPtr_rsCounter_77_BIT_0_84_X_ETC___d187[0]]) ?
 	       hostStartQ_q_rRdPtr_rsCounter | x__h7218 :
 	       hostStartQ_q_rRdPtr_rsCounter & y__h7405 ;
   assign MUX_hostStartQ_q_rWrPtr_rsCounter$write_1__VAL_1 =
@@ -1766,6 +1766,10 @@ module mkMemLoader(CLK_portalClk,
   assign respStQ_enqReq_dummy2_2$EN = 1'd1 ;
 
   // remaining internal signals
+  assign IF_hostStartQ_q_rRdPtr_rsCounter_77_BIT_0_84_X_ETC___d187 =
+	     hostStartQ_q_rRdPtr_rsCounter_77_BIT_0_84_XOR__ETC___d186 ?
+	       32'd1 :
+	       32'd0 ;
   assign IF_hostWrAddrQ_q_rRdPtr_rsCounter_1_BIT_0_8_XO_ETC___d41 =
 	     hostWrAddrQ_q_rRdPtr_rsCounter_1_BIT_0_8_XOR_h_ETC___d40 ?
 	       32'd1 :
@@ -2127,11 +2131,9 @@ module mkMemLoader(CLK_portalClk,
 	     hostStartQ_q_rWrPtr_rsCounter_47_BIT_0_54_XOR__ETC___d156 ?
 	       32'd1 :
 	       32'd0 ;
-  assign x__h7218 = 2'd1 << x__h7383 ;
-  assign x__h7383 =
-	     hostStartQ_q_rRdPtr_rsCounter_77_BIT_0_84_XOR__ETC___d186 ?
-	       32'd1 :
-	       32'd0 ;
+  assign x__h7218 =
+	     2'd1 <<
+	     IF_hostStartQ_q_rRdPtr_rsCounter_77_BIT_0_84_X_ETC___d187 ;
   assign x__h8177 = x_sReadBin__h7627 + 2'd1 ;
   assign x__h9070 =
 	     2'd1 <<

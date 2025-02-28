@@ -641,32 +641,34 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
             inIfc.setFetchWaitRedirect;
             inIfc.setFetchWaitFlush;
 
-            // Go to quiescent state until debugger resumes execution
-            rg_run_state <= RUN_STATE_DEBUGGER_HALTED;
-
-            if (verbosity >= 2)
-              $display ("%0d: %m.commitStage.doCommitTrap_handle; debugger halt:", cur_cycle);
-         end else
+	    // Go to quiescent state until debugger resumes execution
+	    rg_run_state <= RUN_STATE_DEBUGGER_HALTED;
+	    if (verbosity >= 2)
+	    	$display ("%0d: %m.commitStage.doCommitTrap_handle; debugger halt:", cur_cycle);
+	  end
+       else begin
 `endif
-        begin
-            // trap handling & redirect
-            let trap_updates <- csrf.trap(trap.trap, trap.pc, trap.addr, trap.orig_inst);
-            redirectQ.enq(trap_updates.new_pc);
+
+         // trap handling & redirect
+         let trap_updates <- csrf.trap(trap.trap, trap.pc, trap.addr, trap.orig_inst);
+         redirectQ.enq(trap_updates.new_pc);
 
 `ifdef INCLUDE_TANDEM_VERIF
-            fa_to_TV (way0, rg_serial_num,
-                      tagged Invalid,
-                      x, no_fflags, no_mstatus, tagged Valid trap_updates, no_ret_updates);
+       fa_to_TV (way0, rg_serial_num,
+		 tagged Invalid,
+		 x, no_fflags, no_mstatus, tagged Valid trap_updates, no_ret_updates);
 `endif
-            rg_serial_num <= rg_serial_num + 1;
+       rg_serial_num <= rg_serial_num + 1;
 
-            // system consistency
-            // TODO spike flushes TLB here, but perhaps it is because spike's TLB
-            // does not include prv info, and it has to flush when prv changes.
-            // XXX As approximation, Trap may cause context switch, so flush for
-            // security
-            makeSystemConsistent(False, True, False);
-        end
+       // system consistency
+       // TODO spike flushes TLB here, but perhaps it is because spike's TLB
+       // does not include prv info, and it has to flush when prv changes.
+       // XXX As approximation, Trap may cause context switch, so flush for
+       // security
+       makeSystemConsistent(False, True, False);
+`ifdef INCLUDE_GDB_CONTROL
+       end
+`endif
     endrule
 
     // commit misspeculated load

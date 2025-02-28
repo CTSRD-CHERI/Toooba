@@ -32,7 +32,7 @@ BSC_COMPILATION_FLAGS += \
 	-D PERFORMANCE_MONITORING \
 	-D FABRIC64    \
 	-D INCLUDE_GDB_CONTROL \
-	-D INCLUDE_TANDEM_VERIF \
+	-D PERFORMANCE_MONITORING \
 	-D BRVF_TRACE \
 	-D XILINX_BSCAN  -D JTAG_TAP
 
@@ -41,6 +41,9 @@ SYNTH_BSC_OPTIONS = -D XILINX_XCVU9P
 
 # Sim only BSC_COMPILATION_FLAGS
 SIM_BSC_OPTIONS = -D BSIM
+
+# Set number of cores for RISCY config
+CORE_NUM = 2
 
 # Only used if we don't have INCLUDE_GDB_CONTROL
 #	-D EXTERNAL_DEBUG_MODULE
@@ -56,7 +59,7 @@ RISCY_DIRS = $(RISCY_HOME)/procs/RV64G_OOO:$(RISCY_HOME)/procs/lib:$(RISCY_HOME)
 
 CONNECTAL_DIRS = $(RISCY_HOME)/connectal/bsv:$(RISCY_HOME)/connectal/tests/spi:$(RISCY_HOME)/connectal/lib/bsv
 
-BLUESTUFF_DIRS = $(REPO)/src_Core/BSV_Additional_Libs/BlueStuff:$(REPO)/src_Core/BSV_Additional_Libs/BlueStuff/BlueUtils:$(REPO)/src_Core/BSV_Additional_Libs/BlueStuff/BlueBasics
+BLUESTUFF_DIRS = $(REPO)/src_Core/BSV_Additional_Libs/BlueStuff:$(REPO)/src_Core/BSV_Additional_Libs/BlueStuff/BlueUtils:$(REPO)/src_Core
 
 # ALL_RISCY_DIRS = $(RISCY_DIRS)
 ALL_RISCY_DIRS = $(RISCY_DIRS):$(CONNECTAL_DIRS):$(BLUESTUFF_DIRS)
@@ -67,8 +70,9 @@ ALL_RISCY_DIRS = $(RISCY_DIRS):$(CONNECTAL_DIRS):$(BLUESTUFF_DIRS)
 CORE_DIRS = $(REPO)/src_Core/CPU:$(REPO)/src_Core/ISA:$(REPO)/src_Core/Core:$(REPO)/src_Core/PLIC:$(REPO)/src_Core/Debug_Module:$(REPO)/src_Core/BSV_Additional_Libs
 
 TESTBENCH_DIRS  = $(REPO)/src_Testbench/Fabrics/AXI4
+TLM_DIRS = %/Libraries/TLM3:%/Libraries/Axi:%/Libraries/Axi4:%/Libraries/AMBA_TLM3/TLM3:%/Libraries/AMBA_TLM3/Axi:%/Libraries/AMBA_TLM3/Axi4:%/Libraries/Bus
 
-BSC_PATH = -p $(ALL_RISCY_DIRS):$(CORE_DIRS):src_BSV:$(TESTBENCH_DIRS):+:%/Libraries/AMBA_TLM3/TLM3:%/Libraries/AMBA_TLM3/Axi:%/Libraries/AMBA_TLM3/Axi4:%/Libraries/Bus
+BSC_PATH = -p $(ALL_RISCY_DIRS):$(CORE_DIRS):src_BSV:$(TESTBENCH_DIRS):+:$(TLM_DIRS)
 
 # ----------------
 # Top-level file and module
@@ -105,11 +109,8 @@ Verilog_RTL:
 Verilog_RTL_sim:
 	mkdir -p $@
 
-$(REPO)/src_Core/BSV_Additional_Libs/BlueStuff/.git:
-	git submodule update --init --recursive
-
 .PHONY: compile_synth
-compile_synth:  build_dir_synth Verilog_RTL $(REPO)/src_Core/BSV_Additional_Libs/BlueStuff/.git
+compile_synth:  build_dir_synth Verilog_RTL
 	@echo  "INFO: Generating RTL into Verilog_RTL for synthesis ..."
 	bsc -u -elab -verilog  -vdir Verilog_RTL $(BUILD_DIRS_SYNTH)  $(BSC_COMPILATION_FLAGS)  $(SYNTH_BSC_OPTIONS) $(BSC_PATH)  $(TOPFILE)
 	@echo  "INFO: Generated Synth RTL into Verilog_RTL"
@@ -117,7 +118,7 @@ compile_synth:  build_dir_synth Verilog_RTL $(REPO)/src_Core/BSV_Additional_Libs
 	@echo  "INFO: Copied RTL from  Verilog_RTL/  to  xilinx_ip/hdl/"
 
 .PHONY: compile_sim
-compile_sim:  build_dir_sim Verilog_RTL_sim $(REPO)/src_Core/BSV_Additional_Libs/BlueStuff/.git
+compile_sim:  build_dir_sim Verilog_RTL_sim
 	@echo  "INFO: Generating RTL into Verilog_RTL_sim for simulation ..."
 	bsc -u -elab -verilog  -vdir Verilog_RTL_sim $(BUILD_DIRS_SIM)  $(BSC_COMPILATION_FLAGS) $(SIM_BSC_OPTIONS) $(BSC_PATH)  $(TOPFILE)
 
