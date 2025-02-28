@@ -1269,9 +1269,9 @@ provisos(
         strideTable.deqRdResp;
         StrideEntry seNext = se;
         Bit#(13) observedStride = {1'b0, addr[11:0]} - {1'b0, se.lastAddr};
-        $writeh("%t Stride Prefetcher updateStrideEntry ", $time,
-            fshow(hitMiss), " ", addr,
-            ". Entry ", index, " state is ", fshow(se.state));
+        $write("%t Stride Prefetcher updateStrideEntry ", $time,
+            fshow(hitMiss), " %x", addr,
+            ". Entry %x", index, " state is ", fshow(se.state));
         if (se.state == EMPTY) begin
             if (hitMiss == MISS) begin 
                 seNext.lastAddr = truncate(addr);
@@ -1422,9 +1422,9 @@ provisos(
         strideTable.deqRdResp;
         StrideEntry2 seNext = se;
         Int#(12) observedStride = unpack(addr[11:0] - se.lastAddr);
-        $writeh("%t Stride Prefetcher updateStrideEntry ", $time,
-            fshow(hitMiss), " ", addr,
-            ". Entry ", index, " state is ", fshow(se.state));
+        $write("%t Stride Prefetcher updateStrideEntry ", $time,
+            fshow(hitMiss), " %x", addr,
+            ". Entry $x", index, " state is ", fshow(se.state));
         if (se.state == INIT && observedStride != 0) begin
             if (se.stride == observedStride) begin
                 //fast track to steady
@@ -1701,9 +1701,9 @@ provisos(
         strideTable.deqRdResp;
         StrideEntryAdaptive seNext = se;
         Bit#(13) observedStride = {1'b0, addr[11:0]} - {1'b0, se.lastAddr};
-        $writeh("%t Stride Prefetcher updateStrideEntry ", $time,
-            fshow(hitMiss), " ", addr,
-            ". Entry ", index, " state is ", fshow(se.state));
+        $write("%t Stride Prefetcher updateStrideEntry ", $time,
+            fshow(hitMiss), " %x", addr,
+            ". Entry %x", index, " state is ", fshow(se.state));
         if (se.state == EMPTY) begin
             if (hitMiss == MISS) begin 
                 seNext.lastAddr = truncate(addr);
