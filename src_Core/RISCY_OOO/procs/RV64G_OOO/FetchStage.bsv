@@ -202,13 +202,13 @@ function InstrFromFetch2 fetch2s_2_inst(Fetch2ToDecode inHi, Fetch2ToDecode inLo
    return ret;
 endfunction
 
-// REMOVE LATER
+/* REMOVE LATER
 function ActionValue#(Bit#(1)) dummy(Bit#(1) in);
     actionvalue
         let c <- cur_cycle;
         return in ^ pack(c)[0];
     endactionvalue
-endfunction
+endfunction */
 
 typedef struct {
   Addr pc;
@@ -303,10 +303,6 @@ module mkFetchStage(FetchStage);
     Integer pc_fetch2_port = 2;
     Integer pc_redirect_port = 3;
     Integer pc_final_port = 4;
-    // To track the next expected PC in Decode for early lookups for prediction.
-    Ehr#(TAdd#(SupSize, 2), Addr) decode_pc_reg <- mkEhr(?);
-    Integer decode_pc_redirect_port = valueOf(SupSize);
-    Integer decode_pc_final_port = valueOf(SupSize) + 1;
 
     Reg#(Bool) virtualReg <- mkRevertingVirtualReg(True); // Force redirect to block doDecode
 
@@ -744,8 +740,8 @@ module mkFetchStage(FetchStage);
 
                 let last_x16_pc = pc + ((in.inst_kind == Inst_32b) ? 2 : 0);
                 // Ridiculous, if I put these worthless two lines inside the next if statement compilation fails. But is fine for correctness thanks to decodeBrPred
-                Bit#(1) took <- dummy(1);
-                dir_pred.taken = unpack(took);
+                //Bit#(1) took <- dummy(1);
+                //dir_pred.taken = unpack(took);
 
                 if(in.predicted_branch) begin
                     let recieved <- dirPred.pred[i].pred; 
@@ -770,7 +766,7 @@ module mkFetchStage(FetchStage);
                             `endif
                         end
                     end
-                branchCountRecieved = branchCountRecieved+1;
+                    branchCountRecieved = branchCountRecieved+1;
                 end
                 
                 Maybe#(Addr) dir_ppc = decodeBrPred(pc, decode_result.dInst, dir_pred.taken, (validValue(decodeIn[i]).inst_kind == Inst_32b));
@@ -875,7 +871,6 @@ module mkFetchStage(FetchStage);
 `endif
                   end
                end // if (!isValid(cause))
-               decode_pc_reg[i] <= ppc;
                let out = FromFetchStage{pc: pc,
                                         ppc: ppc,
                                         main_epoch: in.main_epoch,
@@ -937,10 +932,6 @@ module mkFetchStage(FetchStage);
       end
 `endif
    endrule
-
-   /*rule reportDecodePc;
-       dirPred.nextPc(decode_pc_reg[decode_pc_final_port]);
-   endrule*/
 
     // train next addr pred: we use a wire to catch outputs of napTrainByDecQ.
     // This prevents napTrainByDecQ from clogging doDecode rule when
