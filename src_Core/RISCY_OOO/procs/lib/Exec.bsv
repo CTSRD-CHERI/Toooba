@@ -292,9 +292,9 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
 `endif
             tagged AndPerm                :
                 setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
-`ifndef ZCHERI
             tagged SetFlags               :
-                setFlags(a_mut, truncate(getAddr(b)));
+                setIntMode(a_mut, getAddr(b)==1); // XXX Sense swapped for legacy SetFlags
+`ifndef ZCHERI
             tagged FromPtr                :
                 (getAddr(a) == 0 ? nullCap : setAddr(b_mut, getAddr(a)).value);
                 (getAddr(a) == 0 ? nullCap : setOffset(b_mut, getAddr(a)).value);
@@ -337,11 +337,11 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                tagged GetOffset              :
                    getOffset(a);
                tagged GetFlags               :
-`ifdef ZCHERI
-                   zeroExtend(pack(getIntMode(a)));
-`else
-                   zeroExtend(getFlags(a));
-`endif
+                   // XXX Sense of legacy getFlags will be swapped
+                   begin
+                       let intMode = getIntMode(a);
+                       return zeroExtend(pack(intMode.exact ? intMode.value : False));
+                   end
                tagged GetPerm                :
                    zeroExtend(getPerms(a));
                tagged GetHigh                :
