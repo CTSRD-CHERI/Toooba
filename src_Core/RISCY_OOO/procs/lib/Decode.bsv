@@ -995,7 +995,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
 
                     SpecialRWAccess access = ?;
                     access.accessFunc = mAccessFunc.Valid;
-                    access.capAccess = cap_mode;
+                    access.capUpdate = cap_mode && funct3 == fnCSRRW;
+                    access.capRead = cap_mode;
 
                     dInst.scr = Valid (scr);
                     access.scrType = case (scr)
@@ -1055,7 +1056,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
 
                             SpecialRWAccess access = ?;
                             access.accessFunc = Write;
-                            access.capAccess = True;
+                            access.capUpdate = True;
+                            access.capRead = True;
 
                             access.scrType = case (rs2[1:0])
                                                  0: TVEC;
