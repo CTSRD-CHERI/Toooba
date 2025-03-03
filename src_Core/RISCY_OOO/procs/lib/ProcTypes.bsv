@@ -322,7 +322,8 @@ typedef enum {
 } SCRType deriving(Bits, Eq, FShow);
 
 typedef struct {
-    Bool capAccess;
+    Bool capUpdate;
+    Bool capRead;
     CSRAccessFunc accessFunc;
     SCRType scrType;
 } SpecialRWAccess deriving (Bits, Eq, FShow);

@@ -227,7 +227,7 @@ function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWAccess scrAc
         endcase;
     let addr = getAddr(cap);
     let oldAddr = getAddr(oldCap);
-    let baseCap = scrAccess.capAccess && scrAccess.accessFunc == Write ? cap : oldCap;
+    let baseCap = scrAccess.capUpdate ? cap : oldCap;
     let mask = case (scrAccess.scrType)
                    TVEC: 64'h2;
                    EPC: 64'h1;
@@ -275,7 +275,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
             tagged SetBounds .boundsOp    :
                 setBoundsALU(a_mut, getAddr(b), boundsOp);
             tagged SpecialRW .scrAccess   :
-                (scrAccess.capAccess ? b : nullWithAddr(getAddr(b)));
+                (scrAccess.capRead ? b : nullWithAddr(getAddr(b)));
             tagged SetAddr .addrSource    :
                 clearTagIf(setAddr(a_mut, (addrSource == Src2Type) ? b_type : getAddr(b) ).value, (addrSource == Src2Type) ? b_res : False);
             tagged SealEntry              :
