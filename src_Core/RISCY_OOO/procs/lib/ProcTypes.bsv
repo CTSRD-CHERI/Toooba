@@ -1115,7 +1115,3 @@ function Bit#(outWidth) hash(Bit#(inWidth) in)
     Vector#(TDiv#(inWidth,outWidth), Bit#(outWidth)) vec = unpack(zeroExtend(in));
     return fold( \^ , vec);
 endfunction
-
-function Bit#(1) getFlags(capT cap)
-    provisos(CHERICap::CHERICap#(capT, a__, b__, c__, d__, e__))
-    = pack(getIntMode(cap));
