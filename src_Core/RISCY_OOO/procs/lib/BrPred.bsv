@@ -101,6 +101,10 @@ interface DirPredictor#(type trainInfoT, type specInfoT, type fastTrainInfoT); /
     method Vector#(SupSizeX2, specInfoT) getSpec(Bit#(SupSizeX2) mask);
     method Action updateSpec(Bit#(TAdd#(TLog#(SupSizeX2),1)) i);
 
+    `ifdef PERFORMANCE_MONITORING
+    method BranchEvents events;
+    `endif
+
     method Action flush;
     method Bool flush_done;
 endinterface

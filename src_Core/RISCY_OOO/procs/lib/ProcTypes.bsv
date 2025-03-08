@@ -1085,6 +1085,8 @@ typedef struct {
    SupCnt evt_REDIRECT;
    SupCnt evt_TRAP;
    SupCnt evt_BRANCH;
+   SupCnt evt_BRANCH_MISPREDICT;
+   SupCnt evt_EARLY_REDIRECT;
    SupCnt evt_JAL;
    SupCnt evt_JALR;
    SupCnt evt_AUIPC;
@@ -1114,11 +1116,23 @@ typedef struct {
 } EventsCore deriving (Bits, FShow);
 typedef TDiv#(SizeOf#(EventsCore),SizeOf#(SupCnt)) EventsCoreElements;
 
+typedef struct {
+  Bool evt_REDIRECT;
+  Bool evt_EARLY_REDIRECT;
+  BranchEvents branch_evts;
+} FetchEvents deriving (Bits, FShow);
+
+typedef struct {
+  Bool evt_BRANCH_MISPREDICT;
+} BranchEvents deriving (Bits, FShow);
+
 typedef Bit#(Report_Width) HpmRpt;
 typedef struct {
    HpmRpt evt_REDIRECT;
    HpmRpt evt_TRAP;
    HpmRpt evt_BRANCH;
+   HpmRpt evt_BRANCH_MISPREDICT;
+   HpmRpt evt_EARLY_REDIRECT;
    HpmRpt evt_JAL;
    HpmRpt evt_JALR;
    HpmRpt evt_AUIPC;
