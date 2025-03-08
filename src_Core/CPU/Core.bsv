@@ -1074,7 +1074,10 @@ module mkCore#(CoreId coreId)(Core);
      Reg#(EventsCache) events_llc_reg <- mkRegU;
      rule report_events;
          EventsCore events = unpack(pack(commitStage.events));
-         events.evt_REDIRECT = zeroExtend(pack(fetchStage.redirect_evt));
+         FetchEvents fe = fetchStage.events;
+         events.evt_REDIRECT = zeroExtend(pack(fe.evt_REDIRECT));
+         events.evt_EARLY_REDIRECT = zeroExtend(pack(fe.evt_EARLY_REDIRECT));
+         events.evt_BRANCH_MISPREDICT = zeroExtend(pack(fe.branch_evts.evt_BRANCH_MISPREDICT));
          hpm_core_events[1] <= events;
      endrule
 
