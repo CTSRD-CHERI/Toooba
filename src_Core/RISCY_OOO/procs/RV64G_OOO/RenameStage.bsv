@@ -73,6 +73,7 @@ import ConfigReg::*;
 import CHERICap::*;
 import CHERICC_Fat::*;
 import ISA_Decls_CHERI::*;
+import Ehr::*;
 `ifdef PERFORMANCE_MONITORING
 import StatCounters::*;
 import DReg::*;
@@ -115,6 +116,7 @@ endinterface
 interface RenameStage;
     // performance count
     method Data getPerf(ExeStagePerfType t);
+    method Action checkCSRWrite(CSR csr);
 
 `ifdef PERFORMANCE_MONITORING
     method EventsTransExe events;
@@ -131,7 +133,7 @@ interface RenameStage;
 endinterface
 
 module mkRenameStage#(RenameInput inIfc)(RenameStage);
-    Bool verbose = False;
+    Bool verbose = True;
     Integer verbosity = 0;
 
     // func units
@@ -147,6 +149,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     Vector#(FpuMulDivExeNum, ReservationStationFpuMulDiv) reservationStationFpuMulDiv = inIfc.rsFpuMulDivIfc;
     ReservationStationMem reservationStationMem = inIfc.rsMemIfc;
     SplitLSQ lsq = inIfc.lsqIfc;
+
+    Ehr#(2, PhyRIndx) wcount_stid <- mkEhr(0);
 
     // performance counter
     Count#(Data) supRenameCnt <- mkCount(0);
@@ -394,7 +398,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: True, // we have incremented epoch
-                                spec_bits: specTagManager.currentSpecBits
+                                spec_bits: specTagManager.currentSpecBits,
+                                isPureDataRead: False // not relevant
 `ifdef RVFI_DII
                                 , dii_pid: x.dii_pid
 `endif
@@ -481,7 +486,12 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     endfunction
 
     // check for system inst that needs to replay
-    Bool firstReplay = doReplay(fetchStage.pipelines[0].first.dInst.iType);
+    //Bool pureDataInst = isPureDataCSR(fetchStage.pipelines[0].first.dInst);
+    //Bool csrRead = isCSRRead(fetchStage.pipelines[0].first.regs, fetchStage.pipelines[0].first.dInst);
+    //Bool csrWrite = isCSRWrite(fetchStage.pipelines[0].first.regs, fetchStage.pipelines[0].first.dInst);
+    Bool pureDataRead = isPureDataRead(fetchStage.pipelines[0].first.regs, fetchStage.pipelines[0].first.dInst);
+    Bool firstReplay = (doReplay(fetchStage.pipelines[0].first.dInst.iType) && !pureDataRead);
+
 
     // System inst is renamed only when ROB is empty
     rule doRenaming_SystemInst(
@@ -530,6 +540,13 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         let regs_ready_aggr = sbAggr.eagerLookup[0].get(phy_regs);
         sbCons.setBusy[0].set(phy_regs.dst);
         sbAggr.setBusy[0].set(phy_regs.dst);
+
+        // on a CSR Write we increase the counter
+        if(isCSRWrite(arch_regs, dInst) &&& dInst.csr matches tagged Valid .c) begin
+            if (c == csrAddrSTID || c == csrAddrUTID) begin
+                wcount_stid[0] <= wcount_stid[0] + 1;
+            end
+        end
 
         // print rename info
         if (verbose) begin
@@ -619,7 +636,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: True, // system inst has incremented epoch
-                                spec_bits: spec_bits
+                                spec_bits: spec_bits,
+                                isPureDataRead: False
 `ifdef RVFI_DII
                                 , dii_pid: x.dii_pid
 `endif
@@ -813,7 +831,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                 lsqAtCommitNotified: False,
                                 nonMMIOStDone: False,
                                 epochIncremented: False,
-                                spec_bits: spec_bits
+                                spec_bits: spec_bits,
+                                isPureDataRead: False // mem inst are no pure data reads
 `ifdef RVFI_DII
                                 , dii_pid: x.dii_pid
 `endif
@@ -864,7 +883,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
         && epochManager.checkEpoch[0].check(fetchStage.pipelines[0].first.main_epoch) // correct path
         && !isValid(firstTrap) // not trap
-        && !firstReplay // not system inst
+        && !(firstReplay && !pureDataRead) // not system inst
 `ifdef SECURITY
         // stall for ROB empty if we don't allow speculation at all
         && (!specNone || rob.isEmpty)
@@ -947,8 +966,15 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 if(isValid(getTrap(x))) begin
                     stop = True;
                 end
+                if(dInst.csr matches tagged Valid .c) begin
+                    stop = (case (c)
+                        csrAddrSTID, csrAddrUTID: (wcount_stid[0] > 0);
+                        // think about updating!
+                        default: True;
+                    endcase);
+                end
                 // for system inst, process in next cycle (in a different rule)
-                if(doReplay(dInst.iType)) begin
+                if(doReplay(dInst.iType) && !isPureDataRead(arch_regs, dInst)) begin
                     stop = True;
                 end
 `ifdef SECURITY
@@ -1209,7 +1235,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                                                 lsqAtCommitNotified: False,
                                                 nonMMIOStDone: False,
                                                 epochIncremented: False,
-                                                spec_bits: spec_bits
+                                                spec_bits: spec_bits,
+                                                isPureDataRead: isPureDataRead(arch_regs, dInst)
 `ifdef RVFI_DII
                                                 , dii_pid: x.dii_pid
 `endif
@@ -1293,6 +1320,13 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 `endif
             default: 0;
         endcase);
+    endmethod
+
+    method Action checkCSRWrite(CSR csr);
+        case (csr)
+            csrAddrSTID: wcount_stid[1] <= wcount_stid[1] - 1;
+            default: noAction;
+        endcase
     endmethod
 
 `ifdef PERFORMANCE_MONITORING
