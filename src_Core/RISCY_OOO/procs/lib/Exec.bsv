@@ -298,7 +298,6 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
 `ifndef ZCHERI
             tagged FromPtr                :
                 (getAddr(a) == 0 ? nullCap : setAddr(b_mut, getAddr(a)).value);
-                (getAddr(a) == 0 ? nullCap : setOffset(b_mut, getAddr(a)).value);
 `endif
             tagged SetHigh:
                 fromMem(tuple2(False, {getAddr(b), getAddr(a)}));
