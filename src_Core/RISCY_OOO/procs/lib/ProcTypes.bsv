@@ -624,6 +624,7 @@ typedef enum {
 typedef struct {
     Data authority_base;
     CapTop authority_top;
+    Bool authority_almighty;
     Bit#(6) authority_idx;
     Data check_low;
     CapTop check_high;

@@ -150,6 +150,7 @@ function Maybe#(BoundsCheck) prepareBoundsCheck(CapPipe a, CapPipe b, CapPipe pc
     endcase
     ret.authority_base = getBase(authority);
     ret.authority_top = getTop(authority);
+    ret.authority_almighty = hasAlmightyBounds(authority);
 
     case(toCheck.check_low_src)
         Src1Addr: ret.check_low = getAddr(a);
