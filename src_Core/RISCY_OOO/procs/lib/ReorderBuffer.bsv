@@ -26,6 +26,9 @@
 import Types::*;
 import ProcTypes::*;
 import HasSpecBits::*;
+import BrPred::*;
+import DirPredictor::*;
+
 import Vector::*;
 import Assert::*;
 import Ehr::*;
@@ -84,6 +87,7 @@ typedef struct {
 
     // speculation
     SpecBits           spec_bits;
+    DirPredSpecInfo spec_info;
 } ToReorderBuffer deriving(Bits, Eq, FShow);
 
 typedef enum {
@@ -209,6 +213,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Ehr#(2, Bool)                                                   nonMMIOStDone        <- mkEhr(?);
     Reg#(Bool)                                                      epochIncremented     <- mkRegU;
     Ehr#(3, SpecBits)                                               spec_bits            <- mkEhr(?);
+    Reg#(DirPredSpecInfo)                                           spec_info            <- mkRegU;
 
     // wires to get stale (EHR port 0) values of PPC
     Wire#(Addr) predPcWire <- mkBypassWire;
@@ -315,6 +320,7 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
         rob_inst_state[state_enq_port] <= x.rob_inst_state;
         epochIncremented <= x.epochIncremented;
         spec_bits[sb_enq_port] <= x.spec_bits;
+        spec_info <= x.spec_info;
 `ifdef INORDER_CORE
         // in-order core enqs to LSQ later, so don't set LSQ tag; and other
         // flags should default to false
@@ -358,7 +364,8 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
             lsqAtCommitNotified: lsqAtCommitNotified[lsqNotified_deq_port],
             nonMMIOStDone: nonMMIOStDone[nonMMIOSt_deq_port],
             epochIncremented: epochIncremented,
-            spec_bits: spec_bits[sb_deq_port]
+            spec_bits: spec_bits[sb_deq_port],
+            spec_info: spec_info
         };
     endmethod
 

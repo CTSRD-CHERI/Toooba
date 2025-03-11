@@ -636,6 +636,9 @@ module mkCore#(CoreId coreId)(Core);
         method setReconcileD = reconcile_d._write(True);
         method killAll = coreFix.killAll;
         method redirectPc = fetchStage.redirect;
+        method Action recover_spec(DirPredSpecInfo specInfo);
+            fetchStage.recover_spec(specInfo, False, True);
+        endmethod
         method setFetchWaitRedirect = fetchStage.setWaitRedirect;
 `ifdef INCLUDE_GDB_CONTROL
         method setFetchWaitFlush    = fetchStage.setWaitFlush;
