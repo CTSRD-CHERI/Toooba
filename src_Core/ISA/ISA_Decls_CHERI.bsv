@@ -53,12 +53,18 @@ instance FShow#(CHERIException);
     endfunction
 endinstance
 
+Bit#(4) cheriCheckFetch = 4'd0;
+Bit#(4) cheriCheckData = 4'd1;
+Bit#(4) cheriCheckBr = 4'd2;
+
 typedef struct {
     Bit #(6) cheri_exc_reg;
+    Bit #(4) cheri_check_type;
     CHERIException cheri_exc_code;
 } CSR_XCapCause deriving(Bits, Eq, FShow);
 
 CSR_XCapCause noCapCause = CSR_XCapCause {cheri_exc_code: cheriExcNone,
+                                          cheri_check_type: unpack(~0),
                                           cheri_exc_reg: unpack(0)};
 
 // SCR map

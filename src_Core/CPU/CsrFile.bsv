@@ -1172,7 +1172,26 @@ module mkCsrFile #(Data hartid)(CsrFile);
             end
             tagged CapException .ce: begin
                 cause_code = pack(excCHERIFault);
+`ifdef ZCHERI
+                function Bit#(4) toZCheriCause(cheri_exc_code);
+                    return case (cheri_exc_code)
+                        cheriExcLengthViolation: 4'd4;
+                        cheriExcTagViolation:    4'd0;
+                        cheriExcSealViolation, cheriExcTypeViolation:
+                                                 4'd1;
+                        cheriExcGlobalViolation, cheriExcPermitXViolation, cheriExcPermitRViolation,
+                        cheriExcPermitWViolation, cheriExcPermitRCapViolation,
+                        cheriExcPermitWCapViolation, cheriExcPermitWLocalCapViolation,
+                        cheriExcPermitASRViolation, cheriExcPermitCCallViolation,
+                        cheriExcPermitSetCIDViolation, cheriExcSoftwarePermViolation:
+                                                 4'd2;
+                        default: ~0; // Shouldn't happen, but return reserved value
+                    endcase;
+                endfunction
+                trap_val = zeroExtend({pack(ce.cheri_check_type), 12'b0, toZCheriCause(ce.cheri_exc_code)});
+`else
                 trap_val = zeroExtend({pack(ce.cheri_exc_reg), pack(ce.cheri_exc_code)});
+`endif
             end
             tagged Interrupt .i: begin
                 cause_code = zeroExtend(pack(i));

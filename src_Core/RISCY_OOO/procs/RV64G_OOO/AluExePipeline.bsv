@@ -490,7 +490,9 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
             if (!(                         (check.check_low  >= check.authority_base) &&
                   (check.check_inclusive ? (check.check_high <= check.authority_top )
                                          : (check.check_high <  check.authority_top ))))
-                x.capException = Valid(CSR_XCapCause{cheri_exc_reg: check.authority_idx, cheri_exc_code: cheriExcLengthViolation});
+                x.capException = Valid(CSR_XCapCause{ cheri_exc_reg: check.authority_idx
+                                                    , cheri_check_type: cheriCheckBr
+                                                    , cheri_exc_code: cheriExcLengthViolation});
         end
 
         // update the instruction in the reorder buffer.
