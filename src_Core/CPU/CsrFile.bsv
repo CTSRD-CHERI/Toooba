@@ -534,6 +534,9 @@ module mkCsrFile #(Data hartid)(CsrFile);
     Reg#(Data) mtval_csr <- mkCsrReg(0);
     // Capability cause register
     Reg#(Data) mccsr_csr <- mkReadOnlyReg(64'b11);
+    Reg#(Data) mseccfg_csr <- mkReadOnlyReg(64'b1000);
+    Reg#(Data) menvcfg_csr <- mkReadOnlyReg(64'h1 << 28);
+    Reg#(Data) senvcfg_csr <- mkReadOnlyReg(64'h1 << 28);
     // mip
     Vector#(4, Reg#(Bit#(1))) external_int_pend_vec = replicate(readOnlyReg(0));
     external_int_pend_vec[prvU] <- mkCsrReg(0);
@@ -901,6 +904,9 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrMIMPID:     mimpid_csr;
             csrAddrMHARTID:    mhartid_csr;
             csrAddrMCCSR:      mccsr_csr;
+            csrAddrMSECCFG:    mseccfg_csr;
+            csrAddrMENVCFG:    menvcfg_csr;
+            csrAddrSENVCFG:    senvcfg_csr;
 `ifdef PERFORMANCE_MONITORING
             //csrAddrMCOUNTERINHIBIT: perf_counters.inhibit;
             csrAddrMCOUNTERINHIBIT: mcountinhibit_reg;

@@ -135,6 +135,9 @@
 `CSR(MIMPID,     12'hf13)
 `CSR(MHARTID,    12'hf14)
 `CSR(MCCSR,      12'hbc0)
+`CSR(MSECCFG,    12'h747)
+`CSR(MENVCFG,    12'h30a)
+`CSR(SENVCFG,    12'h10a)
 `ifdef SECURITY
 // sanctum machine CSR
 `CSR(MEVBASE,    12'h7c0)
