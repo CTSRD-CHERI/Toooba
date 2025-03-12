@@ -719,7 +719,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 !(                         (check.check_low  >= check.authority_base) &&
                   (check.check_inclusive ? (check.check_high <= check.authority_top )
                                          : (check.check_high <  check.authority_top ))))
-                x.capException = Valid(CSR_XCapCause{cheri_exc_reg: check.authority_idx, cheri_exc_code: cheriExcLengthViolation});
+                x.capException = Valid(CSR_XCapCause{ cheri_exc_reg: check.authority_idx
+                                                    , cheri_check_type: cheriCheckData
+                                                    , cheri_exc_code: cheriExcLengthViolation});
         end
         if (x.capException matches tagged Valid .c) cause = Valid(CapException(c));
         Bool access_at_commit = !isValid(cause) && (isMMIO || isLrScAmo);
