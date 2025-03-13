@@ -97,8 +97,13 @@ module mkTaggedTableBRAM#(GlobalBranchHistory#(GlobalHistoryLength) global) (Tag
     FoldedHistory#(TAdd#(tagSize, indexSize)) folded <- mkFoldedHistory(valueOf(historyLength), global);
     //RegFile#(Bit#(indexSize), TaggedTableEntry#(tagSize)) tab <- mkRegFileWCFLoad(regInitTaggedTableFilename, 0, maxBound);
 
-    Vector#(SupSize, RWBramCore#(Bit#(indexSize), InternalTaggedEntry#(tagSize))) entryTabs <- replicateM(mkRWBramCoreUGLoaded);
-    Vector#(SupSize, RWBramCore#(Bit#(indexSize), UsefulCtr)) usefulTabs <- replicateM(mkRWBramCoreUGLoaded);
+    `ifdef DEBUG_TAGETEST
+    Vector#(SupSize, RWBramCore#(Bit#(indexSize), InternalTaggedEntry#(tagSize))) entryTabs <- replicateM(mkRWBramCoreUGLoaded(regInitTaggedTableFilename));
+    Vector#(SupSize, RWBramCore#(Bit#(indexSize), UsefulCtr)) usefulTabs <- replicateM(mkRWBramCoreUGLoaded(regInitTaggedTableFilename));
+    `else
+    Vector#(SupSize, RWBramCore#(Bit#(indexSize), InternalTaggedEntry#(tagSize))) entryTabs <- replicateM(mkRWBramCoreUG);
+    Vector#(SupSize, RWBramCore#(Bit#(indexSize), UsefulCtr)) usefulTabs <- replicateM(mkRWBramCoreUG);
+    `endif
 
     Vector#(SupSize, TaggedTableRead#(tagSize, indexSize)) taggedTableReadIfc;
 //    Reg#(Maybe#(Bit#(indexSize))) decrementReadFrom <- mkDReg(tagged Invalid);

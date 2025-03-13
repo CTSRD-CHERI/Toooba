@@ -31,10 +31,10 @@ interface RWBramCore#(type addrT, type dataT);
     method Action deqRdResp;
 endinterface
 
-module mkRWBramCoreUGLoaded(RWBramCore#(addrT, dataT)) provisos(
+module mkRWBramCoreUGLoaded#(String fileName)(RWBramCore#(addrT, dataT)) provisos(
     Bits#(addrT, addrSz), Bits#(dataT, dataSz)
 );
-    BRAM_DUAL_PORT#(addrT, dataT) bram <- mkBRAMCore2(valueOf(TExp#(addrSz)), False);
+BRAM_DUAL_PORT#(addrT, dataT) bram <- mkBRAMCore2Load(valueOf(TExp#(addrSz)), False, fileName, False);
     BRAM_PORT#(addrT, dataT) wrPort = bram.a;
     BRAM_PORT#(addrT, dataT) rdPort = bram.b;
 

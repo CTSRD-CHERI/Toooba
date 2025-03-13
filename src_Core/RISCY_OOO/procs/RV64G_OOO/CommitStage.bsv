@@ -41,6 +41,8 @@ import CsrFile::*;
 import StoreBuffer::*;
 import VerificationPacket::*;
 import RenameDebugIF::*;
+import BrPred::*;
+import DirPredictor::*;
 
 import Cur_Cycle :: *;
 
@@ -96,6 +98,7 @@ interface CommitInput;
     // redirect
     method Action killAll;
     method Action redirectPc(Addr trap_pc);
+    method Action recover_spec(DirPredSpecInfo specInfo);
     method Action setFetchWaitRedirect;
 `ifdef INCLUDE_GDB_CONTROL
     method Action setFetchWaitFlush;
@@ -146,6 +149,7 @@ typedef struct {
     Addr pc;
     Addr addr;
     Trap trap;
+    DirPredSpecInfo spec_info;
     Bit #(32) orig_inst;
 } CommitTrap deriving(Bits, Eq, FShow);
 
@@ -395,6 +399,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
     Bool pauseCommit = isValid(commitTrap) || inIfc.pauseCommit;
 
     FIFO#(Addr) redirectQ <- mkFIFO;
+    FIFO#(DirPredSpecInfo) specRecoverQ <- mkFIFO;
 
     // maintain system consistency when system state (CSR) changes or for security
     function Action makeSystemConsistent(Bool flushTlb,
@@ -547,6 +552,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
             trap: trap,
             pc: x.pc,
             addr: vaddr,
+            spec_info: x.spec_info,
 	    orig_inst: x.orig_inst
 	});
         commitTrap <= commitTrap_val;
@@ -558,7 +564,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 	   $display ("instret:%0d  PC:0x%0h  instr:0x%08h", rg_serial_num, x.pc, x.orig_inst,
 		     "  iType:", fshow (x.iType), "    [doCommitTrap]");
 	end
-        if (verbose) begin
+        if (True) begin
 	   $display ("CommitStage.doCommitTrap_flush: deq_data:   ", fshow (x));
 	   $display ("CommitStage.doCommitTrap_flush: commitTrap: ", fshow (commitTrap_val));
 	end
@@ -652,6 +658,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
          // trap handling & redirect
          let trap_updates <- csrf.trap(trap.trap, trap.pc, trap.addr, trap.orig_inst);
          redirectQ.enq(trap_updates.new_pc);
+         specRecoverQ.enq(trap.spec_info);
 
 `ifdef INCLUDE_TANDEM_VERIF
        fa_to_TV (way0, rg_serial_num,
@@ -687,6 +694,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         // kill everything, redirect, and increment epoch
         inIfc.killAll;
         redirectQ.enq(x.pc);
+        specRecoverQ.enq(x.spec_info);
         inIfc.incrementEpoch;
 
         // the killed Ld should have claimed phy reg, we should not commit it;
@@ -724,7 +732,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         let x = rob.deqPort[0].deq_data;
 
         if(verbose) $display("[doCommitSystemInst] ", fshow(x));
-        if (verbosity >= 1) begin
+        if (verbosity >= 0) begin
 	   $display("instret:%0d  PC:0x%0h  instr:0x%08h", rg_serial_num, x.pc, x.orig_inst,
 		    "   iType:", fshow (x.iType), "    [doCommitSystemInst]");
 	end
@@ -790,6 +798,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 `endif
         end
         redirectQ.enq(next_pc);
+        specRecoverQ.enq(x.spec_info);
 
 `ifdef INCLUDE_TANDEM_VERIF
         fa_to_TV (way0, rg_serial_num,
@@ -1109,7 +1118,9 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
 
     rule pass_redirect;
         inIfc.redirectPc(redirectQ.first);
+        inIfc.recover_spec(specRecoverQ.first);
         redirectQ.deq;
+        specRecoverQ.deq;
     endrule
 
    // ================================================================

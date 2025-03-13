@@ -103,7 +103,7 @@ interface FetchStage;
     // performance
     interface Perf#(DecStagePerfType) perf;
 `ifdef PERFORMANCE_MONITORING
-    method Bool redirect_evt;
+    method FetchEvents events;
 `endif
 endinterface
 
@@ -378,6 +378,7 @@ module mkFetchStage(FetchStage);
 `endif
 `ifdef PERFORMANCE_MONITORING
     Reg#(Bool) redirect_evt_reg <- mkDReg(False);
+    Reg#(Bool) early_redirect_evt_reg <- mkDReg(False);
 `endif
 
     rule updatePcInBtb;
@@ -739,9 +740,7 @@ module mkFetchStage(FetchStage);
                 DirPredSpecInfo dir_spec = in.recoverInfo;
 
                 let last_x16_pc = pc + ((in.inst_kind == Inst_32b) ? 2 : 0);
-                // Ridiculous, if I put these worthless two lines inside the next if statement compilation fails. But is fine for correctness thanks to decodeBrPred
-                //Bit#(1) took <- dummy(1);
-                //dir_pred.taken = unpack(took);
+                dir_pred.taken = True;
 
                 if(in.predicted_branch) begin
                     let recieved <- dirPred.pred[i].pred; 
@@ -902,6 +901,9 @@ module mkFetchStage(FetchStage);
       // update PC and epoch
       if(redirectPc matches tagged Valid .rp) begin
          pc_reg[pc_decode_port] <= rp;
+`ifdef PERFORMANCE_MONITORING
+         early_redirect_evt_reg <= True;
+`endif
       end
       decode_epoch[0] <= decode_epoch_local;
       // send training data for next addr pred
@@ -920,6 +922,7 @@ module mkFetchStage(FetchStage);
       end
 
       //dirPred.confirmPred(branchResults, trueBranchCount);
+
 `ifdef PERF_COUNT
       // performance counter: check whether redirect happens
       if(redirectInst matches tagged Valid .iType &&& doStats) begin
@@ -1106,6 +1109,6 @@ module mkFetchStage(FetchStage);
     endinterface
 
 `ifdef PERFORMANCE_MONITORING
-    method Bool redirect_evt = redirect_evt_reg._read;
+    method FetchEvents events = FetchEvents{evt_REDIRECT: redirect_evt_reg, evt_EARLY_REDIRECT: early_redirect_evt_reg, branch_evts: dirPred.events};
 `endif
 endmodule
