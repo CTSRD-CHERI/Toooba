@@ -202,12 +202,12 @@ def main (argv = None):
     # Create a TAP file to output individual test results in TAP format
     tap_out = open("../isa_test_report.tap", "w")
     tap_out.write("1.." + str(n_tests) + "\n")
-    tap_out.flush()
+    tap_out.close()
 
     # Create n workers
     sys.stdout.write ("Creating {0} workers (sub-processes)\n".format (n_workers))
     workers        = [multiprocessing.Process (target = do_worker,
-                                               args = (w, args_dict, tap_out))
+                                               args = (w, args_dict))
                       for w in range (n_workers)]
 
     # Start the workers
@@ -227,9 +227,6 @@ def main (argv = None):
                               .format (w, n_e, n_p))
             num_executed = num_executed + n_e
             num_passed   = num_passed   + n_p
-
-    # Close tap_out file
-    tap_out.close()
 
     # Write final statistics
     sys.stdout.write ("Total tests: {0} tests\n".format (n_tests))
@@ -335,7 +332,7 @@ def traverse (fn_filter_dir, fn_filter_regular_file, level, path):
 # ================================================================
 # For each ELF file, execute it in the RISC-V simulator
 
-def do_worker (worker_num, args_dict, tap_out):
+def do_worker (worker_num, args_dict):
     tmpdir = "./worker_" + "{0}".format (worker_num)
     if not os.path.exists (tmpdir):
         os.mkdir (tmpdir)
@@ -362,7 +359,6 @@ def do_worker (worker_num, args_dict, tap_out):
         if my_index >= n_tests:
             # All done
             with results.get_lock():
-                tap_out.flush()
                 results [2 * worker_num]     = num_executed
                 results [2 * worker_num + 1] = num_passed
             return
@@ -386,7 +382,10 @@ def do_worker (worker_num, args_dict, tap_out):
                                       num_passed,
                                       num_executed - num_passed))
         sys.stdout.write (message)
+         # Create a TAP file to output individual test result in TAP format
+        tap_out = open("../isa_test_report.tap", "a+")
         tap_out.write(("ok" if passed else "not ok") + " " + str(my_index + 1) + " - " + filenames[my_index] + "\n")
+        tap_out.close()
 
 # ================================================================
 # For each ELF file, execute it in the RISC-V simulator
