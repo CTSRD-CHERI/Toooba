@@ -1085,8 +1085,8 @@ typedef struct {
    SupCnt evt_REDIRECT;
    SupCnt evt_TRAP;
    SupCnt evt_BRANCH;
-   SupCnt evt_JAL;
-   SupCnt evt_JALR;
+   SupCnt evt_BRANCH_REDIRECT;
+   SupCnt evt_JUMP_REDIRECT;
    SupCnt evt_AUIPC;
    SupCnt evt_LOAD;
    SupCnt evt_STORE;
@@ -1119,8 +1119,8 @@ typedef struct {
    HpmRpt evt_REDIRECT;
    HpmRpt evt_TRAP;
    HpmRpt evt_BRANCH;
-   HpmRpt evt_JAL;
-   HpmRpt evt_JALR;
+   SupCnt evt_BRANCH_REDIRECT;
+   SupCnt evt_JUMP_REDIRECT;
    HpmRpt evt_AUIPC;
    HpmRpt evt_LOAD;
    HpmRpt evt_STORE;
@@ -1147,6 +1147,12 @@ typedef struct {
    HpmRpt evt_MEM_CAP_STORE_TAG_SET;
 } EventsCoreMem deriving (Bits, FShow); // Memory needs more space for reporting delays
 typedef TDiv#(SizeOf#(EventsCoreMem),Report_Width) EventsCoreMemElements;
+
+typedef struct {
+  Bool evt_REDIRECT;
+  Bool evt_JUMP_REDIRECT;
+  Bool evt_BRANCH_REDIRECT;
+} FetchEvents deriving (Bits, FShow);
 `endif
 
 function Bit#(outWidth) hash(Bit#(inWidth) in)
