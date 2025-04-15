@@ -504,7 +504,7 @@ module mkFetchStage(FetchStage);
 
         // Search the last few translations to look for a match.
         Maybe#(UInt#(TLog#(PageBuffSize))) m_buff_match_idx = findElem(Valid(getVpn(pc)), buffered_translation_virt_pc);
-        if (m_buff_match_idx matches tagged Valid .buff_match_idx) begin
+        if (m_buff_match_idx matches tagged Valid .buff_match_idx  &&& (!predInput.deqS[0].canDeq || isCurrentPredInput(predInput.deqS[0].first))) begin
             let next_fetch_pc = fromMaybe(pc + (2 * (zeroExtend(posLastSupX2) + 1)), pred_next_pc);
             let pc_idxs <- pcBlocks.insertAndReserve(truncateLSB(pc), truncateLSB(next_fetch_pc));
             PcIdx pc_idx = pc_idxs.inserted;
