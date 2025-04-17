@@ -632,6 +632,9 @@ module mkL2Tlb(L2Tlb::L2Tlb);
             // invalid pte -> fault
             pageFault("invalid page");
         end
+        else if(isMalformedPTE(pte.pteType, pte.pteUpperType)) begin
+            pageFault("malformed PTE");
+        end
 `ifdef SECURITY
         // TODO: raise page fault or access fault?
         else if((newPTBase & parmask) == parbase) begin

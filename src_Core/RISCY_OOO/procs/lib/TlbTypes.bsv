@@ -149,6 +149,29 @@ function Bool isLeafPTE(PTEType t);
     return t.executable || t.readable || t.writable;
 endfunction
 
+function Bool isMalformedPTE(PTEType t, PTEUpperType ut);
+    Bool fault = False;
+    // check PTE itself is well-formed or not
+    if(ut.reserved_hi != 0 || ut.reserved_lo != 0) begin
+        fault = True; // reserved-zero bits are set
+    end
+    if(t.writable && !t.readable) begin
+        fault = True; // page writable but not readable
+    end
+    if(!t.readable && !t.executable) begin
+        // PTE is non-leaf
+        if (t.user || t.dirty || t.accessed) begin
+            fault = True; // These bits are reserved for non-leaves
+        end
+`ifdef ZCHERI
+        if (ut.cw || ut.crg) begin
+            fault = True; // These bits are reserved for non-leaves
+        end
+`endif
+    end
+    return fault;
+endfunction
+
 function Addr translate(Addr addr, Ppn ppn, PageWalkLevel level);
     return zeroExtend(case (level)
         0: {ppn, getPageOffset(addr)}; // 4KB page
@@ -212,9 +235,8 @@ function TlbPermissionCheck hasVMPermission(
         fault = True;
     end
 
-    // check PTE itself is well-formed or not
-    if(pte_type.writable && !pte_type.readable) begin
-        fault = True; // page writable but not readable
+    if(isMalformedPTE(pte_type, pte_upper_type)) begin
+        fault = True;
     end
     if(!isPpnAligned(ppn, level)) begin
         fault = True; // unaligned super page
