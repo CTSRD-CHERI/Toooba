@@ -473,7 +473,7 @@ function Reg#(Bit#(n)) concatReg23(
   return concatReg(asReg(r1),asReg(r2),asReg(r3),asReg(r4),asReg(r5),asReg(r6),asReg(r7),asReg(r8),asReg(r9),asReg(r10),asReg(r11),asReg(r12),asReg(r13),asReg(r14),asReg(r15),asReg(r16),asReg(r17),asReg(r18),asReg(r19),asReg(r20),asReg(r21),asReg(r22),asReg(r23));
 endfunction
 
-function Reg#(Bit#(n)) concatReg24(
+function Reg#(Bit#(n)) concatReg26(
       Reg#(Bit#(n1)) r1,
       Reg#(Bit#(n2)) r2,
       Reg#(Bit#(n3)) r3,
@@ -497,10 +497,12 @@ function Reg#(Bit#(n)) concatReg24(
       Reg#(Bit#(n21)) r21,
       Reg#(Bit#(n22)) r22,
       Reg#(Bit#(n23)) r23,
-      Reg#(Bit#(n24)) r24
+      Reg#(Bit#(n24)) r24,
+      Reg#(Bit#(n25)) r25,
+      Reg#(Bit#(n26)) r26
     ) provisos (
-      Add#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(n1,n2),n3),n4),n5),n6),n7),n8),n9),n10),n11),n12),n13),n14),n15),n16),n17),n18),n19),n20),n21),n22),n23),n24,n)
+      Add#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(TAdd#(n1,n2),n3),n4),n5),n6),n7),n8),n9),n10),n11),n12),n13),n14),n15),n16),n17),n18),n19),n20),n21),n22),n23),n24),n25),n26,n)
     );
-  return concatReg(asReg(r1),asReg(r2),asReg(r3),asReg(r4),asReg(r5),asReg(r6),asReg(r7),asReg(r8),asReg(r9),asReg(r10),asReg(r11),asReg(r12),asReg(r13),asReg(r14),asReg(r15),asReg(r16),asReg(r17),asReg(r18),asReg(r19),asReg(r20),asReg(r21),asReg(r22),asReg(r23),asReg(r24));
+  return concatReg(asReg(r1),asReg(r2),asReg(r3),asReg(r4),asReg(r5),asReg(r6),asReg(r7),asReg(r8),asReg(r9),asReg(r10),asReg(r11),asReg(r12),asReg(r13),asReg(r14),asReg(r15),asReg(r16),asReg(r17),asReg(r18),asReg(r19),asReg(r20),asReg(r21),asReg(r22),asReg(r23),asReg(r24),asReg(r25),asReg(r26));
 endfunction
 

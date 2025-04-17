@@ -398,6 +398,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
 
     // Machine level CSRs
     // mstatus
+    Reg#(Bit#(1)) ucrg_reg  <- mkCsrReg(0);
     Reg#(Bit#(2)) xs_reg   <- mkReadOnlyReg(0); // XXX no extension
     Reg#(Bit#(2)) fs_reg   <- (isa.f || isa.d) ? mkCsrReg(2'b00) : mkReadOnlyReg(0);
     Reg#(Bit#(1)) sd_reg   =  readOnlyReg(
@@ -435,8 +436,9 @@ module mkCsrFile #(Data hartid)(CsrFile);
     prev_ie_vec[prvU] <- mkCsrReg(0);
     prev_ie_vec[prvS] <- mkCsrReg(0);
     prev_ie_vec[prvM] <- mkCsrReg(0);
-    Reg#(Data) mstatus_csr = concatReg24(
-        sd_reg, readOnlyReg(27'b0), sxl_reg, uxl_reg, readOnlyReg(9'b0),
+    Reg#(Data) mstatus_csr = concatReg26(
+        sd_reg, readOnlyReg(1'b0), ucrg_reg, readOnlyReg(25'b0),
+        sxl_reg, uxl_reg, readOnlyReg(9'b0),
         tsr_reg, tw_reg, tvm_reg, mxr_reg, sum_reg, mprv_reg, xs_reg, fs_reg,
         mpp_reg, readOnlyReg(2'b0), spp_reg,
         prev_ie_vec[prvM], readOnlyReg(1'b0),
@@ -444,7 +446,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
         ie_vec[prvM],      readOnlyReg(1'b0),
         ie_vec[prvS],      ie_vec[prvU]
     );
-    function Data fn_mstatus_val (Bit #(2) sxl_val, Bit #(2) uxl_val,
+    function Data fn_mstatus_val (Bit #(2) sxl_val, Bit #(2) uxl_val, Bit #(1) ucrg,
                                   Bit #(1) tsr_val, Bit #(1) tw_val,  Bit #(1) tvm_val,
                                   Bit #(1) mxr_val, Bit #(1) sum_val, Bit #(1) mprv_val,
                                   Bit #(2) xs_val,  Bit #(2) fs_val,
@@ -453,8 +455,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
                                   Bit #(1) prev_ie_vec_prvS_val, Bit #(1) prev_ie_vec_prvU_val,
                                   Bit #(1) ie_vec_prvM_val,
                                   Bit #(1) ie_vec_prvS_val,      Bit #(1) ie_vec_prvU_val);
-       return {fn_sd_val (xs_val, fs_val),
-               27'b0, sxl_val, uxl_val, 9'b0,
+       return {fn_sd_val (xs_val, fs_val), 1'b0, ucrg,
+               25'b0, sxl_val, uxl_val, 9'b0,
                tsr_val, tw_val, tvm_val, mxr_val, sum_val, mprv_val, xs_val, fs_val,
                mpp_val, 2'b0, spp_val,
                prev_ie_vec_prvM_val, 1'b0,
@@ -593,14 +595,15 @@ module mkCsrFile #(Data hartid)(CsrFile);
 
     // Supervisor level CSRs
     // sstatus: restricted view of mstatus
-    Reg#(Data) sstatus_csr = concatReg17(
-        sd_reg, readOnlyReg(29'b0), uxl_reg, readOnlyReg(12'b0),
+    Reg#(Data) sstatus_csr = concatReg19(
+        sd_reg, readOnlyReg(1'b0), ucrg_reg, readOnlyReg(27'b0),
+        uxl_reg, readOnlyReg(12'b0),
         mxr_reg, sum_reg, readOnlyReg(1'b0), xs_reg, fs_reg,
         readOnlyReg(4'b0), spp_reg,
         readOnlyReg(2'b0), prev_ie_vec[prvS], prev_ie_vec[prvU],
         readOnlyReg(2'b0), ie_vec[prvS], ie_vec[prvU]
     );
-    function Data fn_sstatus_val (Bit #(2) uxl_val,
+    function Data fn_sstatus_val (Bit #(2) uxl_val, Bit #(1) ucrg_val,
                                   Bit #(1) mxr_val, Bit #(1) sum_val,
                                   Bit #(2) xs_val,  Bit #(2) fs_val,
                                   Bit #(1) spp_val,
@@ -608,8 +611,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
                                   Bit #(1) prev_ie_vec_prvU_val,
                                   Bit #(1) ie_vec_prvS_val,
                                   Bit #(1) ie_vec_prvU_val);
-       return {fn_sd_val (xs_val, fs_val),
-               27'b0, 2'b0, uxl_val, 12'b0,
+       return {fn_sd_val (xs_val, fs_val), 1'b0, ucrg_val,
+               25'b0, 2'b0, uxl_val, 12'b0,
                mxr_val, sum_val, 1'b0, xs_val, fs_val,
                4'b0, spp_val,
                2'b0,
@@ -992,6 +995,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrMHARTID:   hartid;
             csrAddrMSTATUS:   fn_mstatus_val (getXLBits,    // sxl
                                           getXLBits,    // uxl
+                                          x [61],       // ucrg
                                           x [22],       // tsr
                                           x [21],       // tw
                                           x [20],       // tvm
@@ -1019,6 +1023,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
 
             // Supervisor level CSRs
             csrAddrSSTATUS:   fn_sstatus_val (getXLBits,    // uxl
+                                          x [61],       // ucrg
                                           x [19],       // mxr
                                           x [18],       // sum
                                           2'b0,         // xs
@@ -1243,7 +1248,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             stval_csr <= trap_val;
             stval2_csr <= trap_val2;
             // return next pc
-            Data sstatus_val = fn_sstatus_val (uxl_reg,
+            Data sstatus_val = fn_sstatus_val (uxl_reg, ucrg_reg,
                                                mxr_reg, sum_reg,
                                                xs_reg,  fs_reg,
                                                /* spp_reg */ prv_reg [0],
@@ -1275,7 +1280,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             mtval_csr <= trap_val;
             mtval2_csr <= trap_val2;
             // return next pc
-            Data mstatus_val = fn_mstatus_val (sxl_reg, uxl_reg,
+            Data mstatus_val = fn_mstatus_val (sxl_reg, uxl_reg, ucrg_reg,
                                                tsr_reg, tw_reg,  tvm_reg,
                                                mxr_reg, sum_reg, mprv_reg,
                                                xs_reg,  fs_reg,
@@ -1306,7 +1311,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
         ie_vec[prvM] <= prev_ie_vec[prvM];
         prev_ie_vec[prvM] <= 1;
 
-        Data mstatus_val = fn_mstatus_val(sxl_reg, uxl_reg,
+        Data mstatus_val = fn_mstatus_val(sxl_reg, uxl_reg, ucrg_reg,
                                           tsr_reg, tw_reg,  tvm_reg,
                                           mxr_reg, sum_reg, mprv_reg,
                                           xs_reg,  fs_reg,
@@ -1333,7 +1338,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
         prev_ie_vec[prvS] <= 1;
 
         // For Tandem Verification, we return the full underlying MSTATUS register
-        Data mstatus_val = fn_mstatus_val(sxl_reg, uxl_reg,
+        Data mstatus_val = fn_mstatus_val(sxl_reg, uxl_reg, ucrg_reg,
                                           tsr_reg, tw_reg,  tvm_reg,
                                           mxr_reg, sum_reg, mprv_reg,
                                           xs_reg,  fs_reg,
@@ -1365,8 +1370,13 @@ module mkCsrFile #(Data hartid)(CsrFile);
             exeReadable: mxr_reg == 1,
             userAccessibleByS: sum_reg == 1,
             basePPN: ppn_reg,
+`ifdef ZCHERI
+            globalCapLoadGenU: ucrg_reg,
+            globalCapLoadGenS: 0
+`else
             globalCapLoadGenU: global_cap_load_gen_u_reg,
             globalCapLoadGenS: global_cap_load_gen_s_reg
+`endif
 `ifdef SECURITY
             , sanctum_evbase:   mevbase_csr,
             sanctum_evmask:     mevmask_csr,
@@ -1394,8 +1404,13 @@ module mkCsrFile #(Data hartid)(CsrFile);
             exeReadable: mxr_reg == 1,
             userAccessibleByS: sum_reg == 1,
             basePPN: ppn_reg,
+`ifdef ZCHERI
+            globalCapLoadGenU: ucrg_reg,
+            globalCapLoadGenS: 0
+`else
             globalCapLoadGenU: global_cap_load_gen_u_reg,
             globalCapLoadGenS: global_cap_load_gen_s_reg
+`endif
 `ifdef SECURITY
             , sanctum_evbase:   mevbase_csr,
             sanctum_evmask:     mevmask_csr,
