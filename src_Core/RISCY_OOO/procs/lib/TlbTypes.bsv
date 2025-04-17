@@ -68,16 +68,23 @@ typedef struct {
 } PTEType deriving (Bits, Eq, FShow);
 
 typedef struct {
+`ifdef ZCHERI
+    Bit #(3) reserved_hi;
+    Bool cw;
+    Bool crg;
+`else
+    Bit #(0) reserved_hi;
     Bool cap_writable;
     Bool cap_readable;
     Bool cap_dirty;
     Bool cap_read_mod;
     Bool cap_read_gen;
+`endif
+    Bit#(5) reserved_lo;
 } PTEUpperType deriving (Bits, Eq, FShow);
 
 typedef struct {
     PTEUpperType pteUpperType;
-    Bit#(5) reserved;
     Ppn ppn;
     Bit#(2) reserved_sw; // reserved for supervisor software
     PTEType pteType;
@@ -212,11 +219,13 @@ function TlbPermissionCheck hasVMPermission(
     if(!isPpnAligned(ppn, level)) begin
         fault = True; // unaligned super page
     end
+`ifndef ZCHERI
     if ((!pte_upper_type.cap_readable && pte_upper_type.cap_read_gen) ||
         (pte_upper_type.cap_readable && !pte_upper_type.cap_read_mod &&
         pte_upper_type.cap_read_gen)) begin
         fault = True;
     end
+`endif
 
     // check permission related to user page
     if(pte_type.user) begin
@@ -254,14 +263,22 @@ function TlbPermissionCheck hasVMPermission(
             end
             if (potentialCapLoad) begin
                 if (!fault) excCode = excLoadCapPageFault;
+`ifndef ZCHERI
                 // load traps if page not cap readable and using cap_read_mod set
                 if (!pte_upper_type.cap_readable && pte_upper_type.cap_read_mod) begin
                     fault = True;
                 end
+`endif
                 // perform generation check
+`ifdef ZCHERI
+                if ((pte_type.user && pte_upper_type.cw)
+                       && (vm_info.globalCapLoadGenU != pack(pte_upper_type.crg)))
+`else
                 if (pte_upper_type.cap_read_mod
                     && ((pte_type.user ? vm_info.globalCapLoadGenU : vm_info.globalCapLoadGenS)
-                       != pack(pte_upper_type.cap_read_gen))) begin
+                       != pack(pte_upper_type.cap_read_gen)))
+`endif
+                begin
                     fault = True;
                 end
             end
@@ -272,7 +289,13 @@ function TlbPermissionCheck hasVMPermission(
             if(!(pte_type.readable && pte_type.writable)) begin
                 fault = True;
             end
-            else if(capStore && !pte_upper_type.cap_writable) begin
+            else
+`ifdef ZCHERI
+            if(capStore && !pte_upper_type.cw)
+`else
+            if(capStore && !pte_upper_type.cap_writable)
+`endif
+            begin
                 if (!fault) excCode = excStoreCapPageFault;
                 fault = True;
             end
@@ -282,14 +305,21 @@ function TlbPermissionCheck hasVMPermission(
     TlbPermissionCheck ret = TlbPermissionCheck {
         allowed:  !fault,
         excCode:  excCode,
-        allowCap: pte_upper_type.cap_readable};
+`ifdef ZCHERI
+        allowCap: pte_upper_type.cw
+`else
+        allowCap: pte_upper_type.cap_readable
+`endif
+    };
 
     if (!fault) begin
+`ifndef ZCHERI
         // check if accessed or dirty bit needs to be set
         if(capStore && access == DataStore && !pte_upper_type.cap_dirty) begin
             ret.allowed = False;
             ret.excCode = excStoreCapPageFault;
         end
+`endif
         if(access == DataStore && !pte_type.dirty) begin
             ret.allowed = False;
             ret.excCode = excStorePageFault;
