@@ -532,6 +532,9 @@ module mkCsrFile #(Data hartid)(CsrFile);
 
     // mtval (mbadaddr in spike)
     Reg#(Data) mtval_csr <- mkCsrReg(0);
+    Reg#(Bit#(4)) mtval2_type <- mkCsrReg(0);
+    Reg#(Bit#(4)) mtval2_cause <- mkCsrReg(0);
+    Reg#(Data) mtval2_csr = concatReg4 (readOnlyReg(44'b0), mtval2_type, readOnlyReg(12'b0), mtval2_cause);
     // Capability cause register
     Reg#(Data) mccsr_csr <- mkReadOnlyReg(64'b11);
     Reg#(Data) mseccfg_csr <- mkReadOnlyReg(64'b1000);
@@ -647,6 +650,9 @@ module mkCsrFile #(Data hartid)(CsrFile);
 
     // stval (sbadaddr in spike)
     Reg#(Data) stval_csr <- mkCsrReg(0);
+    Reg#(Bit#(4)) stval2_type <- mkCsrReg(0);
+    Reg#(Bit#(4)) stval2_cause <- mkCsrReg(0);
+    Reg#(Data) stval2_csr = concatReg4 (readOnlyReg(44'b0), stval2_type, readOnlyReg(12'b0), stval2_cause);
     // Capability cause register
     Reg#(Bit#(1)) global_cap_load_gen_s_reg <- mkCsrReg(0);
     Reg#(Bit#(1)) global_cap_load_gen_u_reg <- mkCsrReg(0);
@@ -881,6 +887,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrSEPC:       scrToCsr(sepcc_reg[1]); // Only accessed by debugger. CPU accesses decoded into cspecialrw
             csrAddrSCAUSE:     scause_csr;
             csrAddrSTVAL:      stval_csr;
+            csrAddrSTVAL2:     stval2_csr;
             csrAddrSIP:        sip_csr;
             csrAddrSATP:       satp_csr;
             csrAddrSCCSR:      sccsr_csr;
@@ -896,6 +903,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrMEPC:       scrToCsr(mepcc_reg[1]); // Only accessed by debugger. CPU accesses decoded into cspecialrw
             csrAddrMCAUSE:     mcause_csr;
             csrAddrMTVAL:      mtval_csr;
+            csrAddrMTVAL2:     mtval2_csr;
             csrAddrMIP:        mip_csr;
             csrAddrMCYCLE:     mcycle_csr;
             csrAddrMINSTRET:   minstret_csr;
@@ -1154,6 +1162,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
         Bit#(1) cause_interrupt = 0;
         Cause cause_code = 0;
         Data trap_val = 0;
+        Data trap_val2 = 0;
         case(t) matches
             tagged Exception .e: begin
                 cause_code = pack(e);
@@ -1188,7 +1197,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
                         default: ~0; // Shouldn't happen, but return reserved value
                     endcase;
                 endfunction
-                trap_val = zeroExtend({pack(ce.cheri_check_type), 12'b0, toZCheriCause(ce.cheri_exc_code)});
+                trap_val = addr;
+                trap_val2 = zeroExtend({pack(ce.cheri_check_type), 12'b0, toZCheriCause(ce.cheri_exc_code)});
 `else
                 trap_val = zeroExtend({pack(ce.cheri_exc_reg), pack(ce.cheri_exc_code)});
 `endif
@@ -1231,6 +1241,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             scause_interrupt_reg <= cause_interrupt;
             scause_code_reg <= cause_code;
             stval_csr <= trap_val;
+            stval2_csr <= trap_val2;
             // return next pc
             Data sstatus_val = fn_sstatus_val (uxl_reg,
                                                mxr_reg, sum_reg,
@@ -1262,6 +1273,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             mcause_interrupt_reg <= cause_interrupt;
             mcause_code_reg <= cause_code;
             mtval_csr <= trap_val;
+            mtval2_csr <= trap_val2;
             // return next pc
             Data mstatus_val = fn_mstatus_val (sxl_reg, uxl_reg,
                                                tsr_reg, tw_reg,  tvm_reg,
