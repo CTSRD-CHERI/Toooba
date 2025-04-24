@@ -771,7 +771,7 @@ module mkFetchStage(FetchStage);
         waitForRedirect[0] <= True;
     endmethod
     method Action redirect(Addr new_pc);
-        if (verbose) $display("Redirect: newpc %h, old f_main_epoch %d, new f_main_epoch %d",new_pc,f_main_epoch,f_main_epoch+1);
+        $display("Redirect: newpc %h",new_pc);
         pc_reg[pc_redirect_port] <= new_pc;
         f_main_epoch <= (f_main_epoch == fromInteger(valueOf(NumEpochs)-1)) ? 0 : f_main_epoch + 1;
         // redirect comes, stop stalling for redirect

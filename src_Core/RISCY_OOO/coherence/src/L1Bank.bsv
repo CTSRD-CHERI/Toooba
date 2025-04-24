@@ -254,16 +254,18 @@ action
         endcase
     end
 `endif
-`ifdef PERFORMANCE_MONITORING
+//`ifdef PERFORMANCE_MONITORING
     EventsCache events = unpack (0);
     case(op)
         Ld: begin
             events.evt_LD_MISS_LAT = saturating_truncate(lat);
             events.evt_LD_MISS = 1;
+            $display("LD_MISS LATENCY:%d", lat);
         end
         St: begin
             events.evt_ST_MISS_LAT = saturating_truncate(lat);
             events.evt_ST_MISS = 1;
+            $display("ST_MISS LATENCY:%d", lat);
         end
         Lr, Sc, Amo: begin
             events.evt_AMO_MISS_LAT = saturating_truncate(lat);
@@ -271,7 +273,7 @@ action
         end
     endcase
     perf_events[1] <= events;
-`endif
+//`endif
     noAction;
 endaction
 endfunction
