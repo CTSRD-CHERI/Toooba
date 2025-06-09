@@ -295,7 +295,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
             tagged AndPerm                :
                 setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
             tagged SetFlags               :
-                setIntMode(a_mut, getAddr(b)==1); // XXX Sense swapped for legacy SetFlags
+                setIntMode(a_mut, getAddr(b)!=0); // XXX Sense swapped for legacy SetFlags
 `ifndef ZCHERI
             tagged FromPtr                :
                 (getAddr(a) == 0 ? nullCap : setAddr(b_mut, getAddr(a)).value);
