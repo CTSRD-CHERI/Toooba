@@ -319,6 +319,8 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                tagged TestSubset              : begin
                    // TODO will be bad for timing. Would like to reuse bounds check
                    zeroExtend(pack(   (isValidCap(b) == isValidCap(a))
+                                   && isDerivable(a)
+                                   && isDerivable(b)
                                    && ((getPerms(a) & getPerms(b)) == getPerms(a))
                                    && (getBase(a) >= getBase(b))
                                    && (getTop(a) <= getTop(b))));
