@@ -273,7 +273,7 @@ function Maybe#(RVFI_DII_Execution#(DataSz,DataSz)) genRVFI(ToReorderBuffer rot,
         rvfi_rs2_addr: rot.orig_inst[24:20],
         rvfi_rs1_data: ?,
         rvfi_rs2_data: ?,
-        rvfi_pc_rdata: getOffset(pipePc),
+        rvfi_pc_rdata: getAddr(pipePc),
         rvfi_pc_wdata: next_pc,
         rvfi_mem_wdata: wdata,
         rvfi_rd_addr: rd,
@@ -994,7 +994,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         Rvfi_Traces rvfis = replicate(tagged Invalid);
         x.ppc_vaddr_csrData = tagged PPC next_pc;
         CapPipe cp = cast(next_pc);
-        rvfis[0] = genRVFI(x, traceCnt, getTSB(), getOffset(cp), inIfc.lookupPAddr[0].sub(x.lsqTag));
+        rvfis[0] = genRVFI(x, traceCnt, getTSB(), getAddr(cp), inIfc.lookupPAddr[0].sub(x.lsqTag));
         rvfiQ.enq(rvfis);
         traceCnt <= traceCnt + 1;
 `endif
