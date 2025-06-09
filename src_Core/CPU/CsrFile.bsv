@@ -1173,7 +1173,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
                 cause_code = pack(e);
                 trap_val = (case(e)
                     excIllegalInst: zeroExtend (orig_inst);
-                    excInstAddrMisaligned, excBreakpoint: return getOffset(pcc); // TODO do we want getAddr?
+                    excInstAddrMisaligned, excBreakpoint: return getAddr(pcc);
 
                     excInstAccessFault, excInstPageFault,
                     excLoadAddrMisaligned, excLoadAccessFault,
