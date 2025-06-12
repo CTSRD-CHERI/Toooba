@@ -16,3 +16,6 @@
 [submodule "libs/WindCoreInterface"]
 	path = libs/WindCoreInterface
 	url = https://github.com/CTSRD-CHERI/WindCoreInterface.git
+[submodule "Tests/benchmarks"]
+	path = Tests/benchmarks
+	url = https://github.com/CTSRD-CHERI/toooba-sim-benchmarks.git

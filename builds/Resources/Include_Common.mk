@@ -25,6 +25,7 @@ help:
 	@echo ''
 	@echo '    make  test         Runs simulation executable on rv32ui-p-add or rv64ui-p-add'
 	@echo '    make  isa_tests    Runs simulation executable on all relevant standard RISC-V ISA tests'
+	@echo '    make  benchmarks   Runs simulation executable on a set of benchmarks'
 	@echo ''
 	@echo '    make  clean        Remove intermediate build-files unnecessary for execution'
 	@echo '    make  full_clean   Restore to pristine state (pre-building anything)'
@@ -95,6 +96,16 @@ isa_tests:
 	@echo "Running regressions on ISA tests; saving logs in Logs/"
 	$(REPO)/Tests/Run_regression.py  ./exe_HW_sim  $(REPO)  ./Logs  $(ARCH)
 	@echo "Finished running regressions; saved logs in Logs/"
+
+# ================================================================
+# Benchmarks
+
+.PHONY: benchmarks
+benchmarks:
+	@echo "Running benchmarks; saving logs in Logs/"
+	$(REPO)/Tests/Run_benchmarks.py  ./exe_HW_sim  $(REPO)  ./Logs
+	@echo "Finished running benchmarks"
+	$(REPO)/Tests/benchmarks/report_log.sh Logs/*.bin.log
 
 # ================================================================
 # Generate Bluespec CHERI tag controller source file

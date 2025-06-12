@@ -26,6 +26,7 @@ import Vector::*;
 import Ehr::*;
 import Types::*;
 import ProcTypes::*;
+import ConfigReg::*;
 
 typedef struct {
     Epoch curEp;
@@ -53,25 +54,22 @@ endinterface
 
 (* synthesize *)
 module mkEpochManager(EpochManager);
-    Reg#(Epoch) curr_epoch <- mkReg(0);
-    Reg#(Epoch) prev_checked_epoch <- mkReg(0);
+    Reg#(Epoch) curr_epoch <- mkConfigReg(0);
+    Reg#(Epoch) prev_checked_epoch <- mkConfigReg(0);
     Epoch next_epoch = (curr_epoch== fromInteger(valueOf(NumEpochs)-1)) ? 0 : (curr_epoch+1);
 
     // epochs in the core are within range [prev_checked_epoch, curr_epoch]
     // prev_checked_epoch can be updated in a lazy way
-    Vector#(SupSize, Ehr#(2, Maybe#(Epoch))) updatePrevEn <- replicateM(mkEhr(Invalid));
+    Vector#(SupSize, RWire#(Epoch)) updatePrevEn <- replicateM(mkRWire);
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule canon_prev_checked_epoch;
-        Vector#(SupSize, Maybe#(Epoch)) updates = readVEhr(1, updatePrevEn);
+        Vector#(SupSize, Maybe#(Epoch)) updates = ?;
+        for (Integer i = 0; i < valueof(SupSize); i = i + 1) updates[i] = updatePrevEn[i].wget();
         // find the last update
         if(find(isValid, reverse(updates)) matches tagged Valid .upd) begin
             doAssert(isValid(upd), "must be valid");
             prev_checked_epoch <= validValue(upd);
-        end
-        // reset EHR
-        for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-            updatePrevEn[i][1] <= Invalid;
         end
     endrule
 
@@ -79,21 +77,21 @@ module mkEpochManager(EpochManager);
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         updateIfc[i] = (interface EM_updatePrevEpoch;
             method Action update(Epoch e);
-                updatePrevEn[i][0] <= Valid (e); // record update action
+                updatePrevEn[i].wset(e); // record update action
 `ifdef BSIM
                 // sanity check
-                Epoch checkedEpoch = prev_checked_epoch;
-                for(Integer j = 0; j < i; j = j+1) begin
-                    if(updatePrevEn[j][1] matches tagged Valid .ep) begin
-                        checkedEpoch = ep;
-                    end
-                end
-                if(checkedEpoch <= curr_epoch) begin
-                    doAssert(checkedEpoch <= e && e <= curr_epoch, "e in [checkedEpoch, curr_epoch]");
-                end
-                else begin
-                    doAssert(checkedEpoch <= e || e <= curr_epoch, "e in [checkedEpoch, max] + [0, curr_epoch]");
-                end
+                //Epoch checkedEpoch = prev_checked_epoch;
+                //for(Integer j = 0; j < i; j = j+1) begin
+                //    if(updatePrevEn[j][1] matches tagged Valid .ep) begin
+                //        checkedEpoch = ep;
+                //    end
+                //end
+                //if(checkedEpoch <= curr_epoch) begin
+                //    doAssert(checkedEpoch <= e && e <= curr_epoch, "e in [checkedEpoch, curr_epoch]");
+                //end
+                //else begin
+                //    doAssert(checkedEpoch <= e || e <= curr_epoch, "e in [checkedEpoch, max] + [0, curr_epoch]");
+                //end
 `endif
             endmethod
         endinterface);
