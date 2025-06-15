@@ -538,7 +538,6 @@ module mkCsrFile #(Data hartid)(CsrFile);
     Reg#(Bit#(4)) mtval2_cause <- mkCsrReg(0);
     Reg#(Data) mtval2_csr = concatReg4 (readOnlyReg(44'b0), mtval2_type, readOnlyReg(12'b0), mtval2_cause);
     // Capability cause register
-    Reg#(Data) mccsr_csr <- mkReadOnlyReg(64'b11);
     Reg#(Data) mseccfg_csr <- mkReadOnlyReg(64'b1000);
     Reg#(Data) menvcfg_csr <- mkReadOnlyReg(64'h1 << 28);
     Reg#(Data) senvcfg_csr <- mkReadOnlyReg(64'h1 << 28);
@@ -659,7 +658,6 @@ module mkCsrFile #(Data hartid)(CsrFile);
     // Capability cause register
     Reg#(Bit#(1)) global_cap_load_gen_s_reg <- mkCsrReg(0);
     Reg#(Bit#(1)) global_cap_load_gen_u_reg <- mkCsrReg(0);
-    Reg#(Data) sccsr_csr = concatReg4 (readOnlyReg(60'b0), global_cap_load_gen_u_reg, global_cap_load_gen_s_reg, readOnlyReg(2'b11));
     // sip: restricted view of mip
     Reg#(Data) sip_csr = concatReg9(
         readOnlyReg(54'b0),
@@ -893,7 +891,6 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrSTVAL2:     stval2_csr;
             csrAddrSIP:        sip_csr;
             csrAddrSATP:       satp_csr;
-            csrAddrSCCSR:      sccsr_csr;
             // Machine CSRs
             csrAddrMSTATUS:    mstatus_csr;
             csrAddrMISA:       misa_csr;
@@ -914,7 +911,6 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrMARCHID:    marchid_csr;
             csrAddrMIMPID:     mimpid_csr;
             csrAddrMHARTID:    mhartid_csr;
-            csrAddrMCCSR:      mccsr_csr;
             csrAddrMSECCFG:    mseccfg_csr;
             csrAddrMENVCFG:    menvcfg_csr;
             csrAddrSENVCFG:    senvcfg_csr;

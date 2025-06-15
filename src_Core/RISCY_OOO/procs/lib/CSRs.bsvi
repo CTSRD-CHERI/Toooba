@@ -8,7 +8,6 @@
 // user non-standard CSRs (TODO)
 `CSR(TERMINATE,  12'h800) // terminate (used to exit Linux)
 `CSR(STATS,      12'h801) // turn on/off perf counters
-// `CSR(UCCSR,      12'h8c0)
 // supervisor standard CSRs
 `CSR(SSTATUS,    12'h100)
 // no user trap handler, so no se/ideleg
@@ -22,7 +21,6 @@
 `CSR(STVAL2,     12'h14B)
 `CSR(SIP,        12'h144)
 `CSR(SATP,       12'h180) // it's still called sptbr in spike
-`CSR(SCCSR,      12'h9c0)
 // machine standard CSRs
 `CSR(MSTATUS,    12'h300)
 `CSR(MISA,       12'h301)
@@ -136,7 +134,6 @@
 `CSR(MARCHID,    12'hf12)
 `CSR(MIMPID,     12'hf13)
 `CSR(MHARTID,    12'hf14)
-`CSR(MCCSR,      12'hbc0)
 `CSR(MSECCFG,    12'h747)
 `CSR(MENVCFG,    12'h30a)
 `CSR(SENVCFG,    12'h10a)
