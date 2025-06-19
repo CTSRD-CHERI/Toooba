@@ -468,13 +468,13 @@ module mkCsrFile #(Data hartid)(CsrFile);
     // misa
     Reg#(Data) misa_csr = readOnlyReg({getXLBits, 36'b0, getExtensionBits(isa)});
     // medeleg: some exceptions don't exist, fix corresponding bits to 0
-    Reg#(Bit#(3)) medeleg_28_26_reg <- mkCsrReg(0); // CHERI causes 0x1a-0x1c
+    Reg#(Bit#(1)) medeleg_28_reg <- mkCsrReg(0); // CHERI cause 0x1c
     Reg#(Bit#(1)) medeleg_15_reg <- mkCsrReg(0); // cause 15
     Reg#(Bit#(3)) medeleg_13_11_reg <- mkCsrReg(0); // case 13-11
     Reg#(Bit#(10)) medeleg_9_0_reg <- mkCsrReg(0); // cause 9-0
     Reg#(Data) medeleg_csr = concatReg8(
-        readOnlyReg(35'b0), medeleg_28_26_reg,
-        readOnlyReg(10'b0), medeleg_15_reg,
+        readOnlyReg(35'b0), medeleg_28_reg,
+        readOnlyReg(12'b0), medeleg_15_reg,
         readOnlyReg(1'b0), medeleg_13_11_reg,
         readOnlyReg(1'b0), medeleg_9_0_reg
     );
@@ -1174,8 +1174,11 @@ module mkCsrFile #(Data hartid)(CsrFile);
                     excInstAccessFault, excInstPageFault,
                     excLoadAddrMisaligned, excLoadAccessFault,
                     excStoreAddrMisaligned, excStoreAccessFault,
-                    excLoadPageFault, excStorePageFault,
-                    excLoadCapPageFault, excStoreCapPageFault: return addr;
+`ifndef ZCHERI
+                    excLoadCapPageFault, excStoreCapPageFault,
+`endif
+                    excLoadPageFault, excStorePageFault:
+                        return addr;
 
                     default: return 0;
                 endcase);

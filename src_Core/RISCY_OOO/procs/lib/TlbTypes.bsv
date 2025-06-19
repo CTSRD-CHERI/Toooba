@@ -284,8 +284,8 @@ function TlbPermissionCheck hasVMPermission(
                 fault = True;
             end
             if (potentialCapLoad) begin
-                if (!fault) excCode = excLoadCapPageFault;
 `ifndef ZCHERI
+                if (!fault) excCode = excLoadCapPageFault;
                 // load traps if page not cap readable and using cap_read_mod set
                 if (!pte_upper_type.cap_readable && pte_upper_type.cap_read_mod) begin
                     fault = True;
@@ -318,7 +318,9 @@ function TlbPermissionCheck hasVMPermission(
             if(capStore && !pte_upper_type.cap_writable)
 `endif
             begin
+`ifndef ZCHERI
                 if (!fault) excCode = excStoreCapPageFault;
+`endif
                 fault = True;
             end
         end
