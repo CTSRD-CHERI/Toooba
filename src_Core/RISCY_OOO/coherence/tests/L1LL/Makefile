@@ -46,7 +46,7 @@ MACROS = -D CCSIZES_FILE=\"L1LLSizes.bsv\"   \
 		 -D LOG_L1_WAYS=2 \
 		 -D LOG_L1_LINES=9 \
 		 -D LOG_LLC_LINES=8 \
-		 -D LLChildNum=2
+		 -D verbose
 				
 ifeq ($(STORE_PREFETCH),true)
 MACROS += -D STORE_PREFETCH -D DEBUG_STORE_PREFETCH
