@@ -485,11 +485,28 @@ typedef 16 InterruptNum;    // With debugger
 typedef 12 InterruptNum;    // Without debugger
 `endif
 
+typedef struct {
+    Exception exception;
+`ifdef ZCHERI
+    Bit#(2) tval2Code;
+`endif
+} PTEException deriving(Bits, Eq, FShow);
+
+function PTEException pteExc(Exception exception);
+    PTEException ret;
+    ret.exception = exception;
+`ifdef ZCHERI
+    ret.tval2Code = 0;
+`endif
+    return ret;
+endfunction
+
 // Traps are either an exception or an interrupt
 typedef union tagged {
     CapException CapException;
     Exception Exception;
     Interrupt Interrupt;
+    PTEException PTEException;
 } Trap deriving(Bits, Eq, FShow);
 
 // privilege modes

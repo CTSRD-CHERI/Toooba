@@ -210,7 +210,7 @@ module mkITlb(ITlb::ITlb);
             end
             else begin
                 // page fault
-                hitQ.enq(tuple3(?, Valid (excInstPageFault), False));
+                hitQ.enq(tuple3(?, Valid (pteExc(excInstPageFault)), False));
                 if(verbose) begin
                     $display("ITLB %m refill no permission: ", fshow(vaddr));
                 end
@@ -218,7 +218,7 @@ module mkITlb(ITlb::ITlb);
         end
         else begin
             // page fault
-            hitQ.enq(tuple3(?, Valid (excInstPageFault), False));
+            hitQ.enq(tuple3(?, Valid (pteExc(excInstPageFault)), False));
             if(verbose) $display("ITLB %m refill page fault: ", fshow(vaddr));
         end
         // miss resolved
@@ -303,7 +303,7 @@ module mkITlb(ITlb::ITlb);
                 if (vm_info.sv39) begin
                     let vpn = getVpn(vaddr);
                     let trans_result = tlb.translate(vpn, vm_info.asid);
-                    if (!validVirtualAddress(vaddr)) hitQ.enq(tuple3(?, Valid (excInstPageFault), False));
+                    if (!validVirtualAddress(vaddr)) hitQ.enq(tuple3(?, Valid (pteExc(excInstPageFault)), False));
                     else if (trans_result.hit) begin
                         // TLB hit
                         let entry = trans_result.entry;
@@ -330,7 +330,7 @@ module mkITlb(ITlb::ITlb);
                         end
                         else begin
                             // page fault
-                            hitQ.enq(tuple3(?, Valid (excInstPageFault), False));
+                            hitQ.enq(tuple3(?, Valid (pteExc(excInstPageFault)), False));
                             if(verbose) begin
                                 $display("ITLB %m req no permission: ",
                                          fshow(vaddr));

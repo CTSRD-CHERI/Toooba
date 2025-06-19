@@ -34,7 +34,7 @@ typedef struct{
     Bool  capStore;
     Bool  potentialCapLoad;
 } TlbReq deriving(Eq, Bits, FShow);
-typedef Tuple3#(Addr, Maybe#(Exception), Bool) TlbResp;
+typedef Tuple3#(Addr, Maybe#(PTEException), Bool) TlbResp;
 
 // non-blocking DTLB
 typedef `DTLB_REQ_NUM DTlbReqNum;
@@ -216,7 +216,7 @@ typedef enum {
 
 typedef struct {
     Bool allowed;
-    Exception excCode; // Only defined if !allowed
+    PTEException excCode; // Only defined if !allowed
     Bool allowCap; // Whether we can load caps
 } TlbPermissionCheck deriving(Bits, Eq, FShow);
 
@@ -268,6 +268,8 @@ function TlbPermissionCheck hasVMPermission(
 
     Exception excCode = excLoadPageFault; // Unused default.  Just choose one valid option.
 
+    Bool cheriFault = False;
+
     // check execute/read/write permission
     case(access)
         InstFetch: begin
@@ -301,7 +303,7 @@ function TlbPermissionCheck hasVMPermission(
                        != pack(pte_upper_type.cap_read_gen)))
 `endif
                 begin
-                    fault = True;
+                    cheriFault = True;
                 end
             end
         end
@@ -321,14 +323,18 @@ function TlbPermissionCheck hasVMPermission(
 `ifndef ZCHERI
                 if (!fault) excCode = excStoreCapPageFault;
 `endif
-                fault = True;
+                cheriFault = True;
             end
         end
     endcase
 
     TlbPermissionCheck ret = TlbPermissionCheck {
-        allowed:  !fault,
-        excCode:  excCode,
+        allowed:  !fault && !cheriFault,
+        excCode:  PTEException{exception: excCode
+`ifdef ZCHERI
+        , tval2Code: fault && cheriFault ? 2 : cheriFault ? 1 : 0
+`endif
+        },
 `ifdef ZCHERI
         allowCap: pte_upper_type.cw
 `else
@@ -341,16 +347,16 @@ function TlbPermissionCheck hasVMPermission(
         // check if accessed or dirty bit needs to be set
         if(capStore && access == DataStore && !pte_upper_type.cap_dirty) begin
             ret.allowed = False;
-            ret.excCode = excStoreCapPageFault;
+            ret.excCode.exception = excStoreCapPageFault;
         end
 `endif
         if(access == DataStore && !pte_type.dirty) begin
             ret.allowed = False;
-            ret.excCode = excStorePageFault;
+            ret.excCode.exception = excStorePageFault;
         end
         if(!pte_type.accessed) begin
             ret.allowed = False;
-            ret.excCode = access == DataStore ? excStorePageFault : excLoadPageFault;
+            ret.excCode.exception = access == DataStore ? excStorePageFault : excLoadPageFault;
         end
     end
 

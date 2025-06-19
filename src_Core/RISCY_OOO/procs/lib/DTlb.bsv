@@ -312,7 +312,7 @@ module mkDTlb#(
             end
             else begin
                 // page fault
-                Exception fault = permCheck.excCode;
+                PTEException fault = permCheck.excCode;
                 pendResp[idx] <= tuple3(?, Valid (fault), False);
                 if(verbose) begin
                     $display("[DTLB] refill no permission: idx %d; ", idx, fshow(r));
@@ -322,7 +322,7 @@ module mkDTlb#(
         else begin
             // page fault
             Exception fault = r.write ? excStorePageFault : excLoadPageFault;
-            pendResp[idx] <= tuple3(?, Valid (fault), False);
+            pendResp[idx] <= tuple3(?, Valid (pteExc(fault)), False);
             if(verbose) $display("[DTLB] refill page fault: idx %d; ", idx, fshow(r));
         end
 
@@ -478,7 +478,7 @@ module mkDTlb#(
                 // page fault
                 Exception fault = r.write ? excStorePageFault : excLoadPageFault;
                 pendWait[idx] <= None;
-                pendResp[idx] <= tuple3(?, Valid (fault), False);
+                pendResp[idx] <= tuple3(?, Valid (pteExc(fault)), False);
                 if(verbose) $display("[DTLB] req invalid virtual address: idx %d; ", idx, fshow(r));
             end else if (trans_result.hit) begin
                 // TLB hit
@@ -517,7 +517,7 @@ module mkDTlb#(
                 end
                 else begin
                     // page fault
-                    Exception fault = permCheck.excCode;
+                    PTEException fault = permCheck.excCode;
                     pendWait[idx] <= None;
                     pendResp[idx] <= tuple3(?, Valid (fault), False);
                     if(verbose) $display("[DTLB] req no permission: idx %d; ", idx, fshow(r));

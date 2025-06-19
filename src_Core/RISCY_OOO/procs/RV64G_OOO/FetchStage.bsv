@@ -624,7 +624,11 @@ module mkFetchStage(FetchStage);
             Dii_Parcel_Id dii_pid = dii_pid_reg[pc_fetch1_port];
             dii_pid_reg[pc_fetch1_port] <= dii_pid + (zeroExtend(posLastSupX2) + 1);
 `endif
-            match {.buffered_phys_pc, .cause, .allow_cap} = buffered_translation_tlb_resp[buff_match_idx];
+            match {.buffered_phys_pc, .pte_cause, .allow_cap} = buffered_translation_tlb_resp[buff_match_idx];
+            Maybe#(Exception) cause = Invalid;
+            if (pte_cause matches tagged Valid .pte_exc) begin
+                cause = Valid(pte_exc.exception);
+            end
             Addr phys_pc = unpack({buffered_phys_pc[63:12],getAddr(pc)[11:0]});
             // Access main mem or boot rom if no TLB exception
             Bool access_mmio = False;

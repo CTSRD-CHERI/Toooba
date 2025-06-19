@@ -656,7 +656,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let x = dTlbResp.inst;
         let {paddr, expCause, allowCapPTE} = dTlbResp.resp;
         Maybe#(Trap) cause = Invalid;
-        if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
+        if (expCause matches tagged Valid .c) begin
+            cause = Valid(PTEException(c));
+        end
 
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(dTlbResp));
         if(isValid(cause) && verbose) $display("  [doFinishMem - dTlb response] PAGEFAULT!");

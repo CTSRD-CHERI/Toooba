@@ -1164,6 +1164,12 @@ module mkCsrFile #(Data hartid)(CsrFile);
         Cause cause_code = 0;
         Data trap_val = 0;
         Data trap_val2 = 0;
+`ifdef ZCHERI
+        if (t matches tagged PTEException .pteExc) begin
+            trap_val2 = zeroExtend(pteExc.tval2Code);
+            t = Exception(pteExc.exception);
+        end
+`endif
         case(t) matches
             tagged Exception .e: begin
                 cause_code = pack(e);
