@@ -832,15 +832,18 @@ module mkCsrFile #(Data hartid)(CsrFile);
 
     // System level SCRs with accessSysRegs
     Reg#(CapReg) stcc_reg      <- mkCsrReg(defaultValue);
-    Reg#(CapReg) stdc_reg      <- mkCsrReg(nullCap);
     Reg#(CapReg) sScratchC_reg <- mkCsrReg(nullCap);
     Ehr#(2, CapReg) sepcc_reg  <- mkConfigEhr(defaultValue);
 
     // Machine level SCRs with accessSysRegs
     Reg#(CapReg) mtcc_reg      <- mkCsrReg(defaultValue);
-    Reg#(CapReg) mtdc_reg      <- mkCsrReg(nullCap);
     Reg#(CapReg) mScratchC_reg <- mkCsrReg(nullCap);
     Ehr#(2, CapReg) mepcc_reg  <- mkConfigEhr(defaultValue);
+
+`ifdef CHERI_ISAV9
+    Reg#(CapReg) stdc_reg      <- mkCsrReg(nullCap);
+    Reg#(CapReg) mtdc_reg      <- mkCsrReg(nullCap);
+`endif
 
 `ifdef PERFORMANCE_MONITORING
     // Performance monitoring
@@ -959,14 +962,16 @@ module mkCsrFile #(Data hartid)(CsrFile);
             // scrAddrUEPCC:     uepcc_reg;
             // System CSRs with accessSysRegs
             scrAddrSTCC:      stcc_reg;
-            scrAddrSTDC:      stdc_reg;
             scrAddrSScratchC: sScratchC_reg;
             scrAddrSEPCC:     sepcc_reg[1];
             // Machine CSRs with accessSysRegs
             scrAddrMTCC:      mtcc_reg;
-            scrAddrMTDC:      mtdc_reg;
             scrAddrMScratchC: mScratchC_reg;
             scrAddrMEPCC:     mepcc_reg[1];
+`ifdef CHERI_ISAV9
+            scrAddrSTDC:      stdc_reg;
+            scrAddrMTDC:      mtdc_reg;
+`endif
         endcase);
     endfunction
 

@@ -306,7 +306,10 @@ typedef enum {
 } AluFunc deriving(Bits, Eq, FShow);
 
 typedef enum {
-    SetOffset, IncOffset
+`ifdef CHERI_ISAV9
+    SetOffset,
+`endif
+    IncOffset
 } ModifyOffsetFunc deriving(Bits, Eq, FShow);
 
 typedef enum {
@@ -341,34 +344,37 @@ typedef union tagged {
     SetBoundsFunc SetBounds;
     SpecialRWAccess SpecialRW;
     AddrSource SetAddr;
-    void Seal;
-    void CSeal;
     void SealEntry;
-    SrcSelector Unseal;
     void AndPerm;
     void SetFlags;
     void SetHigh;
     void BuildCap;
     void Move;
+`ifdef CHERI_ISAV9
+    void Seal;
+    void CSeal;
+    SrcSelector Unseal;
     void ClearTag;
     void FromPtr;
+`endif
 } CapModifyFunc deriving(Bits, Eq, FShow);
 
 typedef union tagged {
     void TestSubset;
     void SetEqualExact;
-    void CSub;
     void GetLen;
     void GetBase;
     void GetTag;
-    void GetSealed;
-    void GetAddr;
-    void GetOffset;
+    void GetType;
     void GetFlags;
     void GetPerm;
-    void GetType;
     void GetHigh;
+`ifdef CHERI_ISAV9
+    void GetAddr;
+    void GetOffset;
+    void GetSealed;
     void ToPtr;
+`endif
 } CapInspectFunc deriving(Bits, Eq, FShow);
 
 typedef enum {Mul, Mulh, Div, Rem} MulDivFunc deriving(Bits, Eq, FShow);

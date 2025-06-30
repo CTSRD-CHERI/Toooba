@@ -273,7 +273,11 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
     Bool buildCapIllegal = !isValidCap(b) || getKind(b) != UNSEALED || !isDerivable(a) || (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b); // XXX needs optimisation
     CapPipe res = (case(func) matches
             tagged ModifyOffset .offsetOp :
+`ifdef CHERI_ISAV9
                 modifyOffset(a_mut, getAddr(b), offsetOp == IncOffset).value;
+`else
+                incOffset(a_mut, getAddr(b)).value;
+`endif
             tagged SetBounds .boundsOp    :
                 setBoundsALU(a_mut, getAddr(b), boundsOp);
             tagged SpecialRW .scrAccess   :
@@ -282,6 +286,19 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 clearTagIf(setAddr(a_mut, (addrSource == Src2Type) ? b_type : getAddr(b) ).value, (addrSource == Src2Type) ? b_res : False);
             tagged SealEntry              :
                 setKind(a_mut, SENTRY);
+            tagged SetHigh:
+                fromMem(tuple2(False, {getAddr(b), getAddr(a)}));
+            tagged BuildCap               :
+                setKind(setValidCap(a_mut, !buildCapIllegal), getKind(a)==SENTRY ? SENTRY : UNSEALED);
+            tagged Move                   :
+                a;
+            tagged AndPerm                :
+                setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
+            tagged SetFlags               :
+                setIntMode(a_mut, getAddr(b)[0]!=0); // XXX Sense swapped for legacy SetFlags
+`ifdef CHERI_ISAV9
+            tagged ClearTag               :
+                setValidCap(a, False);
 `ifndef ZCHERI
             tagged Seal                   :
                 clearTagIf( setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b))))
@@ -291,23 +308,10 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                      clearTagIf(setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b)))), sealIllegal));
             tagged Unseal .src            :
                 clearTagIf(setHardPerms(setKind(((src == Src1) ? a:b), UNSEALED), new_hard_perms), (src == Src1) && unsealIllegal);
-`endif
-            tagged AndPerm                :
-                setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
-            tagged SetFlags               :
-                setIntMode(a_mut, getAddr(b)[0]!=0); // XXX Sense swapped for legacy SetFlags
-`ifndef ZCHERI
             tagged FromPtr                :
                 (getAddr(a) == 0 ? nullCap : setAddr(b_mut, getAddr(a)).value);
 `endif
-            tagged SetHigh:
-                fromMem(tuple2(False, {getAddr(b), getAddr(a)}));
-            tagged BuildCap               :
-                setKind(setValidCap(a_mut, !buildCapIllegal), getKind(a)==SENTRY ? SENTRY : UNSEALED);
-            tagged Move                   :
-                a;
-            tagged ClearTag               :
-                setValidCap(a, False);
+`endif
             default: ?;
         endcase);
     return res;
@@ -333,12 +337,8 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                    getBase(a);
                tagged GetTag                 :
                    zeroExtend(pack(isValidCap(a)));
-               tagged GetSealed              :
-                   zeroExtend(pack(getKind(a) != UNSEALED));
-               tagged GetAddr                :
-                   getAddr(a);
-               tagged GetOffset              :
-                   getOffset(a);
+               tagged GetType                :
+                   tpl_1(extractType(a));
                tagged GetFlags               :
                    // XXX Sense of legacy getFlags will be swapped
                    begin
@@ -349,10 +349,16 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                    zeroExtend(getPerms(a));
                tagged GetHigh                :
                    zeroExtend(tpl_2(toMem(a))[127:64]);
-               tagged GetType                :
-                   tpl_1(extractType(a));
+`ifdef CHERI_ISAV9
+               tagged GetAddr                :
+                   getAddr(a);
+               tagged GetOffset              :
+                   getOffset(a);
+               tagged GetSealed              :
+                   zeroExtend(pack(getKind(a) != UNSEALED));
                tagged ToPtr                  :
                    (isValidCap(a) ? getAddr(a) - getBase(b) : 0);
+`endif
                default: ?;
         endcase);
     return res;

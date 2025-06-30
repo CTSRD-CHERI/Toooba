@@ -1026,6 +1026,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
             end
         end
 
+`ifdef CHERI_ISAV9
         opcOpXCHERI: begin
             case (funct3)
                 f3_cap_CIncOffsetImmediate: begin
@@ -1450,6 +1451,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                 end
             endcase
         end
+`endif
     endcase
 
     dInst.capChecks.rn1 = {1'b0, regs.src1.Valid.Gpr};
