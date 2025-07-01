@@ -13,8 +13,8 @@
 `SCR(MScratchC, 5'd30, 12'h340, True)
 `SCR(MEPCC,     5'd31, 12'h341, True)
 
-`ifdef CHERI_ISAV9
 `SCR(PCC,       5'd00, 12'h000, False)
+`ifdef CHERI_ISAV9
 `SCR(MTDC,      5'd29, 12'h000, False)
 `SCR(STDC,      5'd13, 12'h000, False)
 `endif
