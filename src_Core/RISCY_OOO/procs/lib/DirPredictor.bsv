@@ -45,6 +45,7 @@ import Bht::*;
 import GSelectPred::*;
 import GSharePred::*;
 import TourPred::*;
+import TourPredSecure::*;
 import Ras::*;
 
 export DirPredTrainInfo(..);
