@@ -337,8 +337,6 @@ module mkCore#(CoreId coreId)(Core);
     endinterface);
     MMIOCore mmio <- mkMMIOCore(mmioInIfc);
 
-    PulseWire commitRedirect <- mkPulseWire;
-
     // fix point module to instantiate other function units
     module mkCoreFixPoint#(CoreFixPoint fix)(CoreFixPoint);
         // spec update
@@ -422,7 +420,7 @@ module mkCore#(CoreId coreId)(Core);
                 method setRegReadyAggr = writeAggr(aluWrAggrPort(i));
                 interface sendBypass = sendBypassIfc;
                 method writeRegFile = writeCons(aluWrConsPort(i));
-                method Action redirect(CapMem new_pc, SpecTag spec_tag, InstTag inst_tag, SpecBits spec_bits) if (!commitRedirect);
+                method Action redirect(CapMem new_pc, SpecTag spec_tag, InstTag inst_tag, SpecBits spec_bits);
                     if (verbose) begin
                         $display("[ALU redirect - %d] ", i, fshow(new_pc),
                                  "; ", fshow(spec_tag), "; ", fshow(inst_tag));
@@ -528,7 +526,6 @@ module mkCore#(CoreId coreId)(Core);
         interface memExeIfc = memExe;
         method Action killAll;
             globalSpecUpdate.incorrectSpec(True, ?, ?, 0);
-            commitRedirect.send();
         endmethod
         interface doStatsIfc = doStatsReg;
         method pendingIncorrectSpec = globalSpecUpdate.pendingIncorrectSpec;
