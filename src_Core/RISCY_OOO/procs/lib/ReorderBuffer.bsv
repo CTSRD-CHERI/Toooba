@@ -48,8 +48,6 @@ import HasSpecBits::*;
 import Vector::*;
 import Assert::*;
 import Ehr::*;
-import ConfigReg::*;
-import SpecialRegs::*;
 import RevertingVirtualReg::*;
 `ifdef RVFI_DII
 import RVFI_DII_Types::*;
@@ -262,29 +260,29 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Integer traceBundle_deqLSQ_port = valueof(fpuMulDivExeNum) + valueof(aluExeNum);
     Integer traceBundle_enq_port = 1 + traceBundle_deqLSQ_port;
 
-    Reg#(CapMem)                                                    pc                   <- mkConfigRegU;
-    Reg #(Bit #(32))                                                orig_inst            <- mkConfigRegU;
-    Reg#(IType)                                                     iType                <- mkConfigRegU;
-    Reg #(Maybe #(ArchRIndx))                                       rg_dst_reg           <- mkConfigRegU;
+    Reg#(CapMem)                                                    pc                   <- mkRegU;
+    Reg #(Bit #(32))                                                orig_inst            <- mkRegU;
+    Reg#(IType)                                                     iType                <- mkRegU;
+    Reg #(Maybe #(ArchRIndx))                                       rg_dst_reg           <- mkRegU;
 `ifdef INCLUDE_TANDEM_VERIF
-    Reg #(Data)                                                     rg_dst_data          <- mkConfigRegU;
-    Reg #(Data)                                                     rg_store_data        <- mkConfigRegU;
-    Reg #(ByteEn)                                                   rg_store_data_BE     <- mkConfigRegU;
+    Reg #(Data)                                                     rg_dst_data          <- mkRegU;
+    Reg #(Data)                                                     rg_store_data        <- mkRegU;
+    Reg #(ByteEn)                                                   rg_store_data_BE     <- mkRegU;
 `endif
-    Reg#(Maybe#(CSR))                                               csr                  <- mkConfigRegU;
-    Reg#(Maybe#(SCR))                                               scr                  <- mkConfigRegU;
-    Reg#(Bool)                                                      claimed_phy_reg      <- mkConfigRegU;
-    Ehr#(TAdd#(2, aluExeNum), Maybe#(Trap))                         trap                 <- mkRegOR(?);
-    Ehr#(TAdd#(2, aluExeNum), PPCVAddrCSRData)                      ppc_vaddr_csrData    <- mkRegOR(?);
-    Ehr#(TAdd#(1, fpuMulDivExeNum), Bit#(5))                        fflags               <- mkRegOR(?);
-    Reg#(Bool)                                                      will_dirty_fpu_state <- mkConfigRegU;
-    Ehr#(TAdd#(3, TAdd#(fpuMulDivExeNum, aluExeNum)), RobInstState) rob_inst_state       <- mkRegOR(?);
-    Reg#(LdStQTag)                                                  lsqTag               <- mkConfigRegU;
-    Ehr#(2, Maybe#(LdKilledBy))                                     ldKilled             <- mkRegOR(?);
-    Ehr#(3, Bool)                                                   memAccessAtCommit    <- mkRegOR(?);
-    Ehr#(2, Bool)                                                   lsqAtCommitNotified  <- mkRegOR(?);
-    Ehr#(2, Bool)                                                   nonMMIOStDone        <- mkRegOR(?);
-    Reg#(Bool)                                                      epochIncremented     <- mkConfigRegU;
+    Reg#(Maybe#(CSR))                                               csr                  <- mkRegU;
+    Reg#(Maybe#(SCR))                                               scr                  <- mkRegU;
+    Reg#(Bool)                                                      claimed_phy_reg      <- mkRegU;
+    Ehr#(TAdd#(2, aluExeNum), Maybe#(Trap))                         trap                 <- mkEhr(?);
+    Ehr#(TAdd#(2, aluExeNum), PPCVAddrCSRData)                      ppc_vaddr_csrData    <- mkEhr(?);
+    Ehr#(TAdd#(1, fpuMulDivExeNum), Bit#(5))                        fflags               <- mkEhr(?);
+    Reg#(Bool)                                                      will_dirty_fpu_state <- mkRegU;
+    Ehr#(TAdd#(3, TAdd#(fpuMulDivExeNum, aluExeNum)), RobInstState) rob_inst_state       <- mkEhr(?);
+    Reg#(LdStQTag)                                                  lsqTag               <- mkRegU;
+    Ehr#(2, Maybe#(LdKilledBy))                                     ldKilled             <- mkEhr(?);
+    Ehr#(3, Bool)                                                   memAccessAtCommit    <- mkEhr(?);
+    Ehr#(2, Bool)                                                   lsqAtCommitNotified  <- mkEhr(?);
+    Ehr#(2, Bool)                                                   nonMMIOStDone        <- mkEhr(?);
+    Reg#(Bool)                                                      epochIncremented     <- mkRegU;
     Ehr#(3, SpecBits)                                               spec_bits            <- mkEhr(?);
 `ifdef RVFI_DII
     Reg#(Dii_Parcel_Id)                                             dii_pid              <- mkRegU;
@@ -1133,8 +1131,8 @@ module mkSupReorderBuffer#(
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         SupWaySel way = getDeqFifoWay(fromInteger(i)); // FIFO[way] is used by deq port i
         Bool can_deq = can_deq_fifo[way] &&
-                       deq_SB_wrongSpec /*&& // ordering: < wrongSpec
-                       all(id, readVReg(deq_SB_enq))*/; // ordering: < enq
+                       deq_SB_wrongSpec && // ordering: < wrongSpec
+                       all(id, readVReg(deq_SB_enq)); // ordering: < enq
         deqIfc[i] = (interface ROB_DeqPort;
             method Bool canDeq = can_deq;
             method Action deq if(can_deq);
