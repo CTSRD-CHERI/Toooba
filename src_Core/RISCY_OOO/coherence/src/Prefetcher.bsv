@@ -36,8 +36,6 @@ import Vector::*;
 import BuildVector::*;
 import ProcTypes::*;
 
-Bool verbose = False;
-
 typedef enum {
     HIT = 1'b0, MISS = 1'b1
 } HitOrMiss deriving (Bits, Eq, FShow);
@@ -195,7 +193,7 @@ module mkSingleWindowL1LLPrefetcher(Prefetcher);
     method ActionValue#(Addr) getNextPrefetchAddr if (nextToAsk != rangeEnd);
         nextToAsk <= nextToAsk + 1;
         let retAddr = Addr'{nextToAsk, '0}; //extend cache line address to regular address
-        if (verbose) $display("%t Prefetcher getNextPrefetchAddr requesting %h", $time, retAddr);
+        if(verbose) $display("%t Prefetcher getNextPrefetchAddr requesting %h", $time, retAddr);
         return retAddr; 
     endmethod
 endmodule
@@ -448,13 +446,13 @@ module mkTargetTable(TargetTable#(narrowTableSize, wideTableSize)) provisos
         if (narrowTable[narrowIdx][0] matches tagged Valid .entry 
             &&& entry.tag == addr[31:valueOf(narrowTableIdxBits)]) begin
             narrowTable[narrowIdx][0] <= Invalid; 
-            //if (verbose) $display("%t found narrow table entry %h", $time, addr + signExtend(pack(entry.distance)));
+            //$display("%t found narrow table entry %h", $time, addr + signExtend(pack(entry.distance)));
             return Valid(addr + signExtend(pack(entry.distance)));
         end
         else if (wideTable[wideIdx][0] matches tagged Valid .entry 
             &&& entry.tag == addr[31:valueOf(wideTableIdxBits)]) begin
             wideTable[wideIdx][0] <= Invalid; 
-            //if (verbose) $display("%t found wide table entry %h", $time, entry.target);
+            //$display("%t found wide table entry %h", $time, entry.target);
             return Valid(entry.target);
         end
         else
@@ -622,12 +620,12 @@ module mkTargetTableDouble(TargetTableDouble#(narrowTableSize, wideTableSize)) p
     actionvalue
         if (narrowWrapped matches tagged Valid .narrow
             &&& narrowTagMatch(addrHash, narrow)) begin
-            //if (verbose) $display("%t found narrow table entry %h", $time, addr + signExtend(pack(narrow.distance)));
+            //$display("%t found narrow table entry %h", $time, addr + signExtend(pack(narrow.distance)));
             return Valid(addr + signExtend(pack(narrow.distance)));
         end
         else if (wideWrapped matches tagged Valid .wide
             &&& wideTagMatch(addrHash, wide)) begin
-            //if (verbose) $display("%t found wide table entry %h", $time, wide.target);
+            //$display("%t found wide table entry %h", $time, wide.target);
             return Valid(wide.target);
         end
         else
@@ -692,7 +690,7 @@ module mkTargetTableDouble(TargetTableDouble#(narrowTableSize, wideTableSize)) p
             entry.distance = truncate(distance);
 
             if (Valid(entry) != lastMissNarrowMRUEntry) begin
-                //if (verbose) $display("%t Recording miss -- modifying narrow table", $time);
+                //$display("%t Recording miss -- modifying narrow table", $time);
                 //Maintain the property that one address can only have 
                 // at most 2 of 4 table entries for it.
                 //Shift narrow table entries down, storing in MRU.
@@ -712,7 +710,7 @@ module mkTargetTableDouble(TargetTableDouble#(narrowTableSize, wideTableSize)) p
             entry.target = currAddr;
 
             if (Valid(entry) != lastMissWideMRUEntry) begin
-                //if (verbose) $display("%t Recording miss -- modifying wide table", $time);
+                //$display("%t Recording miss -- modifying wide table", $time);
                 wideTableMRU.wrReq(idx, Valid(entry));
                 wideTableLRU.wrReq(idx, lastMissWideMRUEntry);
                 Bit#(narrowTableIdxBits) narrowIdx = truncate(lastMissAddrHash);
@@ -750,9 +748,9 @@ module mkTargetTableDouble(TargetTableDouble#(narrowTableSize, wideTableSize)) p
             //Update the entries for the last miss to point to this one
             writeMissEntry(addr);
             //Save the raw table entries
-            //if (verbose) $display("idx: %x", addrHash);
-            //if (verbose) $display("%t Read resp: nMRU: ", fshow(narrowTableMRU.rdResp), "wMRU: ", fshow(wideTableMRU.rdResp));
-            //if (verbose) $display("%t Read resp: nLRU: ", fshow(narrowTableLRU.rdResp), "wLRU: ", fshow(wideTableLRU.rdResp));
+            //$display("idx: %x", addrHash);
+            //$display("%t Read resp: nMRU: ", fshow(narrowTableMRU.rdResp), "wMRU: ", fshow(wideTableMRU.rdResp));
+            //$display("%t Read resp: nLRU: ", fshow(narrowTableLRU.rdResp), "wLRU: ", fshow(wideTableLRU.rdResp));
             lastMissWideMRUEntry <= wideTableMRU.rdResp;
             lastMissNarrowMRUEntry <= narrowTableMRU.rdResp;
             lastMissWideLRUEntry <= wideTableLRU.rdResp;
@@ -1038,7 +1036,7 @@ module mkBRAMMarkovPrefetcher(Prefetcher) provisos
 
         if (hitMiss == MISS) begin 
             //Don't start markov chain if its very recent
-            //if (verbose) $display("%t Prefetcher start new chain with %h", $time, addr);
+            //$display("%t Prefetcher start new chain with %h", $time, addr);
             chainNextToLookup <= cl;
             chainNumberToPrefetch <= fromInteger(valueOf(maxChainLength));
         end
@@ -1293,7 +1291,7 @@ provisos(
         strideTable.deqRdResp;
         StrideEntry seNext = se;
         Bit#(13) observedStride = {1'b0, addr[11:0]} - {1'b0, se.lastAddr};
-        if (verbose) $display("%t Stride Prefetcher updateStrideEntry ", $time,
+        if (verbose) $writeh("%t Stride Prefetcher updateStrideEntry ", $time,
             fshow(hitMiss), " ", addr,
             ". Entry ", index, " state is ", fshow(se.state));
         if (se.state == EMPTY) begin
@@ -1417,7 +1415,7 @@ provisos(
     );
     Bool verbose = False;
     RWBramCore#(strideTableIndexT, StrideEntry2) strideTable <- mkRWBramCoreForwarded;
-    FIFOF#(Tuple3#(Addr, Bit#(16), HitOrMiss)) memAccesses <- mkUGSizedFIFOF(8);
+    FIFOF#(Tuple3#(Addr, Bit#(16), HitOrMiss)) memAccesses <- mkSizedBypassFIFOF(8);
     Reg#(Tuple3#(Addr, Bit#(16), HitOrMiss)) rdRespEntry <- mkReg(?);
 
     Fifo#(8, Addr) addrToPrefetch <- mkOverflowPipelineFifo;
@@ -1425,7 +1423,7 @@ provisos(
     Reg#(Maybe#(Bit#(2))) cLinesPrefetchedLatest <- mkReg(?);
     PulseWire holdReadReq <- mkPulseWire;
 
-    rule sendReadReq if (!holdReadReq && memAccesses.notEmpty);
+    rule sendReadReq if (!holdReadReq);
         match {.addr, .pcHash, .hitMiss} = memAccesses.first;
         if (verbose) $display("%t Sending read req for %h!", $time, pcHash);
         strideTable.rdReq(truncate(pcHash));
@@ -1447,7 +1445,7 @@ provisos(
         strideTable.deqRdResp;
         StrideEntry2 seNext = se;
         Int#(12) observedStride = unpack(addr[11:0] - se.lastAddr);
-        if (verbose) $display("%t Stride Prefetcher updateStrideEntry ", $time,
+        if (verbose) $writeh("%t Stride Prefetcher updateStrideEntry ", $time,
             fshow(hitMiss), " ", addr,
             ". Entry ", index, " state is ", fshow(se.state));
         if (se.state == INIT && observedStride != 0) begin
@@ -1550,7 +1548,7 @@ provisos(
     endrule
 
     method Action reportAccess(Addr addr, Bit#(16) pcHash, HitOrMiss hitMiss);
-        if (memAccesses.notFull) memAccesses.enq(tuple3 (addr, pcHash, hitMiss));
+        memAccesses.enq(tuple3 (addr, pcHash, hitMiss));
     endmethod
 
     method ActionValue#(Addr) getNextPrefetchAddr;
@@ -1728,7 +1726,7 @@ provisos(
         strideTable.deqRdResp;
         StrideEntryAdaptive seNext = se;
         Bit#(13) observedStride = {1'b0, addr[11:0]} - {1'b0, se.lastAddr};
-        if (verbose) $display("%t Stride Prefetcher updateStrideEntry ", $time,
+        if (verbose) $writeh("%t Stride Prefetcher updateStrideEntry ", $time,
             fshow(hitMiss), " ", addr,
             ". Entry ", index, " state is ", fshow(se.state));
         if (se.state == EMPTY) begin
@@ -1948,7 +1946,7 @@ module mkLLIPrefetcher(Prefetcher);
 `endif
     return m;
 endmodule
-(* synthesize *)
+
 module mkL1DPrefetcher(PCPrefetcher);
 `ifdef DATA_PREFETCHER_IN_L1
     `ifdef DATA_PREFETCHER_BLOCK
