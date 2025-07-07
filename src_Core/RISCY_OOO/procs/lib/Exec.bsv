@@ -271,7 +271,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
     new_hard_perms.global = new_hard_perms.global && getHardPerms(b).global;
     Bool unsealIllegal = !isValidCap(b) || getKind(b) != UNSEALED || getKind(a) == UNSEALED || a_res || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
 `endif
-    Bool buildCapIllegal = !isValidCap(b) || getKind(b) != UNSEALED || !isDerivable(a) || !isDerivable(b) || !hasLegalHardPerms(a) || !hasLegalHardPerms(b) || !hasLegalIntMode(a) || !hasLegalIntMode(b) ||  (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b); // XXX needs optimisation
+    Bool buildCapIllegal = !isValidCap(b) || getKind(b) != UNSEALED || !isLegal(a) || !isLegal(b) ||  (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b); // XXX needs optimisation
     CapPipe res = (case(func) matches
             tagged ModifyOffset .offsetOp :
 `ifdef CHERI_ISAV9
@@ -324,10 +324,8 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                tagged TestSubset              : begin
                    // TODO will be bad for timing. Would like to reuse bounds check
                    zeroExtend(pack(   (isValidCap(b) == isValidCap(a))
-                                   && isDerivable(a)
-                                   && isDerivable(b)
-				   && hasLegalHardPerms (a)
-				   && hasLegalHardPerms (b)
+                                   && isLegal(a)
+                                   && isLegal(b)
                                    && ((getPerms(a) & getPerms(b)) == getPerms(a))
                                    && (getBase(a) >= getBase(b))
                                    && (getTop(a) <= getTop(b))));
