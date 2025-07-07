@@ -184,7 +184,7 @@ typedef struct {
     Bool  cap_mode;
 } PcCompressed deriving(Bits,Eq,FShow);
 function PcCompressed compressPc(PcIdx i, CapMem a) =
-    PcCompressed{idx: i, lsb: truncate(a), cap_mode: !getIntMode(a).value}; // Exact fail should be impossible
+    PcCompressed{idx: i, lsb: truncate(a), cap_mode: !getUnlegalisedIntMode(a)}; // Mode must be legal if we've fetched
 
 typedef struct {
     Addr pc;
@@ -834,7 +834,7 @@ module mkFetchStage(FetchStage);
    Vector#(SupSize, DecodeResult) decodeResults = ?;
    for (Integer i = 0; i < valueOf(SupSize); i = i + 1) begin
       CapMem pc = decompressPc(validValue(decodeIn[i]).pc);
-      decodeResults[i] = decode(validValue(decodeIn[i]).inst, !getIntMode(pc).value); // Decode 32b inst, or 32b expansion of 16b inst. Exact fail should be impossible
+      decodeResults[i] = decode(validValue(decodeIn[i]).inst, !getUnlegalisedIntMode(pc)); // Decode 32b inst, or 32b expansion of 16b inst. Mode must be legal if we've fetched
       if (popInst(decodeResults[i])) anyReturns = True;
    end
 
@@ -988,7 +988,7 @@ module mkFetchStage(FetchStage);
                   trainInfo.ras <- ras.ras[i].pop(doPop);
                   if (nextPc matches tagged Valid ._nextPc) begin
                      // Override cap mode prediction
-                     nextPc = Valid (setIntMode(_nextPc, getIntMode(ppc).value)); // Exact fail should be impossible
+                     nextPc = Valid (setIntMode(_nextPc, getUnlegalisedIntMode(ppc))); // Mode must be legal if we've fetched
                   end
                   if(verbose) begin
                      $display("Branch prediction: ", fshow(dInst.iType), " ; ", fshow(pc), " ; ",
@@ -1074,7 +1074,7 @@ module mkFetchStage(FetchStage);
       // update PC and epoch
       if(redirectPc matches tagged Valid .rp) begin
          pc_reg[pc_decode_port] <= rp;
-         cap_mode_reg[cap_mode_decode_port] <= !getIntMode(rp).value; // Exact fail should be impossible
+         cap_mode_reg[cap_mode_decode_port] <= !getUnlegalisedIntMode(rp); // Mode must be legal if we've fetched
          decode_redirect_count <= decode_redirect_count + 1;
       end else begin
          // Update cap_mode based on last decoded frag
@@ -1149,7 +1149,7 @@ module mkFetchStage(FetchStage);
 `endif
     );
         pc_reg[0] <= start_pc;
-        cap_mode_reg[0] <= !getIntMode(start_pc).value; // Exact fail should be impossible
+        cap_mode_reg[0] <= !getUnlegalisedIntMode(start_pc); // Mode must be legal if we've fetched
 `ifdef RVFI_DII
         dii_pid_reg[0] <= dii_pid;
 `endif
@@ -1175,7 +1175,7 @@ module mkFetchStage(FetchStage);
         if (verbose)
         $display("Redirect: newpc %h, old f_main_epoch %d, new f_main_epoch %d, specBits %x",new_pc,f_main_epoch,f_main_epoch+1, specBits);
         pc_reg[pc_redirect_port] <= new_pc;
-        cap_mode_reg[cap_mode_redirect_port] <= !getIntMode(new_pc).value; // Exact fail should be impossible
+        cap_mode_reg[cap_mode_redirect_port] <= !getUnlegalisedIntMode(new_pc); // Mode must be legal if we've fetched
 `ifdef RVFI_DII
         dii_pid_reg[pc_redirect_port] <= dii_pid;
         if (verbose) $display("%t Redirect: dii_pid_reg %d", $time(), dii_pid);
