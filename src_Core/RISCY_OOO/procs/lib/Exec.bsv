@@ -201,6 +201,8 @@ function Data alu(Data a, Data b, AluFunc func);
             Csrw    : b;
             Csrs    : (a | b); // same as Or
             Csrc    : (a & ~b);
+            Eqz     : ((b == 0) ? 0 : a);
+            Nez     : ((b != 0) ? 0 : a);
             default : 0;
         endcase);
     return res;
@@ -297,6 +299,10 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
             tagged SetFlags               :
                 setIntMode(a_mut, getAddr(b)[0]!=0); // XXX Sense swapped for legacy SetFlags
+            tagged CZeroEqz               :
+                ((getAddr(b) == 0) ? nullCap : a);
+            tagged CZeroNez               :
+                ((getAddr(b) != 0) ? nullCap : a);
 `ifdef CHERI_ISAV9
             tagged ClearTag               :
                 setValidCap(a, False);

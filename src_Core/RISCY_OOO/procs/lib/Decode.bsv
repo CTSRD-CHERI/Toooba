@@ -502,8 +502,11 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                     regs.src1 = Valid(tagged Gpr (swap ? rs2 : rs1));
                     regs.src2 = mCapFunc matches tagged Valid .f &&& tpl_1(f) == CapModify(Move) ? Invalid : Valid(tagged Gpr (swap ? rs1 : rs2));
                 end
-                opCapBounds: begin
-                    Maybe#(CapFunc) mCapFunc = case(funct3)
+                opCapBoundsZero: begin
+                    legalInst = False;
+                    Maybe#(CapFunc) mCapFunc = case (funct3)
+                        fnEQZ: Valid(CapModify (CZeroEqz));
+                        fnNEZ: Valid(CapModify (CZeroNez));
                         opSCBNDS : Valid(CapModify(SetBounds(SetBoundsExact)));
                         opSCBNDSR: Valid(CapModify(SetBounds(SetBoundsRounding)));
                         default: Invalid;
@@ -511,6 +514,15 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                     legalInst = isValid(mCapFunc);
                     dInst.capFunc = mCapFunc.Valid;
                     dInst.iType = Cap;
+                    if(!cap_mode) begin
+                        Maybe#(AluFunc) mAluFunc = case (funct3)
+                            fnEQZ: Valid (Eqz);
+                            fnNEZ: Valid (Nez);
+                            default: Invalid;
+                        endcase;
+                        dInst.execFunc = tagged Alu mAluFunc.Valid;
+                        if(isValid(mAluFunc)) dInst.iType = Alu;
+                    end
                     regs.dst = Valid(tagged Gpr rd);
                     regs.src1 = Valid(tagged Gpr rs1);
                     regs.src2 = Valid(tagged Gpr rs2);

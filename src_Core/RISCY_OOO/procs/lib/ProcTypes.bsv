@@ -302,7 +302,8 @@ typedef enum {
     Add, Addw, Sub, Subw,
     And, Or, Xor,
     Slt, Sltu, Sll, Sllw, Sra, Sraw, Srl, Srlw,
-    Csrw, Csrs, Csrc
+    Csrw, Csrs, Csrc,
+    Eqz, Nez
 } AluFunc deriving(Bits, Eq, FShow);
 
 typedef enum {
@@ -357,6 +358,8 @@ typedef union tagged {
     void ClearTag;
     void FromPtr;
 `endif
+    void CZeroEqz;
+    void CZeroNez;
 } CapModifyFunc deriving(Bits, Eq, FShow);
 
 typedef union tagged {
@@ -825,6 +828,9 @@ Bit#(3) fnDIVU   = 3'b101;
 Bit#(3) fnREM    = 3'b110;
 Bit#(3) fnREMU   = 3'b111;
 
+Bit#(3) fnEQZ    = 3'b101;
+Bit#(3) fnNEZ    = 3'b111;
+
 // Branch
 Bit#(3) fnBEQ   = 3'b000;
 Bit#(3) fnBNE   = 3'b001;
@@ -902,11 +908,11 @@ Bit#(3) opSCBNDS    = 3'b000;
 Bit#(3) opSCBNDSR   = 3'b001;
 Bit#(3) fnCADDI     = 3'b010;
 
-Bit#(7) opCapInspect = 7'b0001000;
-Bit#(7) opCapArith   = 7'b0000110;
-Bit#(7) opCapBounds  = 7'b0000111;
-Bit#(7) opMSWCap     = 7'b0001001;
-Bit#(7) opMSWInt     = 7'b0001010;
+Bit#(7) opCapInspect     = 7'b0001000;
+Bit#(7) opCapArith       = 7'b0000110;
+Bit#(7) opCapBoundsZero  = 7'b0000111;
+Bit#(7) opMSWCap         = 7'b0001001;
+Bit#(7) opMSWInt         = 7'b0001010;
 
 //MiscMem
 Bit#(3) fnFENCE  = 3'b000;
