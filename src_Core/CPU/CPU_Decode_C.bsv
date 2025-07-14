@@ -41,6 +41,7 @@ export fv_decode_C;
 
 import ISA_Decls       :: *;
 import ISA_Decls_CHERI :: *;
+import ProcTypes       :: *;
 
 // ================================================================
 
@@ -72,6 +73,7 @@ function Instr fv_decode_C (MISA misa, Bit #(2) xl, Bool cap_enc, Instr_C instr_
    match { .valid_C_SRAI,               .i_C_SRAI }               = fv_decode_C_SRAI               (misa, xl, cap_enc, instr_C);
    match { .valid_C_ANDI,               .i_C_ANDI }               = fv_decode_C_ANDI               (misa, xl, cap_enc, instr_C);
    match { .valid_C_MV,                 .i_C_MV }                 = fv_decode_C_MV                 (misa, xl, cap_enc, instr_C);
+   match { .valid_C_CMV,                .i_C_CMV }                = fv_decode_C_CMV                (misa, xl, cap_enc, instr_C);
    match { .valid_C_ADD,                .i_C_ADD }                = fv_decode_C_ADD                (misa, xl, cap_enc, instr_C);
    match { .valid_C_AND,                .i_C_AND }                = fv_decode_C_AND                (misa, xl, cap_enc, instr_C);
    match { .valid_C_OR,                 .i_C_OR }                 = fv_decode_C_OR                 (misa, xl, cap_enc, instr_C);
@@ -137,6 +139,7 @@ function Instr fv_decode_C (MISA misa, Bit #(2) xl, Bool cap_enc, Instr_C instr_
    else if (valid_C_SRAI)               instr = i_C_SRAI;
    else if (valid_C_ANDI)               instr = i_C_ANDI;
    else if (valid_C_MV)                 instr = i_C_MV;
+   else if (valid_C_CMV)                instr = i_C_CMV;
    else if (valid_C_ADD)                instr = i_C_ADD;
    else if (valid_C_AND)                instr = i_C_AND;
    else if (valid_C_OR)                 instr = i_C_OR;
@@ -878,7 +881,7 @@ function Tuple2 #(Bool, Instr) fv_decode_C_CIncOffsetImm16CSP (MISA  misa,  Bit 
                        && (cap_enc));
 
       Bit #(12) imm12 = signExtend (nzimm10);
-      let       instr = mkInstr_I_type (imm12, rd_rs1, f3_cap_CIncOffsetImmediate, rd_rs1, op_cap_Manip);
+      let       instr = mkInstr_I_type (imm12, rd_rs1, fnCADDI, rd_rs1, pack(opcOpImm32));
 
       return tuple2 (is_legal, instr);
    end
@@ -920,7 +923,7 @@ function Tuple2 #(Bool, Instr) fv_decode_C_CIncOffsetImm4CSPN (MISA  misa,  Bit 
 
       RegName   rs1   = reg_sp;
       Bit #(12) imm12 = zeroExtend (nzimm10);
-      let       instr = mkInstr_I_type (imm12, rs1, f3_cap_CIncOffsetImmediate, rd, op_cap_Manip);
+      let       instr = mkInstr_I_type (imm12, rs1, fnCADDI, rd, pack(opcOpImm32));
 
       return tuple2 (is_legal, instr);
    end
@@ -1031,10 +1034,30 @@ function Tuple2 #(Bool, Instr) fv_decode_C_MV (MISA  misa,  Bit #(2)  xl, Bool c
                        && (op == opcode_C2)
                        && (funct4 == funct4_C_MV)
                        && (rd_rs1 != 0)
-                       && (rs2 != 0));
+                       && (rs2 != 0)
+                       && (! cap_enc));
 
       RegName rs1   = reg_zero;
       let     instr = mkInstr_R_type (funct7_ADD, rs2, rs1, funct3_ADD, rd_rs1, op_OP);
+
+      return tuple2 (is_legal, instr);
+   end
+endfunction
+
+// C.CMV: expands to CMV
+function Tuple2 #(Bool, Instr) fv_decode_C_CMV (MISA  misa,  Bit #(2)  xl, Bool cap_enc,  Instr_C  instr_C);
+   begin
+      match { .funct4, .rd_rs1, .rs1, .op } = fv_ifields_CR_type (instr_C);
+
+      Bool is_legal = ((misa.c == 1'b1)
+                       && (op == opcode_C2)
+                       && (funct4 == funct4_C_MV)
+                       && (rd_rs1 != 0)
+                       && (rs1 != 0)
+                       && (cap_enc));
+
+      RegName rs2   = reg_zero;
+      let     instr = mkInstr_R_type (opCapArith, rs2, rs1, opCADD, rd_rs1, op_OP);
 
       return tuple2 (is_legal, instr);
    end
