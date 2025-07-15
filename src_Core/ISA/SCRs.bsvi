@@ -1,14 +1,17 @@
 `SCR(DDC,       5'd01, 12'h416, True)
 
 //`SCR(UTCC,      5'd0)
-//`SCR(UTDC,      5'd05)
+`SCR(UTIDC,      5'd03, 12'h480, True)        
+//`SCR(UTDC,      5'd05)        
 //`SCR(UScratchC, 5'd06)
 //`SCR(UEPCC,     5'd07)
 
+`SCR(STIDC,     5'd11, 12'h580, True)
 `SCR(STCC,      5'd12, 12'h105, True)
 `SCR(SScratchC, 5'd14, 12'h140, True)
 `SCR(SEPCC,     5'd15, 12'h141, True)
 
+`SCR(MTIDC,     5'd27, 12'h780, True)
 `SCR(MTCC,      5'd28, 12'h305, True)
 `SCR(MScratchC, 5'd30, 12'h340, True)
 `SCR(MEPCC,     5'd31, 12'h341, True)

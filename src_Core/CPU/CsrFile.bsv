@@ -829,13 +829,16 @@ module mkCsrFile #(Data hartid)(CsrFile);
     // Reg#(CapReg) utdc_reg      <- mkCsrReg(nullCap);
     // Reg#(CapReg) uScratchC_reg <- mkCsrReg(nullCap);
     // Reg#(CapReg) uepcc_reg     <- mkCsrReg(defaultValue);
+    Reg#(CapReg) utidc_reg <- mkCsrReg(nullCap);
 
     // System level SCRs with accessSysRegs
+    Reg#(CapReg) stidc_reg <- mkCsrReg(nullCap);
     Reg#(CapReg) stcc_reg      <- mkCsrReg(defaultValue);
     Reg#(CapReg) sScratchC_reg <- mkCsrReg(nullCap);
     Ehr#(2, CapReg) sepcc_reg  <- mkConfigEhr(defaultValue);
 
     // Machine level SCRs with accessSysRegs
+    Reg#(CapReg) mtidc_reg <- mkCsrReg(nullCap);
     Reg#(CapReg) mtcc_reg      <- mkCsrReg(defaultValue);
     Reg#(CapReg) mScratchC_reg <- mkCsrReg(nullCap);
     Ehr#(2, CapReg) mepcc_reg  <- mkConfigEhr(defaultValue);
@@ -960,12 +963,15 @@ module mkCsrFile #(Data hartid)(CsrFile);
             // scrAddrUTDC:      utdc_reg;
             // scrAddrUScratchC: uScratchC_reg;
             // scrAddrUEPCC:     uepcc_reg;
+            scrAddrUTIDC: utidc_reg;
             // System CSRs with accessSysRegs
             scrAddrSTCC:      stcc_reg;
             scrAddrSScratchC: sScratchC_reg;
             scrAddrSEPCC:     sepcc_reg[1];
+            scrAddrSTIDC: stidc_reg;
             // Machine CSRs with accessSysRegs
             scrAddrMTCC:      mtcc_reg;
+            scrAddrMTIDC: mtidc_reg;
             scrAddrMScratchC: mScratchC_reg;
             scrAddrMEPCC:     mepcc_reg[1];
 `ifdef CHERI_ISAV9
