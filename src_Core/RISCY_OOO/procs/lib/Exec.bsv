@@ -589,7 +589,7 @@ function Maybe#(Trap) checkForException(
     else if(dInst.scr matches tagged Valid .scr) begin
         Bool scr_has_priv = (prv >= pack(scr)[4:3]);
         Bool unimplemented = (scr == scrAddrNone);
-        Bool writes_scr = regs.src1 == Valid (tagged Gpr 0) ? False : True;
+        Bool writes_scr = dInst.iType == Scr;
         Bool read_only  = (scr == scrAddrPCC);
         Bool write_deny = (writes_scr && read_only);
         Bool asr_allow = getHardPerms(pcc).accessSysRegs
