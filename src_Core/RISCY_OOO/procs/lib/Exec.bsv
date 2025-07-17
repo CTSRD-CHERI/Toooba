@@ -238,7 +238,11 @@ function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWAccess scrAc
                    EPC: 64'h1;
                    Normal: 64'h0;
                endcase;
-    let allowSealed = scrAccess.scrType == EPC ? addr[0] == 1'b0 : False;
+    let allowSealed = case (scrAccess.scrType)
+                        EPC : (addr[0] == 1'b0 && scrAccess.capUpdate);
+                        TVEC : False;
+                        Normal: scrAccess.capUpdate;
+                      endcase;
     return update_scr_via_csr(baseCap, csrOp(oldAddr, addr, scrAccess.accessFunc) & ~mask, allowSealed);
 endfunction
 
