@@ -295,6 +295,7 @@ typedef struct {
     LdQTag tag;
     Addr paddr;
     ByteOrTagEn shiftedBE;
+    Addr objIdPAddr;
     Bit#(16) pcHash;
 } LSQIssueLdInfo deriving(Bits, Eq, FShow);
 
@@ -376,8 +377,10 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Addr objIdPAddr
     );
+    // update objSeal. Called when ld resp is received for objId bitmap read
+    method Action updateObjIdSeal(LdStQTag lsqTag, Maybe#(Trap) fault);
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, ByteOrTagEn shiftedBE, SBSearchRes sbRes
@@ -466,6 +469,8 @@ interface SplitLSQ;
     // for security: we cannot flush D$ until all wrong-path loads have
     // returned from D$
     method Bool noWrongPathLoads;
+
+    method Bool objIdSealCheck(LdStQTag tag);
 endinterface
 
 // --- auxiliary types and functions ---
@@ -648,7 +653,7 @@ module mkSplitLSQ(SplitLSQ);
     // request faults), we should first copy the MMIO request to a reg, and
     // then kill using the info in reg.
 
-    Bool verbose = False;
+    Bool verbose = True;
 
     // we may simplify things in case of single core
     Bool multicore = valueof(CoreNum) > 1;
@@ -668,10 +673,12 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bit#(16)))                ld_pcHash         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_waitForOlderSt  <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Ehr#(2, Addr))                 ld_paddr           <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Addr))                 ld_objIdPAddr      <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Maybe#(Trap)))         ld_fault           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_computed        <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Bool))                 ld_objIdSealOk     <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_executing       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_done            <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(LdKilledBy)))   ld_killed          <- replicateM(mkEhr(?));
@@ -716,6 +723,8 @@ module mkSplitLSQ(SplitLSQ);
     let ld_paddr_enqIss  = getVEhrPort(ld_paddr, 1); // assert
     let ld_paddr_resp    = getVEhrPort(ld_paddr, 1);
 
+    let ld_objIdPAddr_findIss = getVEhrPort(ld_objIdPAddr, 0);
+
     let ld_isMMIO_findIss = getVEhrPort(ld_isMMIO, 0);
     let ld_isMMIO_evict   = getVEhrPort(ld_isMMIO, 0); // assert
     let ld_isMMIO_deqLd   = getVEhrPort(ld_isMMIO, 0);
@@ -731,6 +740,7 @@ module mkSplitLSQ(SplitLSQ);
 
     let ld_fault_deqLd   = getVEhrPort(ld_fault, 0);
     let ld_fault_updAddr = getVEhrPort(ld_fault, 0); // write
+    let ld_fault_updObjIdSeal = getVEhrPort(ld_fault, 0); // write
     let ld_fault_issue   = getVEhrPort(ld_fault, 1); // assert
     let ld_fault_enqIss  = getVEhrPort(ld_fault, 1); // assert
     let ld_fault_enq     = getVEhrPort(ld_fault, 1); // write
@@ -743,6 +753,12 @@ module mkSplitLSQ(SplitLSQ);
     let ld_computed_enqIss  = getVEhrPort(ld_computed, 1); // assert
     let ld_computed_resp    = getVEhrPort(ld_computed, 1); // assert
     let ld_computed_enq     = getVEhrPort(ld_computed, 1); // write
+
+    let ld_objIdSealOk_deqLd        = getVEhrPort(ld_objIdSealOk, 0);
+    let ld_objIdSealOk_findIss      = getVEhrPort(ld_objIdSealOk, 0);
+    let ld_objIdSealOk_updObjIdSeal = getVEhrPort(ld_objIdSealOk, 0); // write
+    let ld_objIdSealOk_resp         = getVEhrPort(ld_objIdSealOk, 1);
+    let ld_objIdSealOk_enq          = getVEhrPort(ld_objIdSealOk, 1); // write
 
     let ld_executing_findIss   = getVEhrPort(ld_executing, 0);
     let ld_executing_wrongSpec = getVEhrPort(ld_executing, 0);
@@ -853,12 +869,14 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(Maybe#(PhyDst)))          st_dst       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Bit#(16)))                st_pcHash   <- replicateM(mkRegU);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Addr))                 st_objIdPAddr    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Trap)))         st_fault     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_allowCapAmoLd <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_computed  <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Bool))                 st_objIdSealOk   <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_verified  <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, SpecBits))             st_specBits  <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(TAdd#(1, SupSize), Bool)) st_atCommit  <- replicateM(mkEhr(?));
@@ -894,6 +912,7 @@ module mkSplitLSQ(SplitLSQ);
     let st_stData_updData = getVEhrPort(st_stData, 0); // write
 
     let st_fault_updAddr = getVEhrPort(st_fault, 0); // write
+    let st_fault_updObjIdSeal = getVEhrPort(st_fault, 0); // write
     let st_fault_deqSt   = getVEhrPort(st_fault, 1);
     let st_fault_enq     = getVEhrPort(st_fault, 1); // write
 
@@ -907,6 +926,9 @@ module mkSplitLSQ(SplitLSQ);
     let st_computed_deqSt   = getVEhrPort(st_computed, 1);
     let st_computed_updData = getVEhrPort(st_computed, 1); // assert
     let st_computed_enq     = getVEhrPort(st_computed, 1); // write
+
+    let st_objIdSealOk_updObjIdSeal = getVEhrPort(st_objIdSealOk, 0); // write
+    let st_objIdSealOk_resp         = getVEhrPort(st_objIdSealOk, 1);
 
     let st_verified_wrongSpec = getVEhrPort(st_verified, 0);
     let st_verified_verify    = getVEhrPort(st_verified, 0); // write
@@ -1107,7 +1129,9 @@ module mkSplitLSQ(SplitLSQ);
 `endif
                 !isValid(ld_depStQDeq_findIss[i]) && // (5) no dependency
                 !ld_waitWPResp_findIss[i] && // (6) not wating wrong path resp
-                !ld_isMMIO_findIss[i] // (7) not MMIO
+                !ld_isMMIO_findIss[i] && // (7) not MMIO
+                // ld_objIdAddrComputed_findIss[i] && // (8) TODO: make sure objId PAddr is available
+                ld_objIdSealOk_findIss[i] // (9) check that object 
             );
         endfunction
         Vector#(LdQSize, Bool) ableToIssue = map(canIssue,
@@ -1120,6 +1144,7 @@ module mkSplitLSQ(SplitLSQ);
                 tag: tag,
                 paddr: ld_paddr_findIss[tag],
                 shiftedBE: ld_shiftedBE_findIss[tag],
+                objIdPAddr: ld_objIdPAddr_findIss[tag],
                 pcHash: ld_pcHash[tag]
             };
             issueLdInfo.wset(info);
@@ -1433,6 +1458,7 @@ module mkSplitLSQ(SplitLSQ);
         ld_dst[ld_enqP] <= dst;
         ld_fault_enq[ld_enqP] <= Invalid;
         ld_computed_enq[ld_enqP] <= False;
+        ld_objIdSealOk_enq[ld_enqP] <= False;
         ld_executing_enq[ld_enqP] <= False;
         ld_done_enq[ld_enqP] <= False;
         ld_killed_enq[ld_enqP] <= Invalid;
@@ -1509,7 +1535,7 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Addr objIdPAddr
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1684,6 +1710,31 @@ module mkSplitLSQ(SplitLSQ);
             endcase),
             delayIssue: delayIssue
         };
+    endmethod
+
+    // this method should never be called simultaneously with updateAddr for the same tag
+    // otherwise, we would be writing to the same fault EHR port from two places at the same time
+    method Action updateObjIdSeal(LdStQTag lsqTag, Maybe#(Trap) fault);
+        if(lsqTag matches tagged Ld .tag) begin
+            ld_fault_updObjIdSeal[tag] <= fault;
+            ld_objIdSealOk_updObjIdSeal[tag] <= !isValid(fault);
+        end
+        // else if(lsqTag matches tagged St .tag) begin
+        //     st_fault_updObjIdSeal[tag] <= fault;
+        //     st_objIdSealOk_updObjIdSeal[tag] <= !isValid(fault);
+        // end
+    endmethod
+
+    method Bool objIdSealCheck(LdStQTag tag);
+        if(tag matches tagged Ld .t) begin 
+            return ld_objIdSealOk_resp[t];
+        end
+        else if(tag matches tagged St .t) begin
+            return st_objIdSealOk_resp[t];
+        end
+        else begin
+            return False;
+        end
     endmethod
 
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,

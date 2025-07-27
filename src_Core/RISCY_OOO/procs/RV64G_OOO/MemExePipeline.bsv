@@ -124,6 +124,7 @@ typedef struct {
     // result
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
+    Addr objIdVAddr;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
     Data    store_data;
@@ -271,7 +272,7 @@ interface MemExePipeline;
 endinterface
 
 module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
-    Bool verbose = False;
+    Bool verbose = True;
 
     // we change cache request in case of single core, becaues our MSI protocol
     // is not good with single core
@@ -348,6 +349,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     // fifo for req mem
     Fifo#(1, Tuple4#(LdQTag, Addr, Bool, Bit#(16))) reqLdQ <- mkBypassFifo;
+    Fifo#(1, Tuple2#(LdQTag, Addr)) reqLdObjIdSealQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
     Fifo#(1, Tuple2#(Addr, Bit#(16))) reqStQ <- mkBypassFifo;
@@ -361,31 +363,38 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
     // resp ifc to D$
     L1ProcResp#(DProcReqId) procRespIfc = (interface L1ProcResp;
-        method Action respLd(DProcReqId id, MemTaggedData d);
+        method Action respLd(DProcReqId id, Bool objSealRd, MemTaggedData d);
             LdQTag tag = truncate(id);
-            memRespLdQ.enq(tuple2(tag, d));
-            // early wake up RS and set SB
-            // this is done only when the resp is not wrong path
-            LSQHitInfo info <- lsq.getHit(Ld (tag));
-            if(info.dst matches tagged Valid .dst &&& !info.waitWPResp) begin
-                inIfc.setRegReadyAggr_mem(dst.indx);
+            if(objSealRd) begin
+                // objSealRespBuffer.enq(id, d, lsqDeqSt.shiftedBE, lsqDeqSt.stData, lsqDeqSt.pcHash);
+                // TODO: figure out if obj ID seal is ok here
+                lsq.updateObjIdSeal(tagged Ld tag, Invalid);
             end
-            if(verbose) begin
-                $display("%t : [Ld resp] ", $time, fshow(id), "; ", fshow(d), "; ", fshow(info));
-            end
-            // perf: load mem latency
-            let lat <- ldMemLatTimer.done(tag);
+            else begin
+                memRespLdQ.enq(tuple2(tag, d));
+                // early wake up RS and set SB
+                // this is done only when the resp is not wrong path
+                LSQHitInfo info <- lsq.getHit(Ld (tag));
+                if(info.dst matches tagged Valid .dst &&& !info.waitWPResp) begin
+                    inIfc.setRegReadyAggr_mem(dst.indx);
+                end
+                if(verbose) begin
+                    $display("%t : [Ld resp] ", $time, fshow(id), "; ", fshow(d), "; ", fshow(info));
+                end
+                // perf: load mem latency
+                let lat <- ldMemLatTimer.done(tag);
 `ifdef PERF_COUNT
-            if(inIfc.doStats) begin
-                exeLdMemLat.incr(zeroExtend(lat));
-            end
+                if(inIfc.doStats) begin
+                    exeLdMemLat.incr(zeroExtend(lat));
+                end
 `endif
 `ifdef PERFORMANCE_MONITORING
-            EventsCore events = unpack(0);
-            events.evt_LOAD_WAIT = saturating_truncate(lat);
-            events.evt_MEM_CAP_LOAD_TAG_SET = (d.tag) ? 1 : 0;
-            events_reg[1] <= events;
+                EventsCore events = unpack(0);
+                events.evt_LOAD_WAIT = saturating_truncate(lat);
+                events.evt_MEM_CAP_LOAD_TAG_SET = (d.tag) ? 1 : 0;
+                events_reg[1] <= events;
 `endif
+            end
         endmethod
         method Action respLrScAmo(DProcReqId id, MemTaggedData d);
             respLrScAmoQ.enq(d);
@@ -615,6 +624,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             accessByteCount = fromInteger(valueOf(CacheUtils::CLineNumMemDataBytes));
         end
 
+        // calculate bitmap offset and send to TLB here
+        // let objIdVAddr = (x.rVal1.otype >> 3); // TODO: add base addr from CSR: + nullWithAddr(inIfc.csrf_rd(csr))
+
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
@@ -628,6 +640,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: shiftBE,
                 vaddr: x.vaddr,
+                objIdVAddr: 0,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.rVal2,
                 store_data_BE: origBE,
@@ -756,7 +769,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, 0 //objIdPAddr
         );
 
         // issue non-MMIO Ld which has no exception and is not waiting for
@@ -775,6 +788,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
+                objIdPAddr: 0, //objIdPAddr,
                 pcHash: hash(getAddr(pc))
             });
         end
@@ -851,6 +865,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         else begin
             doAssert(False, "load is stalled");
         end
+        // TODO: should we enq even when stalled?
+        reqLdObjIdSealQ.enq(tuple2(zeroExtend(info.tag), info.objIdPAddr));
 `ifdef PERFORMANCE_MONITORING
         events_reg[0] <= events;
 `endif
@@ -914,7 +930,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endaction
     endfunction
 
-    rule doRespLdMem;
+    function Bool memRespLdQDeqGuard;
+        let {t, d} = memRespLdQ.first;
+        // LdQTag tag = t;
+        return lsq.objIdSealCheck(tagged Ld t);
+    endfunction
+
+    rule doRespLdMem(memRespLdQDeqGuard);
         memRespLdQ.deq;
         let {t, d} = memRespLdQ.first;
         doRespLd(t, d, "[doRespLdMem]");
@@ -1007,6 +1029,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data: ?,
             amoInst: ?,
             loadTags: False,
+            objSealRd: False,
             pcHash: ?
         };
         reqLrScAmoQ.enq(req);
@@ -1353,6 +1376,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 rl: lsqDeqSt.rel
             },
             loadTags: False,
+            objSealRd: False,
             pcHash: ?
         };
         reqLrScAmoQ.enq(req);
@@ -1566,6 +1590,22 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     // send req to D$
+    rule sendObjSealRdToMem;
+        let {lsqTag, addr} <- toGet(reqLdObjIdSealQ).get;
+        dMem.procReq.req(ProcRq {
+            id: zeroExtend(lsqTag),
+            addr: addr,
+            toState: (multicore ? S : E), // in case of single core, just fetch to E
+            op: Ld,
+            byteEn: ?,
+            data: ?,
+            amoInst: ?,
+            loadTags: False,
+            objSealRd: True,
+            pcHash: ?
+        });
+    endrule
+    (* descending_urgency = "sendObjSealRdToMem, sendLdToMem" *)
     rule sendLdToMem;
         let {lsqTag, addr, loadTags, pcHash} <- toGet(reqLdQ).get;
         dMem.procReq.req(ProcRq {
@@ -1577,6 +1617,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data: ?,
             amoInst: ?,
             loadTags: loadTags,
+            objSealRd: False,
             pcHash: pcHash
         });
     endrule
@@ -1598,6 +1639,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data: ?,
             amoInst: ?,
             loadTags: False,
+            objSealRd: False,
             pcHash: pcHash
         });
     endrule
