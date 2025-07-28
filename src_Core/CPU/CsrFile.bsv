@@ -591,6 +591,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
     Reg#(Data) mimpid_csr = readOnlyReg(0);
     // mhartid
     Reg#(Data) mhartid_csr = readOnlyReg(hartid);
+    // mconfigptr
+    Reg#(Data) mconfigptr_csr = readOnlyReg(0);
 
     // Supervisor level CSRs
     // sstatus: restricted view of mstatus
@@ -917,6 +919,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrMARCHID:    marchid_csr;
             csrAddrMIMPID:     mimpid_csr;
             csrAddrMHARTID:    mhartid_csr;
+            csrAddrMCONFIGPTR: mconfigptr_csr;
             csrAddrMSECCFG:    mseccfg_csr;
             csrAddrMENVCFG:    menvcfg_csr;
             csrAddrSENVCFG:    senvcfg_csr;
@@ -999,6 +1002,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrMVENDORID: 0;
             csrAddrMARCHID:   0;
             csrAddrMIMPID:    0;
+            csrAddrMCONFIGPTR:0;
             csrAddrMHARTID:   hartid;
             csrAddrMSTATUS:   fn_mstatus_val (getXLBits,    // sxl
                                           getXLBits,    // uxl
