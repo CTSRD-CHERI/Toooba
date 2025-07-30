@@ -138,6 +138,7 @@ Bit #(7) f7_cap_CIncOffset      = 7'h11;
 Bit #(7) f7_cap_CToPtr          = 7'h12;
 Bit #(7) f7_cap_CFromPtr        = 7'h13;
 Bit #(7) f7_cap_CSub            = 7'h14;
+Bit #(7) f7_cap_CCSetType       = 7'h15;
 // 7'h15 unused
 Bit #(7) f7_cap_CSetHigh        = 7'h16;
 // 7'h17-7'h1c unused

@@ -343,6 +343,7 @@ typedef union tagged {
     void SealEntry;
     SrcSelector Unseal;
     void AndPerm;
+    void CCSetType;
     void SetFlags;
     void SetHigh;
     void BuildCap;
