@@ -53,7 +53,7 @@ typedef Bit#(TLog#(TAdd#(TestNum, 1))) TestCnt;
 typedef TDiv#(TestNum, 1) TestPrintNum;
 
 // number of DMA reqs
-typedef 1 DmaTestNum; //TMul#(TestNum, L1Num) DmaTestNum; // To reduce sc failure
+typedef 2 DmaTestNum; //TMul#(TestNum, L1Num) DmaTestNum; // To reduce sc failure
 typedef Bit#(TLog#(DmaTestNum)) DmaTestId;
 typedef Bit#(TLog#(TAdd#(DmaTestNum, 1))) DmaTestCnt;
 typedef TDiv#(DmaTestNum, 1) DmaTestPrintNum;
@@ -198,9 +198,19 @@ module mkTbCHERIL1LL(Empty);
     Vector#(L1DNum, Randomize#(AmoFunc)) randDCAmoFunc <- replicateM(mkConstrainedRandomizer(Swap, Maxu));
     Vector#(L1DNum, Randomize#(Bool)) randDCDoubleWord <- replicateM(mkGenericRandomizer);
     Vector#(L1DNum, Reg#(TestCnt)) sendDCCnt <- replicateM(mkReg(0));
+    Reg#(DmaTestCnt) sendPrintDmaCnt <- mkReg(fromInteger(valueof(DmaTestPrintNum)));
+
     Vector#(L1DNum, RWire#(MemTestReq)) sendDCReq <- replicateM(mkRWire);
     // randomize req
     // D$
+
+        // DMA
+    Randomize#(ReqStall) randDmaReqStall <- mkGenericRandomizer;
+    Randomize#(Bool) randDmaWrite <- mkGenericRandomizer;
+    Randomize#(Bit#(LineSzBytes)) randDmaBE <- mkConstrainedRandomizer(1, maxBound); // this cannot be all 0
+    Randomize#(LLCTag) randDmaTag <- mkConstrainedRandomizer(0, fromInteger(valueOf(TagNum) - 1));
+    Randomize#(LLCIndex) randDmaIndex <- mkConstrainedRandomizer(0, fromInteger(valueOf(IndexNum) - 1));
+    Randomize#(Bit#(SizeOf#(Line))) randDmaData <- mkGenericRandomizer;
 
     Vector#(L1DNum, Reg#(File)) dcReqLog <- replicateM(mkReg(InvalidFile));
     Vector#(L1DNum, Reg#(File)) dcRespLog <- replicateM(mkReg(InvalidFile));
@@ -211,8 +221,13 @@ module mkTbCHERIL1LL(Empty);
     Vector#(L1DNum, RegFile#(TestId, Bool)) dcRespDoneTable <- replicateM(mkRegFileFull);
     Vector#(L1DNum, RWire#(MemTestResp)) recvDCResp <- replicateM(mkRWire);
 
+    RegFile#(DmaTestId, Maybe#(DmaRq#(DmaTestId))) dmaReqTable <- mkRegFileFull;
+    Reg#(DmaTestCnt) sendDmaCnt <- mkReg(0);
+    RWire#(DmaRq#(DmaTestId)) sendDmaReq <- mkRWire;
+
     Reg#(LLCTag) iterTag <- mkReg(0);
     Reg#(LLCIndex) iterIndex <- mkReg(0);
+
 
     function L1ProcResp#(ProcRqId) getL1ProcResp(Integer i);
         return (interface L1ProcResp;
@@ -241,6 +256,9 @@ module mkTbCHERIL1LL(Empty);
     let memSys <- mkL1LL(map(getL1ProcResp, genVector));
 
     mkConnection(memSys.to_mem, delayMem.to_proc);
+    
+    DmaServer#(DmaRqId) ifcDma = memSys.dma;
+
     DelayMemTest dutMem = delayMem.to_test;
 
     rule doInitCoreTable(testFSM == InitTable && !coreTableInitDone);
@@ -316,14 +334,14 @@ module mkTbCHERIL1LL(Empty);
         waitCount <= waitCount + 1;
         if(waitCount == fromInteger(valueOf(TExp#(LLIndexSz)))) begin
             $display("%t %m Start Issuing Requests only now!!!!", $time);
-            $fdisplay(stderr, "INFO: start issue req");
+            $fdisplay(stderr, "INFO: start issue req, why");
             testFSM <= Process;
         end
     endrule
     
     Vector#(L1DNum, L1ProcReq#(ProcRqId)) ifcDC = memSys.dReq;
     Vector#(L1DNum, Reg#(TestCnt)) sendPrintDCCnt <- replicateM(mkReg(fromInteger(valueOf(TestPrintNum))));
-
+    
     for(Integer i = 0; i < valueOf(L1DNum); i = i+1) begin
         rule doDCReq(testFSM == Process && sendDCCnt[i] < fromInteger(valueOf(TestNum)));
             // randomize req
@@ -364,6 +382,7 @@ module mkTbCHERIL1LL(Empty);
                     addr: req.addr,
                     toState: getToState(req.op),
                     op: getMemOp(req.op),
+                    alloc_policy : 2'b00,
                     byteEn: req.byteEn,
                     data: req.data,
                     amoInst: req.amoInst
@@ -381,4 +400,50 @@ module mkTbCHERIL1LL(Empty);
             end
         endrule
     end
+    /*
+    Reg #(Bool ) dcache_done <- mkReg(False);
+    rule doDmaReq(testFSM == Process && sendDmaCnt < fromInteger(valueOf(DmaTestNum))) ;
+        // randomize req
+        
+        let index <- randDCIndex[0].next;
+        let tag <- randDCTag[0].next;
+        let addr = getAddr(tag, index, 0);
+        
+        //Bool write <- randDmaWrite.next;
+        //let data <- randDCData[0].next;
+        //let rBE <- randDCDataBE[0].next;
+        
+        $display("%t Start DMA", $time);
+        
+        //LineByteEn be = unpack(rBE);
+        DmaRq#(DmaTestId) req = DmaRq {
+            addr: addr,
+            byteEn: replicate(0),
+            data: replicate(0),
+            id: truncate(sendDmaCnt)
+        };
+        // randomize stall
+        let rStall <- randDmaReqStall.next;
+        
+        if(!getDmaReqStall(rStall)) begin
+            // no stall, send req & record
+            ifcDma.memReq.enq(DmaRq {
+                addr: req.addr,
+                byteEn: req.byteEn,
+                data: req.data,
+                id: zeroExtend(req.id)
+            });
+            sendDmaReq.wset(req);
+
+            // output req cnt
+            if((sendDmaCnt + 1) == sendPrintDmaCnt) begin
+                $fdisplay(stderr, "INFO: %t DMA send req %d/%d",
+                    $time, sendDmaCnt + 1, valueOf(DmaTestNum)
+                );
+                sendPrintDmaCnt <= sendPrintDmaCnt + fromInteger(valueOf(DmaTestPrintNum));
+            end
+        end
+        
+    endrule
+    */
 endmodule 

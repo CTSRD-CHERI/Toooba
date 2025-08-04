@@ -69,7 +69,8 @@ module mkL1CRqToLLXBar(L1CRqToLLXBar);
                 toState: rq.toState,
                 canUpToE: rq.canUpToE,
                 id: rq.id,
-                child: whichL1
+                child: whichL1,
+                alloc_policy:rq.alloc_policy
             }
         };
     endfunction

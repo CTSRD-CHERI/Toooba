@@ -521,6 +521,7 @@ endfunction
             addr: req.addr,
             fromState: slot.cs,
             toState: req.toState,
+            alloc_policy: req.alloc_policy,
             canUpToE: True,
             id: slot.way,
             child: ?,
