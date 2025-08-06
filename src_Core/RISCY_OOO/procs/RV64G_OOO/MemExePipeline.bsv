@@ -124,7 +124,7 @@ typedef struct {
     // result
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
-    Addr objIdVAddr;
+    Addr objIdAddr;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
     Data    store_data;
@@ -190,6 +190,21 @@ module mkDTlbSynth(DTlbSynth);
                     endcase),
             capStore: x.capStore,
             potentialCapLoad: x.allowCapLoad
+        };
+    endfunction
+    let m <- mkDTlb(getTlbReq);
+    return m;
+endmodule
+
+typedef DTlb#(MemExeToFinish) ObjIdTlbSynth;
+(* synthesize *)
+module mkObjIdTlbSynth(ObjIdTlbSynth);
+    function TlbReq getTlbReq(MemExeToFinish x);
+        return TlbReq {
+            addr: x.objIdAddr,
+            write: False,
+            capStore: False,
+            potentialCapLoad: False
         };
     endfunction
     let m <- mkDTlb(getTlbReq);
@@ -325,8 +340,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // wire to recv bypass
     Vector#(TMul#(2, AluExeNum), RWire#(Tuple2#(PhyRIndx, CapPipe))) bypassWire <- replicateM(mkRWire);
 
-    // TLB
+    // TLBs
     DTlbSynth dTlb <- mkDTlbSynth;
+    DTlbSynth objIdTlb <- mkObjIdTlbSynth;
 
     // store buffer only used in WEAK model
 `ifdef TSO_MM
@@ -633,14 +649,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         // go to next stage by sending to TLB
-        dTlb.procReq(DTlbReq {
+        objIdTlb.procReq(DTlbReq {
             inst: MemExeToFinish {
                 mem_func: x.mem_func,
                 tag: x.tag,
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: shiftBE,
                 vaddr: x.vaddr,
-                objIdVAddr: 0,
+                objIdAddr: 0,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.rVal2,
                 store_data_BE: origBE,
@@ -656,6 +672,42 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
             },
             specBits: regToExe.spec_bits
+        });
+    endrule
+
+    rule doDTlb;
+        objIdTlb.deqProcResp;
+        let objIdTlbResp = objIdTlb.procResp;
+        let x = objIdTlbResp.inst;
+        let {paddr, expCause, allowCapPTE} = objIdTlbResp.resp;
+        Maybe#(Trap) cause = Invalid;
+        if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
+
+        if(verbose) $display("%t : [doDTlb] ", $time, fshow(objIdTlbResp));
+        if(isValid(cause) && verbose) $display("  [doDTlb - objIdTlb response] PAGEFAULT!");
+
+        dTlb.procReq(DTlbReq {
+            inst: MemExeToFinish {
+                mem_func: x.mem_func,
+                tag: x.tag,
+                ldstq_tag: x.ldstq_tag,
+                shiftedBE: x.shiftedBE,
+                vaddr: x.vaddr,
+                objIdAddr: 0,
+`ifdef INCLUDE_TANDEM_VERIF
+                store_data: x.store_data,
+                store_data_BE: x.store_data_BE,
+`endif
+                misaligned: x.misaligned,
+                capStore: x.capStore,
+                allowCapLoad: x.allowCapLoad,
+                capException: x.capException,
+                check: x.check
+`ifdef KONATA
+                , u_id: x.u_id
+`endif
+            },
+            specBits: objIdTlbResp.specBits
         });
     endrule
 
@@ -769,7 +821,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, 0 //objIdPAddr
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.objIdAddr
         );
 
         // issue non-MMIO Ld which has no exception and is not waiting for
@@ -788,7 +840,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
-                objIdPAddr: 0, //objIdPAddr,
+                objIdPAddr: x.objIdAddr,
                 pcHash: hash(getAddr(pc))
             });
         end
