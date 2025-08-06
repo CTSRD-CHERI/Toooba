@@ -124,7 +124,7 @@ typedef struct {
     // result
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
-    Addr objIdAddr;
+    Maybe#(Addr) objIdAddr;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
     Data    store_data;
@@ -181,8 +181,8 @@ endmodule
 typedef DTlb#(MemExeToFinish) DTlbSynth;
 (* synthesize *)
 module mkDTlbSynth(DTlbSynth);
-    function TlbReq getTlbReq(MemExeToFinish x);
-        return TlbReq {
+    function Maybe#(TlbReq) getTlbReq(MemExeToFinish x);
+        return Valid(TlbReq {
             addr: getAddr(x.vaddr),
             write: (case(x.mem_func)
                         St, Sc, Amo: True;
@@ -190,7 +190,7 @@ module mkDTlbSynth(DTlbSynth);
                     endcase),
             capStore: x.capStore,
             potentialCapLoad: x.allowCapLoad
-        };
+        });
     endfunction
     let m <- mkDTlb(getTlbReq);
     return m;
@@ -199,13 +199,17 @@ endmodule
 typedef DTlb#(MemExeToFinish) ObjIdTlbSynth;
 (* synthesize *)
 module mkObjIdTlbSynth(ObjIdTlbSynth);
-    function TlbReq getTlbReq(MemExeToFinish x);
-        return TlbReq {
-            addr: x.objIdAddr,
-            write: False,
-            capStore: False,
-            potentialCapLoad: False
-        };
+    function Maybe#(TlbReq) getTlbReq(MemExeToFinish x);
+        Maybe#(TlbReq) r = Invalid;
+        if (x.objIdAddr matches tagged Valid .a) begin
+            r = Valid(TlbReq{
+                addr: a,
+                write: False,
+                capStore: False,
+                potentialCapLoad: False
+            });
+        end
+        return r;
     endfunction
     let m <- mkDTlb(getTlbReq);
     return m;
@@ -656,7 +660,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: shiftBE,
                 vaddr: x.vaddr,
-                objIdAddr: 0,
+                objIdAddr: Invalid,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.rVal2,
                 store_data_BE: origBE,
@@ -679,9 +683,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdTlb.deqProcResp;
         let objIdTlbResp = objIdTlb.procResp;
         let x = objIdTlbResp.inst;
-        let {paddr, expCause, allowCapPTE} = objIdTlbResp.resp;
+        Maybe#(Addr) objIdPAddr = Invalid;
+        Bool allowCapPTE = False;
         Maybe#(Trap) cause = Invalid;
-        if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
+        if (objIdTlbResp.resp matches tagged Valid .rsp) begin
+            Maybe#(Exception) expCause = Invalid;
+            Addr a = 0;
+            {a, expCause, allowCapPTE} = rsp;
+            objIdPAddr = Valid(a);
+            if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
+        end
 
         if(verbose) $display("%t : [doDTlb] ", $time, fshow(objIdTlbResp));
         if(isValid(cause) && verbose) $display("  [doDTlb - objIdTlb response] PAGEFAULT!");
@@ -693,7 +704,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: x.shiftedBE,
                 vaddr: x.vaddr,
-                objIdAddr: 0,
+                objIdAddr: objIdPAddr,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.store_data,
                 store_data_BE: x.store_data_BE,
@@ -715,9 +726,17 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         dTlb.deqProcResp;
         let dTlbResp = dTlb.procResp;
         let x = dTlbResp.inst;
-        let {paddr, expCause, allowCapPTE} = dTlbResp.resp;
+        Addr paddr = 0;
+        Bool allowCapPTE = False;
         Maybe#(Trap) cause = Invalid;
-        if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
+        if (dTlbResp.resp matches tagged Valid .rsp) begin
+            Maybe#(Exception) expCause = Invalid;
+            {paddr, expCause, allowCapPTE} = rsp;
+            if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
+        end
+        else begin
+            doAssert(False, "[doFinishMem] Regular DTlb response must be valid");
+        end
 
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(dTlbResp));
         if(isValid(cause) && verbose) $display("  [doFinishMem - dTlb response] PAGEFAULT!");
@@ -918,7 +937,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             doAssert(False, "load is stalled");
         end
         // TODO: should we enq even when stalled?
-        reqLdObjIdSealQ.enq(tuple2(zeroExtend(info.tag), info.objIdPAddr));
+        if (info.objIdPAddr matches tagged Valid .a)
+            reqLdObjIdSealQ.enq(tuple2(zeroExtend(info.tag), a));
 `ifdef PERFORMANCE_MONITORING
         events_reg[0] <= events;
 `endif

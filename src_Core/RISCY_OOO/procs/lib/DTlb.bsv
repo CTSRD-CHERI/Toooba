@@ -78,7 +78,7 @@ typedef struct {
 } DTlbReq#(type instT) deriving(Bits, Eq, FShow);
 
 typedef struct {
-    TlbResp resp;
+    Maybe#(TlbResp) resp;
     instT inst;
     SpecBits specBits;
 } DTlbResp#(type instT) deriving(Bits, Eq, FShow);
@@ -142,9 +142,9 @@ typedef union tagged {
 } DTlbWait deriving(Bits, Eq, FShow);
 
 module mkDTlb#(
-    function TlbReq getTlbReq(instT inst)
+    function Maybe#(TlbReq) getTlbReq(instT inst)
 )(DTlb::DTlb#(instT)) provisos(Bits#(instT, a__));
-    Bool verbose = False;
+    Bool verbose = True;
 
     // TLB array
     DTlbArray tlb <- mkDTlbArray;
@@ -166,7 +166,7 @@ module mkDTlb#(
     Vector#(DTlbReqNum, Reg#(DTlbWait)) pendWait <- replicateM(mkReg(None));
     Vector#(DTlbReqNum, Reg#(Bool)) pendPoisoned <- replicateM(mkRegU);
     Vector#(DTlbReqNum, Reg#(instT)) pendInst <- replicateM(mkRegU);
-    Vector#(DTlbReqNum, Reg#(TlbResp)) pendResp <- replicateM(mkRegU);
+    Vector#(DTlbReqNum, Reg#(Maybe#(TlbResp))) pendResp <- replicateM(mkRegU);
     Vector#(DTlbReqNum, Ehr#(2, SpecBits)) pendSpecBits <- replicateM(mkEhr(?));
 
     // ordering of methods/rules that access pend reqs
@@ -279,7 +279,14 @@ module mkDTlb#(
         // the current req being served is either the initiating req or other
         // req pending on the same resp
         let idx = fromMaybe(pRs.id, respForOtherReq);
-        TlbReq r = getTlbReq(pendInst[idx]);
+        TlbReq r = TlbReq {addr: 0, write: False, capStore: False, potentialCapLoad: False};
+        Maybe#(TlbReq) maybe_r = getTlbReq(pendInst[idx]);
+        if (maybe_r matches tagged Valid .req) begin
+            r = req;
+        end
+        else begin
+            doAssert(False, "[DTLB] Pending request cannot be Invalid");
+        end
 
         if(pendPoisoned[idx]) begin
             // poisoned inst, do nothing
@@ -304,7 +311,7 @@ module mkDTlb#(
                 // fill TLB, and record resp
                 tlb.addEntry(en);
                 let trans_addr = translate(r.addr, en.ppn, en.level);
-                pendResp[idx] <= tuple3(trans_addr, Invalid, permCheck.allowCap);
+                pendResp[idx] <= Valid(tuple3(trans_addr, Invalid, permCheck.allowCap));
                 if(verbose) begin
                     $display("[DTLB] refill: idx %d; ", idx, fshow(r),
                              "; ", fshow(trans_addr));
@@ -313,7 +320,7 @@ module mkDTlb#(
             else begin
                 // page fault
                 Exception fault = permCheck.excCode;
-                pendResp[idx] <= tuple3(?, Valid (fault), False);
+                pendResp[idx] <= Valid(tuple3(?, Valid (fault), False));
                 if(verbose) begin
                     $display("[DTLB] refill no permission: idx %d; ", idx, fshow(r));
                 end
@@ -322,7 +329,7 @@ module mkDTlb#(
         else begin
             // page fault
             Exception fault = r.write ? excStorePageFault : excLoadPageFault;
-            pendResp[idx] <= tuple3(?, Valid (fault), False);
+            pendResp[idx] <= Valid(tuple3(?, Valid (fault), False));
             if(verbose) $display("[DTLB] refill page fault: idx %d; ", idx, fshow(r));
         end
 
@@ -452,117 +459,130 @@ module mkDTlb#(
         // pendWait and pendResp are set later in this method
 
         // try to translate
-        TlbReq r = getTlbReq(req.inst);
-
+        Maybe#(TlbReq) maybe_r = getTlbReq(req.inst);
+        if (maybe_r matches tagged Valid .mr) begin
+            TlbReq r = mr;
 `ifdef SECURITY
-        // Security check
-        // Forbid any data load shared outside of the protection domain
-        // if shared load are not allowed
-        // No need to special case M mode with special vm_info value because we
-        // assume that we allow shared load all the time when in M mode.
-        // (Because we are always non speculative in M mode)
-        if (!vm_info.sanctum_authShared && outOfProtectionDomain(vm_info, r.addr))begin
-            pendWait[idx] <= None;
-            pendResp[idx] <= tuple3(?, Valid (excLoadAccessFault), False);
-        end
-`else
-        // No security check
-        if (False) begin
-            noAction;
-        end
-`endif
-        else if (vm_info.sv39) begin
-            let vpn = getVpn(r.addr);
-            let trans_result = tlb.translate(vpn, vm_info.asid);
-            if (!validVirtualAddress(r.addr)) begin
-                // page fault
-                Exception fault = r.write ? excStorePageFault : excLoadPageFault;
+            // Security check
+            // Forbid any data load shared outside of the protection domain
+            // if shared load are not allowed
+            // No need to special case M mode with special vm_info value because we
+            // assume that we allow shared load all the time when in M mode.
+            // (Because we are always non speculative in M mode)
+            if (!vm_info.sanctum_authShared && outOfProtectionDomain(vm_info, r.addr))begin
                 pendWait[idx] <= None;
-                pendResp[idx] <= tuple3(?, Valid (fault), False);
-                if(verbose) $display("[DTLB] req invalid virtual address: idx %d; ", idx, fshow(r));
-            end else if (trans_result.hit) begin
-                // TLB hit
-                let entry = trans_result.entry;
-                // check permission
-            $display("procReq: vm_info: ", fshow(vm_info),
-                     "         en     : ", fshow(entry),
-                     "         r      : ", fshow(r)
-                     );
-                let permCheck = hasVMPermission(vm_info,
-                                                entry.pteType,
-                                                entry.pteUpperType,
-                                                entry.ppn,
-                                                entry.level,
-                                                r.write ? DataStore : DataLoad,
-                                                r.capStore,
-                                                r.potentialCapLoad);
-                $display("Permission check output 2: ", fshow(permCheck));
-                if (permCheck.allowed) begin
-                    // update TLB replacement info
-                    tlb.updateRepByHit(trans_result.index);
-                    // translate addr
-                    Addr trans_addr = translate(r.addr, entry.ppn, entry.level);
-                    pendWait[idx] <= None;
-                    pendResp[idx] <= tuple3(trans_addr, Invalid, permCheck.allowCap);
-                    if(verbose) begin
-                        $display("[DTLB] req (hit): idx %d; ", idx, fshow(r),
-                                 "; ", fshow(trans_result));
-                    end
-`ifdef PERF_COUNT
-                    // perf: hit under miss
-                    if(doStats && readVReg(pendWait) != replicate(None)) begin
-                        hitUnderMissCnt.incr(1);
-                    end
+                pendResp[idx] <= Valid(tuple3(?, Valid (excLoadAccessFault), False));
+            end
+`else
+            // No security check
+            if (False) begin
+                noAction;
+            end
 `endif
+            else if (vm_info.sv39) begin
+                let vpn = getVpn(r.addr);
+                let trans_result = tlb.translate(vpn, vm_info.asid);
+                if (!validVirtualAddress(r.addr)) begin
+                    // page fault
+                    Exception fault = r.write ? excStorePageFault : excLoadPageFault;
+                    pendWait[idx] <= None;
+                    pendResp[idx] <= Valid(tuple3(?, Valid (fault), False));
+                    if(verbose) $display("[DTLB] req invalid virtual address: idx %d; ", idx, fshow(r));
+                end else if (trans_result.hit) begin
+                    // TLB hit
+                    let entry = trans_result.entry;
+                    // check permission
+                $display("procReq: vm_info: ", fshow(vm_info),
+                        "         en     : ", fshow(entry),
+                        "         r      : ", fshow(r)
+                        );
+                    let permCheck = hasVMPermission(vm_info,
+                                                    entry.pteType,
+                                                    entry.pteUpperType,
+                                                    entry.ppn,
+                                                    entry.level,
+                                                    r.write ? DataStore : DataLoad,
+                                                    r.capStore,
+                                                    r.potentialCapLoad);
+                    $display("Permission check output 2: ", fshow(permCheck));
+                    if (permCheck.allowed) begin
+                        // update TLB replacement info
+                        tlb.updateRepByHit(trans_result.index);
+                        // translate addr
+                        Addr trans_addr = translate(r.addr, entry.ppn, entry.level);
+                        pendWait[idx] <= None;
+                        pendResp[idx] <= Valid(tuple3(trans_addr, Invalid, permCheck.allowCap));
+                        if(verbose) begin
+                            $display("[DTLB] req (hit): idx %d; ", idx, fshow(r),
+                                    "; ", fshow(trans_result));
+                        end
+`ifdef PERF_COUNT
+                        // perf: hit under miss
+                        if(doStats && readVReg(pendWait) != replicate(None)) begin
+                            hitUnderMissCnt.incr(1);
+                        end
+`endif
+                    end
+                    else begin
+                        // page fault
+                        Exception fault = permCheck.excCode;
+                        pendWait[idx] <= None;
+                        pendResp[idx] <= Valid(tuple3(?, Valid (fault), False));
+                        if(verbose) $display("[DTLB] req no permission: idx %d; ", idx, fshow(r));
+                    end
                 end
                 else begin
-                    // page fault
-                    Exception fault = permCheck.excCode;
-                    pendWait[idx] <= None;
-                    pendResp[idx] <= tuple3(?, Valid (fault), False);
-                    if(verbose) $display("[DTLB] req no permission: idx %d; ", idx, fshow(r));
+                    // TLB miss, req to parent TLB only if there is no existing req
+                    // for the same VPN already waiting for parent TLB resp
+                    function Bool reqSamePage(DTlbReqIdx i);
+                        // we can ignore pendValid here, because not-None pendWait implies
+                        // pendValid is true
+                        let mr_i = getTlbReq(pendInst[i]);
+                        if (mr_i matches tagged Valid .r_i) begin
+                            return pendWait[i] == WaitParent && getVpn(r.addr) == getVpn(r_i.addr);
+                        end
+                        else begin
+                            // doAssert(False, "[DTLB] Pending request cannot be Invalid - miss");
+                            return True;
+                        end
+                    endfunction
+                    Vector#(DTlbReqNum, DTlbReqIdx) idxVec = genWith(fromInteger);
+                    if(find(reqSamePage, idxVec) matches tagged Valid .i) begin
+                        // peer entry has already requested, so don't send duplicate req
+                        pendWait[idx] <= WaitPeer (i);
+                        doAssert(pendValid_procReq[i], "peer entry must be valid");
+                        if(verbose) begin
+                            $display("[DTLB] req miss, pend on peer: idx %d, ",
+                                    idx, "; ", fshow(r), "; ", fshow(i));
+                        end
+                    end
+                    else begin
+                        // this is the first req for this VPN
+                        pendWait[idx] <= WaitParent;
+                        rqToPQ.enq(DTlbRqToP {
+                            vpn: vpn,
+                            id: idx
+                        });
+                        if(verbose) begin
+                            $display("[DTLB] req miss, send to parent: idx %d, ",
+                                    idx, fshow(r));
+                        end
+                    end
+                    // perf: miss
+                    latTimer.start(idx);
                 end
             end
             else begin
-                // TLB miss, req to parent TLB only if there is no existing req
-                // for the same VPN already waiting for parent TLB resp
-                function Bool reqSamePage(DTlbReqIdx i);
-                    // we can ignore pendValid here, because not-None pendWait implies
-                    // pendValid is true
-                    let r_i = getTlbReq(pendInst[i]);
-                    return pendWait[i] == WaitParent && getVpn(r.addr) == getVpn(r_i.addr);
-                endfunction
-                Vector#(DTlbReqNum, DTlbReqIdx) idxVec = genWith(fromInteger);
-                if(find(reqSamePage, idxVec) matches tagged Valid .i) begin
-                    // peer entry has already requested, so don't send duplicate req
-                    pendWait[idx] <= WaitPeer (i);
-                    doAssert(pendValid_procReq[i], "peer entry must be valid");
-                    if(verbose) begin
-                        $display("[DTLB] req miss, pend on peer: idx %d, ",
-                                 idx, "; ", fshow(r), "; ", fshow(i));
-                    end
-                end
-                else begin
-                    // this is the first req for this VPN
-                    pendWait[idx] <= WaitParent;
-                    rqToPQ.enq(DTlbRqToP {
-                        vpn: vpn,
-                        id: idx
-                    });
-                    if(verbose) begin
-                        $display("[DTLB] req miss, send to parent: idx %d, ",
-                                 idx, fshow(r));
-                    end
-                end
-                // perf: miss
-                latTimer.start(idx);
+                // bare mode
+                pendWait[idx] <= None;
+                pendResp[idx] <= Valid(tuple3(r.addr, Invalid, True));
+                if(verbose) $display("DTLB %m req (bare): ", fshow(r));
             end
         end
         else begin
-            // bare mode
             pendWait[idx] <= None;
-            pendResp[idx] <= tuple3(r.addr, Invalid, True);
-            if(verbose) $display("DTLB %m req (bare): ", fshow(r));
+            pendResp[idx] <= Invalid;
+            if(verbose) $display("DTLB %m req (skip objId): ", fshow(maybe_r));
         end
 
 `ifdef PERF_COUNT

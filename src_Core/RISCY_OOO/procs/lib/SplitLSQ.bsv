@@ -295,7 +295,7 @@ typedef struct {
     LdQTag tag;
     Addr paddr;
     ByteOrTagEn shiftedBE;
-    Addr objIdPAddr;
+    Maybe#(Addr) objIdPAddr;
     Bit#(16) pcHash;
 } LSQIssueLdInfo deriving(Bits, Eq, FShow);
 
@@ -377,7 +377,7 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Addr objIdPAddr
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Maybe#(Addr) objIdPAddr
     );
     // update objSeal. Called when ld resp is received for objId bitmap read
     method Action updateObjIdSeal(LdStQTag lsqTag, Maybe#(Trap) fault);
@@ -673,7 +673,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bit#(16)))                ld_pcHash         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_waitForOlderSt  <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Ehr#(2, Addr))                 ld_paddr           <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(2, Addr))                 ld_objIdPAddr      <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))                 ld_objIdPAddr      <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Maybe#(Trap)))         ld_fault           <- replicateM(mkEhr(?));
@@ -1535,7 +1535,7 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Addr objIdPAddr
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Maybe#(Addr) objIdPAddr
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
