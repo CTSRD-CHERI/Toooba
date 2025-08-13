@@ -378,7 +378,7 @@ endfunction
             data: ?,
             amoInst: ?,
             loadTags: ?,
-            objSealRd: ?,
+            objSealRd: False,
             pcHash: ?
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);

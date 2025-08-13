@@ -256,7 +256,7 @@ module mkDTlb#(
         // request parent TLB to flush
         flushRqToPQ.enq(?);
         waitFlushP <= True;
-        if(verbose) $display("[DTLB] flush begin");
+        if(verbose) $display("[DTLB] %m: flush begin");
 `ifdef PERFORMANCE_MONITORING
         EventsL1D ev = unpack(0);
         ev.evt_TLB_FLUSH = 1;
@@ -268,7 +268,7 @@ module mkDTlb#(
         flushRsFromPQ.deq;
         needFlush <= False;
         waitFlushP <= False;
-        if(verbose) $display("[DTLB] flush done");
+        if(verbose) $display("[DTLB] %m: flush done");
     endrule
 
     // get resp from parent TLB
@@ -492,7 +492,7 @@ module mkDTlb#(
                     // TLB hit
                     let entry = trans_result.entry;
                     // check permission
-                $display("procReq: vm_info: ", fshow(vm_info),
+                    $display("procReq: vm_info: ", fshow(vm_info),
                         "         en     : ", fshow(entry),
                         "         r      : ", fshow(r)
                         );

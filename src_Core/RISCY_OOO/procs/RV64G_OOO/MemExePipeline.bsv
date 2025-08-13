@@ -274,6 +274,7 @@ interface MemExePipeline;
     interface Vector#(TMul#(2, AluExeNum), RecvBypass) recvBypass;
     interface ReservationStationMem rsMemIfc;
     interface DTlbSynth dTlbIfc;
+    interface ObjIdTlbSynth objIdTlbIfc;
     interface SplitLSQ lsqIfc;
     interface StoreBuffer stbIfc;
     interface DCoCache dMemIfc;
@@ -379,6 +380,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
+    Fifo#(2, Tuple2#(LdQTag, Maybe#(Trap))) memObjIdRespLdQ <- mkCFFifo;
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
     // resp ifc to D$
@@ -386,9 +388,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         method Action respLd(DProcReqId id, Bool objSealRd, MemTaggedData d);
             LdQTag tag = truncate(id);
             if(objSealRd) begin
-                // objSealRespBuffer.enq(id, d, lsqDeqSt.shiftedBE, lsqDeqSt.stData, lsqDeqSt.pcHash);
+                if(verbose) begin
+                    $display("%t : [Ld resp] objSealRd Resp", $time, fshow(id), "; ", fshow(d));
+                end
                 // TODO: figure out if obj ID seal is ok here
-                lsq.updateObjIdSeal(tagged Ld tag, Invalid);
+                memObjIdRespLdQ.enq(tuple2(tag, Invalid));
             end
             else begin
                 memRespLdQ.enq(tuple2(tag, d));
@@ -645,7 +649,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
 
         // calculate bitmap offset and send to TLB here
-        // let objIdVAddr = (x.rVal1.otype >> 3); // TODO: add base addr from CSR: + nullWithAddr(inIfc.csrf_rd(csr))
+        Maybe#(Addr) objIdVAddr = Invalid;
+        // if (getCCType(x.rVal1) != '0 && getCCType(x.rVal1) != '1)
+        //     objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >> 3) + inIfc.csrf_rd(csrAddrCCP));
+        // objIdVAddr = Valid('h80004000);
 
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
@@ -653,32 +660,61 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         // go to next stage by sending to TLB
-        objIdTlb.procReq(DTlbReq {
-            inst: MemExeToFinish {
-                mem_func: x.mem_func,
-                tag: x.tag,
-                ldstq_tag: x.ldstq_tag,
-                shiftedBE: shiftBE,
-                vaddr: x.vaddr,
-                objIdAddr: Invalid,
+        if (x.mem_func == Ld && isValid(objIdVAddr)) begin
+            objIdTlb.procReq(DTlbReq {
+                inst: MemExeToFinish {
+                    mem_func: x.mem_func,
+                    tag: x.tag,
+                    ldstq_tag: x.ldstq_tag,
+                    shiftedBE: shiftBE,
+                    vaddr: x.vaddr,
+                    objIdAddr: objIdVAddr, //Valid('h80010000),
 `ifdef INCLUDE_TANDEM_VERIF
-                store_data: x.rVal2,
-                store_data_BE: origBE,
+                    store_data: x.rVal2,
+                    store_data_BE: origBE,
 `endif
-                misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
-                capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
-                allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
-                capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
-                check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                          ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
+                    misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
+                    capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
+                    allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
+                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
+                    check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
+                                            ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
 `ifdef KONATA
-                , u_id: x.u_id
+                    , u_id: x.u_id
 `endif
-            },
-            specBits: regToExe.spec_bits
-        });
+                },
+                specBits: regToExe.spec_bits
+            });
+        end
+        else begin
+            dTlb.procReq(DTlbReq {
+                inst: MemExeToFinish {
+                    mem_func: x.mem_func,
+                    tag: x.tag,
+                    ldstq_tag: x.ldstq_tag,
+                    shiftedBE: shiftBE,
+                    vaddr: x.vaddr,
+                    objIdAddr: Invalid,
+`ifdef INCLUDE_TANDEM_VERIF
+                    store_data: x.rVal2,
+                    store_data_BE: origBE,
+`endif
+                    misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
+                    capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
+                    allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
+                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
+                    check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
+                                            ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
+`ifdef KONATA
+                    , u_id: x.u_id
+`endif
+                },
+                specBits: regToExe.spec_bits
+            });
+        end
     endrule
 
+    (* preempts = "doExeMem, doDTlb" *)
     rule doDTlb;
         objIdTlb.deqProcResp;
         let objIdTlbResp = objIdTlb.procResp;
@@ -704,7 +740,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: x.shiftedBE,
                 vaddr: x.vaddr,
-                objIdAddr: objIdPAddr,
+                objIdAddr: isValid(cause) ? Valid('h80002f00) : objIdPAddr,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.store_data,
                 store_data_BE: x.store_data_BE,
@@ -840,8 +876,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.objIdAddr
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, (x.mem_func == Ld && !isMMIO) ? Valid('h80002f00) : Invalid //x.objIdAddr
         );
+        if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 
         // issue non-MMIO Ld which has no exception and is not waiting for
         // wrong path resp
@@ -859,7 +896,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
-                objIdPAddr: x.objIdAddr,
+                objIdPAddr: Valid('h80002f00), //x.objIdAddr,
                 pcHash: hash(getAddr(pc))
             });
         end
@@ -896,7 +933,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (info.shiftedBE == DataMemAccess (unpack(~0))) events.evt_MEM_CAP_LOAD = 1;
 `endif
         // search LSQ
-        LSQIssueLdResult issRes <- lsq.issueLd(info.tag, info.paddr, info.shiftedBE, sbRes);
+        LSQIssueLdResult issRes <- lsq.issueLd(info.tag, info.paddr, info.objIdPAddr, info.shiftedBE, sbRes);
         if(verbose) begin
             $display("%t : [doIssueLd] fromIssueQ: ", $time, fshow(fromIssueQ), " ; ",
                      fshow(info), " ; ", fshow(sbRes), " ; ", fshow(issRes));
@@ -904,6 +941,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // summarize
         if(issRes matches tagged Forward .forward) begin
             forwardQ.enq(tuple2(info.tag, forward.data));
+            if (info.objIdPAddr matches tagged Valid .a) begin
+                $display("Forward: Issuing objIdSeal ", fshow(info));
+                reqLdObjIdSealQ.enq(tuple2(zeroExtend(info.tag), a));
+            end
             // early wake up
             if(forward.dst matches tagged Valid .dst) begin
                 inIfc.setRegReadyAggr_forward(dst.indx);
@@ -917,10 +958,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
         else if(issRes == ToCache) begin
             reqLdQ.enq(tuple4(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash));
+            if (info.objIdPAddr matches tagged Valid .a) begin
+                $display("ToCache: Issuing objIdSeal ", fshow(info));
+                reqLdObjIdSealQ.enq(tuple2(zeroExtend(info.tag), a));
+            end
             // perf: load mem latency
             ldMemLatTimer.start(info.tag);
         end
         else if(issRes matches tagged Stall .stallBy) begin
+            $display("IssueLd stalled ", fshow(info));
 `ifdef PERF_COUNT
             // perf: load stall
             if(inIfc.doStats) begin
@@ -937,13 +983,48 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             doAssert(False, "load is stalled");
         end
         // TODO: should we enq even when stalled?
-        if (info.objIdPAddr matches tagged Valid .a)
-            reqLdObjIdSealQ.enq(tuple2(zeroExtend(info.tag), a));
+        
 `ifdef PERFORMANCE_MONITORING
         events_reg[0] <= events;
 `endif
     endaction
     endfunction
+
+    rule debug;
+        if (verbose) begin
+            $display("[MemExe debug] reqLdObjIdSealQ: ", fshow(reqLdObjIdSealQ.notFull));
+            $display("[MemExe debug] reqLdQ: ", fshow(reqLdQ.notFull));
+            $display("[MemExe debug] forwardQ: ", fshow(forwardQ.notFull));
+            $display("[MemExe debug] forwardQ: ", fshow(forwardQ.notFull));
+            $display("[MemExe debug] memObjIdRespLdQ: ", fshow(memObjIdRespLdQ.notFull));
+            $display("[MemExe debug] memRespLdQ: ", fshow(memRespLdQ.notFull));
+        end
+    endrule
+    rule debug1;
+        if (verbose) begin
+            $display("[MemExe debug1] reqLdObjIdSealQ: ", fshow(reqLdObjIdSealQ.first));
+        end
+    endrule
+    rule debug2;
+        if (verbose) begin
+            $display("[MemExe debug2] reqLdQ: ", fshow(reqLdQ.first));
+        end
+    endrule
+    rule debug3;
+        if (verbose) begin
+            $display("[MemExe debug3] forwardQ: ", fshow(forwardQ.first));
+        end
+    endrule
+    rule debug4;
+        if (verbose) begin
+            $display("[MemExe debug4] memObjIdRespLdQ: ", fshow(memObjIdRespLdQ.first));
+        end
+    endrule
+    rule debug5;
+        if (verbose) begin
+            $display("[MemExe debug5] memRespLdQ: ", fshow(memRespLdQ.first));
+        end
+    endrule
 
     rule doIssueLdFromIssueQ;
         // get issue entry from LSQ
@@ -1002,20 +1083,34 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endaction
     endfunction
 
+    (* preempts = "doObjIdRespLdMem, (doRespLdMem,doRespLdForward)" *)
+    rule doObjIdRespLdMem;
+        memObjIdRespLdQ.deq;
+        let {t, f} = memObjIdRespLdQ.first;
+        lsq.updateObjIdSeal(tagged Ld t, f);
+        if (verbose) $display("[doObjIdRespLdMem] ", fshow(t), "; ", fshow(f));
+    endrule
+
     function Bool memRespLdQDeqGuard;
         let {t, d} = memRespLdQ.first;
         // LdQTag tag = t;
-        return lsq.objIdSealCheck(tagged Ld t);
+        return lsq.objIdSealCheckLd(tagged Ld t);
     endfunction
 
+    (* preempts = "doRespLdMem, doRespLdForward" *) // prioritize mem resp
     rule doRespLdMem(memRespLdQDeqGuard);
         memRespLdQ.deq;
         let {t, d} = memRespLdQ.first;
         doRespLd(t, d, "[doRespLdMem]");
     endrule
 
-    (* descending_urgency = "doRespLdMem, doRespLdForward" *) // prioritize mem resp
-    rule doRespLdForward;
+    function Bool forwardQDeqGuard;
+        let {t, d} = forwardQ.first;
+        // LdQTag tag = t;
+        return lsq.objIdSealCheckFwd(tagged Ld t);
+    endfunction
+
+    rule doRespLdForward(forwardQDeqGuard);
         forwardQ.deq;
         let {t, d} = forwardQ.first;
         doRespLd(t, d, "[doRespLdForward]");
@@ -1664,10 +1759,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // send req to D$
     rule sendObjSealRdToMem;
         let {lsqTag, addr} <- toGet(reqLdObjIdSealQ).get;
+        DProcReqId dId = {1'b1, zeroExtend(lsqTag)};
         dMem.procReq.req(ProcRq {
-            id: zeroExtend(lsqTag),
+            id: dId,
             addr: addr,
-            toState: (multicore ? S : E), // in case of single core, just fetch to E
+            toState: S,
             op: Ld,
             byteEn: ?,
             data: ?,
@@ -1676,12 +1772,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             objSealRd: True,
             pcHash: ?
         });
+        if(verbose) $display("[sendObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
     endrule
-    (* descending_urgency = "sendObjSealRdToMem, sendLdToMem" *)
+    (* preempts = "sendObjSealRdToMem, (sendLdToMem,sendStToMem,sendLrScAmoToMem)" *)
     rule sendLdToMem;
         let {lsqTag, addr, loadTags, pcHash} <- toGet(reqLdQ).get;
+        DProcReqId dId = zeroExtend(lsqTag);
         dMem.procReq.req(ProcRq {
-            id: zeroExtend(lsqTag),
+            id: dId,
             addr: addr,
             toState: loadTags ? T : (multicore ? S : E), // in case of single core, just fetch to E
             op: Ld,
@@ -1692,6 +1790,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             objSealRd: False,
             pcHash: pcHash
         });
+        if(verbose) $display("[sendLdToMem] ", fshow(lsqTag), "; ", fshow(addr));
     endrule
     (* descending_urgency = "sendLdToMem, sendStToMem" *) // prioritize Ld over St
     rule sendStToMem;
@@ -1728,6 +1827,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     interface recvBypass = map(getRecvBypassIfc, bypassWire);
     interface rsMemIfc = rsMem;
     interface dTlbIfc = dTlb;
+    interface objIdTlbIfc = objIdTlb;
     interface lsqIfc = lsq;
     interface stbIfc = stb;
     interface dMemIfc = dMem;
@@ -1736,6 +1836,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         dispToRegQ.specUpdate,
         regToExeQ.specUpdate,
         dTlb.specUpdate,
+        objIdTlb.specUpdate,
         lsq.specUpdate
     ));
 

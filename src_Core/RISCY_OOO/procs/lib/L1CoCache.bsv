@@ -112,7 +112,7 @@ typedef 4 DPRqNum; // match cache pipeline latency
 typedef Bit#(TLog#(DCRqNum)) DCRqMshrIdx;
 typedef Bit#(TLog#(DPRqNum)) DPRqMshrIdx;
 
-typedef Bit#(TMax#(SizeOf#(LdQTag), SizeOf#(SBIndex))) DProcReqId;
+typedef Bit#(TMax#(TAdd#(SizeOf#(LdQTag), 1), SizeOf#(SBIndex))) DProcReqId;
 
 (* synthesize *)
 module mkDCRqMshrWrapper(

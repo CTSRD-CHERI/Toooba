@@ -2,6 +2,7 @@
 `CSR(FFLAGS,     12'h001)
 `CSR(FRM,        12'h002)
 `CSR(FCSR,       12'h003)
+`CSR(CCP,        12'h012)
 `CSR(CYCLE,      12'hc00)
 `CSR(TIME,       12'hc01)
 `CSR(INSTRET,    12'hc02)

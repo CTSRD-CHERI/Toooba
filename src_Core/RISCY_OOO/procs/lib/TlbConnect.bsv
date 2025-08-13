@@ -32,9 +32,17 @@ import ITlb::*;
 import DTlb::*;
 import L2Tlb::*;
 
-module mkTlbConnect#(ITlbToParent i, DTlbToParent d, L2TlbToChildren l2)(Empty);
+module mkTlbConnect#(ITlbToParent i, DTlbToParent d, DTlbToParent o, L2TlbToChildren l2)(Empty);
     // give priority to DTlb req
-    (* descending_urgency = "sendDTlbReq, sendITlbReq" *)
+    (* descending_urgency = "sendObjIdTlbReq, sendDTlbReq, sendITlbReq" *)
+    rule sendObjIdTlbReq;
+        DTlbRqToP r <- toGet(o.rqToP).get;
+        l2.rqFromC.put(L2TlbRqFromC {
+            child: ObjId (r.id),
+            vpn: r.vpn
+        });
+    endrule
+
     rule sendDTlbReq;
         DTlbRqToP r <- toGet(d.rqToP).get;
         l2.rqFromC.put(L2TlbRqFromC {
@@ -51,6 +59,14 @@ module mkTlbConnect#(ITlbToParent i, DTlbToParent d, L2TlbToChildren l2)(Empty);
         });
     endrule
 
+    rule sendRsToObjIdTlb(l2.rsToC.first.child matches tagged ObjId .id);
+        L2TlbRsToC r <- toGet(l2.rsToC).get;
+        o.ldTransRsFromP.enq(DTlbTransRsFromP {
+            entry: r.entry,
+            id: id
+        });
+    endrule
+
     rule sendRsToDTlb(l2.rsToC.first.child matches tagged D .id);
         L2TlbRsToC r <- toGet(l2.rsToC).get;
         d.ldTransRsFromP.enq(DTlbTransRsFromP {
@@ -64,11 +80,13 @@ module mkTlbConnect#(ITlbToParent i, DTlbToParent d, L2TlbToChildren l2)(Empty);
         i.rsFromP.enq(ITlbRsFromP {entry: r.entry});
     endrule
 
+    mkConnection(o.flush.request, l2.objIdTlbReqFlush);
     mkConnection(d.flush.request, l2.dTlbReqFlush);
     mkConnection(i.flush.request, l2.iTlbReqFlush);
 
     rule sendFlushDone;
         let x <- l2.flushDone.get;
+        o.flush.response.put(?);
         d.flush.response.put(?);
         i.flush.response.put(?);
     endrule

@@ -88,6 +88,7 @@ endinterface
 typedef union tagged {
     void I;
     DTlbReqIdx D;
+    DTlbReqIdx ObjId;
 } TlbChild deriving(Bits, Eq, FShow);
 typedef struct {
     TlbChild child;
@@ -105,6 +106,7 @@ interface L2TlbToChildren;
     // flush with I/D TLB
     interface Put#(void) iTlbReqFlush;
     interface Put#(void) dTlbReqFlush;
+    interface Put#(void) objIdTlbReqFlush;
     interface Get#(void) flushDone;
 endinterface
 
@@ -160,8 +162,9 @@ module mkL2Tlb(L2Tlb::L2Tlb);
     // flush
     Reg#(Bool) iFlushReq <- mkReg(False);
     Reg#(Bool) dFlushReq <- mkReg(False);
+    Reg#(Bool) objIdFlushReq <- mkReg(False);
     Reg#(Bool) waitFlushDone <- mkReg(False);
-    Bool flushing = iFlushReq && dFlushReq;
+    Bool flushing = iFlushReq && dFlushReq && objIdFlushReq;
     Fifo#(1, void) flushDoneQ <- mkCFFifo;
 
     // req/resp with I/D TLBs
@@ -313,6 +316,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         flushDoneQ.enq(?);
         iFlushReq <= False;
         dFlushReq <= False;
+        objIdFlushReq <= False;
     endrule
 
     // tlb req rule is preempted by page walk rule, i.e., don't fire when page
@@ -763,6 +767,11 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         interface Put dTlbReqFlush;
             method Action put(void x) if(!dFlushReq);
                 dFlushReq <= True;
+            endmethod
+        endinterface
+        interface Put objIdTlbReqFlush;
+            method Action put(void x) if(!objIdFlushReq);
+                objIdFlushReq <= True;
             endmethod
         endinterface
         interface Get flushDone = toGet(flushDoneQ);

@@ -490,7 +490,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
     function CommitStuck commitStuck;
         let x = rob.deqPort[0].deq_data;
         return CommitStuck {
-            pc: x.pc,
+            pc: getAddr(x.pc),
             iType: x.iType,
             trap: x.trap,
             state: x.rob_inst_state,
