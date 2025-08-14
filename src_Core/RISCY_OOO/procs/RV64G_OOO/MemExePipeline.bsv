@@ -178,6 +178,13 @@ module mkMemRegToExeFifo(MemRegToExeFifo);
     return m;
 endmodule
 
+typedef SpecFifo_SB_deq_enq_C_deq_enq#(1, MemExeToFinish) DTlbReqFifo;
+(* synthesize *)
+module mkDTlbReqFifo(DTlbReqFifo);
+    let m <- mkSpecFifo_SB_deq_enq_C_deq_enq(False);
+    return m;
+endmodule
+
 typedef DTlb#(MemExeToFinish) DTlbSynth;
 (* synthesize *)
 module mkDTlbSynth(DTlbSynth);
@@ -348,6 +355,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // TLBs
     DTlbSynth dTlb <- mkDTlbSynth;
     DTlbSynth objIdTlb <- mkObjIdTlbSynth;
+
+    let dTlbReqQ <- mkDTlbReqFifo;
 
     // store buffer only used in WEAK model
 `ifdef TSO_MM
@@ -687,8 +696,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             });
         end
         else begin
-            dTlb.procReq(DTlbReq {
-                inst: MemExeToFinish {
+            // dTlb.procReq(
+            dTlbReqQ.enq(ToSpecFifo {
+                data: MemExeToFinish {
                     mem_func: x.mem_func,
                     tag: x.tag,
                     ldstq_tag: x.ldstq_tag,
@@ -709,13 +719,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     , u_id: x.u_id
 `endif
                 },
-                specBits: regToExe.spec_bits
+                spec_bits: regToExe.spec_bits
             });
         end
     endrule
 
-    (* preempts = "doExeMem, doDTlb" *)
-    rule doDTlb;
+    (* descending_urgency = "doObjIdTlb, doExeMem" *)
+    rule doObjIdTlb;
         objIdTlb.deqProcResp;
         let objIdTlbResp = objIdTlb.procResp;
         let x = objIdTlbResp.inst;
@@ -730,11 +740,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
         end
 
-        if(verbose) $display("%t : [doDTlb] ", $time, fshow(objIdTlbResp));
-        if(isValid(cause) && verbose) $display("  [doDTlb - objIdTlb response] PAGEFAULT!");
+        if(verbose) $display("%t : [doObjIdTlb] ", $time, fshow(objIdTlbResp));
+        if(isValid(cause) && verbose) $display("  [doObjIdTlb - objIdTlb response] PAGEFAULT!");
 
-        dTlb.procReq(DTlbReq {
-            inst: MemExeToFinish {
+        // dTlb.procReq(
+        dTlbReqQ.enq(ToSpecFifo {
+            data: MemExeToFinish {
                 mem_func: x.mem_func,
                 tag: x.tag,
                 ldstq_tag: x.ldstq_tag,
@@ -754,8 +765,19 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 , u_id: x.u_id
 `endif
             },
-            specBits: objIdTlbResp.specBits
+            spec_bits: objIdTlbResp.specBits
         });
+    endrule
+
+    rule doTlb;
+        dTlbReqQ.deq;
+        let memExeFin = dTlbReqQ.first;
+        let x = memExeFin.data;
+        dTlb.procReq(DTlbReq {
+            inst: x,
+            specBits: memExeFin.spec_bits
+        });
+        if (verbose) $display("%t : [doTlb] ", $time, fshow(memExeFin));
     endrule
 
     rule doFinishMem;
