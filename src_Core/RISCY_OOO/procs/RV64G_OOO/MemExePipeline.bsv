@@ -1083,7 +1083,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endaction
     endfunction
 
-    (* preempts = "doObjIdRespLdMem, (doRespLdMem,doRespLdForward)" *)
+    (* descending_urgency = "doObjIdRespLdMem, doRespLdMem" *)
     rule doObjIdRespLdMem;
         memObjIdRespLdQ.deq;
         let {t, f} = memObjIdRespLdQ.first;
@@ -1097,7 +1097,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         return lsq.objIdSealCheckLd(tagged Ld t);
     endfunction
 
-    (* preempts = "doRespLdMem, doRespLdForward" *) // prioritize mem resp
+    (* descending_urgency = "doRespLdMem, doRespLdForward" *) // prioritize mem resp
     rule doRespLdMem(memRespLdQDeqGuard);
         memRespLdQ.deq;
         let {t, d} = memRespLdQ.first;
@@ -1774,7 +1774,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         });
         if(verbose) $display("[sendObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
     endrule
-    (* preempts = "sendObjSealRdToMem, (sendLdToMem,sendStToMem,sendLrScAmoToMem)" *)
+    // (* preempts = "sendObjSealRdToMem, (sendLdToMem,sendStToMem,sendLrScAmoToMem)" *)
+    (* descending_urgency = "sendObjSealRdToMem, sendLdToMem" *)
     rule sendLdToMem;
         let {lsqTag, addr, loadTags, pcHash} <- toGet(reqLdQ).get;
         DProcReqId dId = zeroExtend(lsqTag);
