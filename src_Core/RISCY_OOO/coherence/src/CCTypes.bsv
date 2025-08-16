@@ -194,6 +194,10 @@ typedef struct {
     type lineT
 ) deriving(Bits, Eq, FShow);
 
+typedef enum {
+    None, Ld, St
+} ObjSealRdType deriving(Bits, Eq, FShow);
+
 // processor req/resp
 typedef struct {
     idT id;
@@ -205,7 +209,7 @@ typedef struct {
     MemTaggedData data; // valid when op == Sc/Amo
     AmoInst amoInst; // valid when op == Amo
     Bool loadTags; // valid when op == Ld
-    Bool objSealRd;
+    ObjSealRdType objSealRdType;
     Bit#(16) pcHash; // hash of instruction pc sending the request
 } ProcRq#(type idT) deriving(Bits, Eq, FShow);
 
@@ -214,7 +218,7 @@ interface L1ProcReq#(type idT);
 endinterface
 
 interface L1ProcResp#(type idT);
-    method Action respLd(idT id, Bool objSealRd, MemTaggedData resp);
+    method Action respLd(idT id, ObjSealRdType objSealRdType, MemTaggedData resp);
     method Action respLrScAmo(idT id, MemTaggedData resp);
     method ActionValue#(Tuple2#(LineByteEn, Line)) respSt(idT id);
     method Action evict(LineAddr a); // called when cache line is evicted

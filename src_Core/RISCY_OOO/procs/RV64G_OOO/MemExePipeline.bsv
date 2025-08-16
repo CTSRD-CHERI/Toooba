@@ -379,7 +379,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     // fifo for req mem
     Fifo#(1, Tuple4#(LdQTag, Addr, Bool, Bit#(16))) reqLdQ <- mkBypassFifo;
-    Fifo#(1, Tuple2#(LdQTag, Addr)) reqLdObjIdSealQ <- mkBypassFifo;
+    Fifo#(1, Tuple2#(LdQTag, Addr)) reqObjIdSealLdQ <- mkBypassFifo;
+    Fifo#(1, Tuple2#(StQTag, Addr)) reqObjIdSealStQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
     Fifo#(1, Tuple2#(Addr, Bit#(16))) reqStQ <- mkBypassFifo;
@@ -390,20 +391,30 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, Maybe#(Trap))) memObjIdRespLdQ <- mkCFFifo;
+    Fifo#(2, Tuple2#(StQTag, Maybe#(Trap))) memObjIdRespStQ <- mkCFFifo;
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
     // resp ifc to D$
     L1ProcResp#(DProcReqId) procRespIfc = (interface L1ProcResp;
-        method Action respLd(DProcReqId id, Bool objSealRd, MemTaggedData d);
-            LdQTag tag = truncate(id);
-            if(objSealRd) begin
+        method Action respLd(DProcReqId id, ObjSealRdType objSealRdType, MemTaggedData d);
+            
+            if(objSealRdType != None) begin
                 if(verbose) begin
-                    $display("%t : [Ld resp] objSealRd Resp", $time, fshow(id), "; ", fshow(d));
+                    $display("%t : [Ld resp] objSealRd Resp ", $time, fshow(objSealRdType), fshow(id), "; ", fshow(d));
                 end
                 // TODO: figure out if obj ID seal is ok here
-                memObjIdRespLdQ.enq(tuple2(tag, Invalid));
+                if (objSealRdType == Ld) begin
+                    memObjIdRespLdQ.enq(tuple2(truncate(id), Invalid));
+                end
+                else if (objSealRdType == St) begin
+                    memObjIdRespStQ.enq(tuple2(truncate(id), Invalid));
+                end
+                else begin
+                    doAssert(False, "unknown objSealRdType");
+                end
             end
             else begin
+                LdQTag tag = truncate(id);
                 memRespLdQ.enq(tuple2(tag, d));
                 // early wake up RS and set SB
                 // this is done only when the resp is not wrong path
@@ -899,7 +910,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             // x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, (x.mem_func == Ld && !isMMIO) ? Valid('h80000100) : Invalid //x.objIdAddr
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, ((x.mem_func == Ld && !isMMIO) ? x.objIdAddr : Invalid)
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, (((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 
@@ -922,6 +933,17 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 objIdPAddr: x.objIdAddr,
                 pcHash: hash(getAddr(pc))
             });
+        end
+        else if (x.mem_func == St && !isMMIO &&
+                 !isValid(cause) && isValid(x.objIdAddr)) begin
+            StQTag stTag = ?;
+            if(x.ldstq_tag matches tagged St .t) begin
+                stTag = t;
+            end
+            else begin
+                doAssert(False, "must be in StQ");
+            end
+            reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, x.objIdAddr)));
         end
 
 `ifdef PERF_COUNT
@@ -966,7 +988,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             forwardQ.enq(tuple2(info.tag, forward.data));
             if (info.objIdPAddr matches tagged Valid .a) begin
                 $display("Forward: Issuing objIdSeal ", fshow(info));
-                reqLdObjIdSealQ.enq(tuple2(zeroExtend(info.tag), a));
+                reqObjIdSealLdQ.enq(tuple2(zeroExtend(info.tag), a));
             end
             // early wake up
             if(forward.dst matches tagged Valid .dst) begin
@@ -983,7 +1005,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             reqLdQ.enq(tuple4(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash));
             if (info.objIdPAddr matches tagged Valid .a) begin
                 $display("ToCache: Issuing objIdSeal ", fshow(info));
-                reqLdObjIdSealQ.enq(tuple2(zeroExtend(info.tag), a));
+                reqObjIdSealLdQ.enq(tuple2(zeroExtend(info.tag), a));
             end
             // perf: load mem latency
             ldMemLatTimer.start(info.tag);
@@ -1015,7 +1037,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     rule debug;
         if (verbose) begin
-            $display("[MemExe debug] reqLdObjIdSealQ: ", fshow(reqLdObjIdSealQ.notFull));
+            $display("[MemExe debug] reqObjIdSealLdQ: ", fshow(reqObjIdSealLdQ.notFull));
             $display("[MemExe debug] reqLdQ: ", fshow(reqLdQ.notFull));
             $display("[MemExe debug] forwardQ: ", fshow(forwardQ.notFull));
             $display("[MemExe debug] forwardQ: ", fshow(forwardQ.notFull));
@@ -1025,7 +1047,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
     rule debug1;
         if (verbose) begin
-            $display("[MemExe debug1] reqLdObjIdSealQ: ", fshow(reqLdObjIdSealQ.first));
+            $display("[MemExe debug1] reqObjIdSealLdQ: ", fshow(reqObjIdSealLdQ.first));
         end
     endrule
     rule debug2;
@@ -1110,8 +1132,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doObjIdRespLdMem;
         memObjIdRespLdQ.deq;
         let {t, f} = memObjIdRespLdQ.first;
-        lsq.updateObjIdSeal(tagged Ld t, f);
+        lsq.updateLdObjIdSeal(t, f);
         if (verbose) $display("[doObjIdRespLdMem] ", fshow(t), "; ", fshow(f));
+    endrule
+
+    rule doObjIdRespStMem;
+        memObjIdRespStQ.deq;
+        let {t, f} = memObjIdRespStQ.first;
+        lsq.updateStObjIdSeal(t, f);
+        if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(f));
     endrule
 
     (* descending_urgency = "doRespLdMem, doRespLdForward" *) // prioritize mem resp
@@ -1207,7 +1236,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data: ?,
             amoInst: ?,
             loadTags: False,
-            objSealRd: False,
+            objSealRdType: None,
             pcHash: ?
         };
         reqLrScAmoQ.enq(req);
@@ -1421,7 +1450,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // store has not been issued yet)
     rule doDeqStQ_St_Mem_issue(
         !isValid(lsqDeqSt.fault) &&
-        lsqDeqSt.memFunc == St && !lsqDeqSt.isMMIO
+        lsqDeqSt.memFunc == St && !lsqDeqSt.isMMIO &&
+        lsqDeqSt.objIdSealOk
     );
         // send to mem
         Addr addr = lsqDeqSt.paddr;
@@ -1445,7 +1475,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doDeqStQ_St_Mem(
         !isValid(lsqDeqSt.fault) &&&
         lsqDeqSt.memFunc == St &&& !lsqDeqSt.isMMIO &&&
-        stb.getEnqIndex(lsqDeqSt.paddr) matches tagged Valid .sbIdx
+        stb.getEnqIndex(lsqDeqSt.paddr) matches tagged Valid .sbIdx &&&
+        lsqDeqSt.objIdSealOk
     );
         lsq.deqSt;
         // send to SB
@@ -1554,7 +1585,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 rl: lsqDeqSt.rel
             },
             loadTags: False,
-            objSealRd: False,
+            objSealRdType: None,
             pcHash: ?
         };
         reqLrScAmoQ.enq(req);
@@ -1768,9 +1799,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     // send req to D$
-    rule sendObjSealRdToMem;
-        let {lsqTag, addr} <- toGet(reqLdObjIdSealQ).get;
-        DProcReqId dId = {1'b1, zeroExtend(lsqTag)};
+    rule sendLdObjSealRdToMem;
+        let {lsqTag, addr} <- toGet(reqObjIdSealLdQ).get;
+        DProcReqId dId = zeroExtend(lsqTag);
         dMem.procReq.req(ProcRq {
             id: dId,
             addr: addr,
@@ -1780,13 +1811,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data: ?,
             amoInst: ?,
             loadTags: False,
-            objSealRd: True,
+            objSealRdType: Ld,
             pcHash: ?
         });
-        if(verbose) $display("[sendObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
+        if(verbose) $display("[sendLdObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
     endrule
-    // (* preempts = "sendObjSealRdToMem, (sendLdToMem,sendStToMem,sendLrScAmoToMem)" *)
-    (* descending_urgency = "sendObjSealRdToMem, sendLdToMem" *)
+
+    (* descending_urgency = "sendLdObjSealRdToMem, sendLdToMem" *)
     rule sendLdToMem;
         let {lsqTag, addr, loadTags, pcHash} <- toGet(reqLdQ).get;
         DProcReqId dId = zeroExtend(lsqTag);
@@ -1799,12 +1830,32 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data: ?,
             amoInst: ?,
             loadTags: loadTags,
-            objSealRd: False,
+            objSealRdType: None,
             pcHash: pcHash
         });
         if(verbose) $display("[sendLdToMem] ", fshow(lsqTag), "; ", fshow(addr));
     endrule
-    (* descending_urgency = "sendLdToMem, sendStToMem" *) // prioritize Ld over St
+
+    // (* descending_urgency = "sendLdToMem, sendStObjSealRdToMem, sendStToMem" *)
+    rule sendStObjSealRdToMem;
+        let {lsqTag, addr} <- toGet(reqObjIdSealStQ).get;
+        DProcReqId dId = zeroExtend(lsqTag);
+        dMem.procReq.req(ProcRq {
+            id: dId,
+            addr: addr,
+            toState: S,
+            op: Ld,
+            byteEn: ?,
+            data: ?,
+            amoInst: ?,
+            loadTags: False,
+            objSealRdType: St,
+            pcHash: ?
+        });
+        if(verbose) $display("[sendStObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
+    endrule
+
+    (* descending_urgency = "sendLdToMem, sendStObjSealRdToMem, sendStToMem" *) // prioritize Ld over St
     rule sendStToMem;
 `ifdef TSO_MM
         let {addr, pcHash} <- toGet(reqStQ).get;
@@ -1822,7 +1873,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data: ?,
             amoInst: ?,
             loadTags: False,
-            objSealRd: False,
+            objSealRdType: None,
             pcHash: pcHash
         });
     endrule

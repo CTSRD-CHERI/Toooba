@@ -344,6 +344,7 @@ typedef struct {
     MemTaggedData     stData;
     Bool              allowCapAmoLd;
     Maybe#(Trap)      fault;
+    Bool              objIdSealOk;
     Bit#(16)          pcHash;
 } StQDeqEntry deriving (Bits, Eq, FShow);
 
@@ -380,7 +381,8 @@ interface SplitLSQ;
         Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Maybe#(Addr) objIdPAddr
     );
     // update objSeal. Called when ld resp is received for objId bitmap read
-    method Action updateObjIdSeal(LdStQTag lsqTag, Maybe#(Trap) fault);
+    method Action updateLdObjIdSeal(LdQTag tag, Maybe#(Trap) fault);
+    method Action updateStObjIdSeal(StQTag tag, Maybe#(Trap) fault);
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, ByteOrTagEn shiftedBE, SBSearchRes sbRes
@@ -727,6 +729,7 @@ module mkSplitLSQ(SplitLSQ);
     let ld_objIdPAddr_evict         = getVEhrPort(ld_objIdPAddr, 0);
     let ld_objIdPAddr_wrongSpec     = getVEhrPort(ld_objIdPAddr, 0);
     let ld_objIdPAddr_updAddr       = getVEhrPort(ld_objIdPAddr, 0); // write
+    let ld_objIdPAddr_updObjIdSeal  = getVEhrPort(ld_objIdPAddr, 1); // assert
     let ld_objIdPAddr_issue         = getVEhrPort(ld_objIdPAddr, 1);
 
     let ld_isMMIO_findIss = getVEhrPort(ld_isMMIO, 0);
@@ -915,9 +918,10 @@ module mkSplitLSQ(SplitLSQ);
     let st_paddr_issue   = getVEhrPort(st_paddr, 1);
     let st_paddr_deqSt   = getVEhrPort(st_paddr, 1);
 
-    let st_objIdPAddr_updAddr = getVEhrPort(st_objIdPAddr, 0); // write
-    let st_objIdPAddr_issue   = getVEhrPort(st_objIdPAddr, 1);
-    let st_objIdPAddr_deqSt   = getVEhrPort(st_objIdPAddr, 1);
+    let st_objIdPAddr_updAddr       = getVEhrPort(st_objIdPAddr, 0); // write
+    // let st_objIdPAddr_issue         = getVEhrPort(st_objIdPAddr, 1);
+    let st_objIdPAddr_deqSt         = getVEhrPort(st_objIdPAddr, 1);
+    let st_objIdPAddr_updObjIdSeal  = getVEhrPort(st_objIdPAddr, 1); // assert
 
     let st_isMMIO_verify  = getVEhrPort(st_isMMIO, 0);
     let st_isMMIO_updAddr = getVEhrPort(st_isMMIO, 0); // write
@@ -948,7 +952,8 @@ module mkSplitLSQ(SplitLSQ);
     let st_computed_enq     = getVEhrPort(st_computed, 1); // write
 
     let st_objIdSealOk_updObjIdSeal = getVEhrPort(st_objIdSealOk, 0); // write
-    let st_objIdSealOk_resp         = getVEhrPort(st_objIdSealOk, 1);
+    let st_objIdSealOk_deqSt        = getVEhrPort(st_objIdSealOk, 1);
+    let st_objIdSealOk_enq          = getVEhrPort(st_objIdSealOk, 1); // write
 
     let st_verified_wrongSpec = getVEhrPort(st_verified, 0);
     let st_verified_verify    = getVEhrPort(st_verified, 0); // write
@@ -1543,6 +1548,7 @@ module mkSplitLSQ(SplitLSQ);
         st_verified_enq[st_enqP] <= False;
         st_specBits_enq[st_enqP] <= spec_bits;
         st_atCommit_enq[st_enqP] <= False;
+        st_objIdSealOk_enq[st_enqP] <= False;
     endmethod
 
     method Action updateData(StQTag t, MemTaggedData d);
@@ -1753,24 +1759,24 @@ module mkSplitLSQ(SplitLSQ);
         };
     endmethod
 
-    // this method should never be called simultaneously with updateAddr for the same tag
-    // otherwise, we would be writing to the same fault EHR port from two places at the same time
-    method Action updateObjIdSeal(LdStQTag lsqTag, Maybe#(Trap) fault) if (!wrongSpec_conflict);
-        if(lsqTag matches tagged Ld .tag) begin
-            if(!ld_waitWPRespObjId_updObjIdSeal[tag]) begin
-                if(verbose) $display("[LSQ - updateObjIdSeal] objIdResp ", fshow(tag));
-                ld_fault_updObjIdSeal[tag] <= fault;
-                ld_objIdSealOk_updObjIdSeal[tag] <= !isValid(fault);
-            end
-            else begin
-                if(verbose) $display("[LSQ - updateObjIdSeal] objIdResp for WP ", fshow(tag));
-                ld_waitWPRespObjId_updObjIdSeal[tag] <= False;
-            end
+    method Action updateLdObjIdSeal(LdQTag tag, Maybe#(Trap) fault) if (!wrongSpec_conflict);
+        if(!ld_waitWPRespObjId_updObjIdSeal[tag]) begin
+            if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp ", fshow(tag));
+            doAssert(isValid(ld_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
+            ld_fault_updObjIdSeal[tag] <= fault;
+            ld_objIdSealOk_updObjIdSeal[tag] <= !isValid(fault);
         end
-        // else if(lsqTag matches tagged St .tag) begin
-        //     st_fault_updObjIdSeal[tag] <= fault;
-        //     st_objIdSealOk_updObjIdSeal[tag] <= !isValid(fault);
-        // end
+        else begin
+            if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp for WP ", fshow(tag));
+            ld_waitWPRespObjId_updObjIdSeal[tag] <= False;
+        end
+    endmethod
+
+    method Action updateStObjIdSeal(StQTag tag, Maybe#(Trap) fault) if (!wrongSpec_conflict);
+        if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp ", fshow(tag));
+        doAssert(isValid(st_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
+        st_fault_updObjIdSeal[tag] <= fault;
+        st_objIdSealOk_updObjIdSeal[tag] <= !isValid(fault);
     endmethod
 
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,
@@ -2216,6 +2222,7 @@ module mkSplitLSQ(SplitLSQ);
             stData: st_stData_deqSt[deqP],
             allowCapAmoLd: st_allowCapAmoLd_deqSt[deqP],
             fault: st_fault_deqSt[deqP],
+            objIdSealOk: st_objIdSealOk_deqSt[deqP] || !isValid(st_objIdPAddr_deqSt[deqP]),
             pcHash: st_pcHash[deqP]
         };
     endmethod

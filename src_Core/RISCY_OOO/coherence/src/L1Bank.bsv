@@ -378,7 +378,7 @@ endfunction
             data: ?,
             amoInst: ?,
             loadTags: ?,
-            objSealRd: False,
+            objSealRdType: None,
             pcHash: ?
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
@@ -585,9 +585,9 @@ endfunction
             Ld: begin
                 if (!cRqIsPrefetch[n]) begin
                     if (req.loadTags) begin
-                        procResp.respLd(req.id, req.objSealRd, getTagsAt(curLine));
+                        procResp.respLd(req.id, req.objSealRdType, getTagsAt(curLine));
                     end else begin
-                        procResp.respLd(req.id, req.objSealRd, getTaggedDataAt(curLine, dataSel));
+                        procResp.respLd(req.id, req.objSealRdType, getTaggedDataAt(curLine, dataSel));
                     end
                 end
             end

@@ -470,7 +470,7 @@ module mkSelfInvL1Bank#(
         LineMemDataOffset dataSel = getLineMemDataOffset(req.addr);
         case(req.op) matches
             Ld: begin
-                procResp.respLd(req.id, req.objSealRd, getTaggedDataAt(curLine, dataSel));
+                procResp.respLd(req.id, req.objSealRdType, getTaggedDataAt(curLine, dataSel));
             end
             Lr: begin
                 procResp.respLrScAmo(req.id, getTaggedDataAt(curLine, dataSel));
