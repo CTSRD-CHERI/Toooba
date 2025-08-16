@@ -660,8 +660,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // calculate bitmap offset and send to TLB here
         Maybe#(Addr) objIdVAddr = Invalid;
         // if (getCCType(x.rVal1) != '0 && getCCType(x.rVal1) != '1)
-        //     objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >> 3) + inIfc.csrf_rd(csrAddrCCP));
-        // objIdVAddr = Valid('h80004000);
+        objIdVAddr = Valid('h80000100);
 
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
@@ -669,7 +668,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         // go to next stage by sending to TLB
-        if (x.mem_func == Ld && isValid(objIdVAddr)) begin
+        if (x.mem_func == Ld && isValid(objIdVAddr) && False) begin
             objIdTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
                     mem_func: x.mem_func,
@@ -704,7 +703,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     ldstq_tag: x.ldstq_tag,
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
-                    objIdAddr: Invalid,
+                    objIdAddr: objIdVAddr, //Invalid,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
                     store_data_BE: origBE,
@@ -751,7 +750,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: x.shiftedBE,
                 vaddr: x.vaddr,
-                objIdAddr: isValid(cause) ? Valid('h80002f00) : objIdPAddr,
+                // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
+                objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.store_data,
                 store_data_BE: x.store_data_BE,
@@ -769,7 +769,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         });
     endrule
 
-    rule doTlb;
+    rule doDTlb;
         dTlbReqQ.deq;
         let memExeFin = dTlbReqQ.first;
         let x = memExeFin.data;
@@ -777,7 +777,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             inst: x,
             specBits: memExeFin.spec_bits
         });
-        if (verbose) $display("%t : [doTlb] ", $time, fshow(memExeFin));
+        if (verbose) $display("%t : [doDTlb] ", $time, fshow(memExeFin));
     endrule
 
     rule doFinishMem;
@@ -898,7 +898,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, (x.mem_func == Ld && !isMMIO) ? Valid('h80002f00) : Invalid //x.objIdAddr
+            // x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, (x.mem_func == Ld && !isMMIO) ? Valid('h80000100) : Invalid //x.objIdAddr
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, ((x.mem_func == Ld && !isMMIO) ? x.objIdAddr : Invalid)
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 
@@ -918,7 +919,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
-                objIdPAddr: Valid('h80002f00), //x.objIdAddr,
+                objIdPAddr: x.objIdAddr,
                 pcHash: hash(getAddr(pc))
             });
         end
@@ -1858,6 +1859,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         rsMem.specUpdate,
         dispToRegQ.specUpdate,
         regToExeQ.specUpdate,
+        dTlbReqQ.specUpdate,
         dTlb.specUpdate,
         objIdTlb.specUpdate,
         lsq.specUpdate

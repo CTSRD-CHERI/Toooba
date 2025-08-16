@@ -674,7 +674,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bit#(16)))                ld_pcHash         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_waitForOlderSt  <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Ehr#(2, Addr))                 ld_paddr           <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))                 ld_objIdPAddr      <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))         ld_objIdPAddr      <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(Trap)))         ld_fault           <- replicateM(mkEhr(?));
@@ -725,12 +725,13 @@ module mkSplitLSQ(SplitLSQ);
     let ld_paddr_enqIss  = getVEhrPort(ld_paddr, 1); // assert
     let ld_paddr_resp    = getVEhrPort(ld_paddr, 1);
 
-    let ld_objIdPAddr_findIss = getVEhrPort(ld_objIdPAddr, 0);
-    let ld_objIdPAddr_evict   = getVEhrPort(ld_objIdPAddr, 0);
-    let ld_objIdPAddr_updAddr = getVEhrPort(ld_objIdPAddr, 0); // write
-    let ld_objIdPAddr_issue   = getVEhrPort(ld_objIdPAddr, 1);
-    let ld_objIdPAddr_resp    = getVEhrPort(ld_objIdPAddr, 1);
-    let ld_objIdPAddr_enq     = getVEhrPort(ld_objIdPAddr, 1); // write
+    let ld_objIdPAddr_findIss       = getVEhrPort(ld_objIdPAddr, 0);
+    let ld_objIdPAddr_evict         = getVEhrPort(ld_objIdPAddr, 0);
+    let ld_objIdPAddr_wrongSpec     = getVEhrPort(ld_objIdPAddr, 0);
+    let ld_objIdPAddr_updAddr       = getVEhrPort(ld_objIdPAddr, 0); // write
+    let ld_objIdPAddr_issue         = getVEhrPort(ld_objIdPAddr, 1);
+    let ld_objIdPAddr_resp          = getVEhrPort(ld_objIdPAddr, 1);
+    let ld_objIdPAddr_enq           = getVEhrPort(ld_objIdPAddr, 1); // write
 
     let ld_isMMIO_findIss = getVEhrPort(ld_isMMIO, 0);
     let ld_isMMIO_evict   = getVEhrPort(ld_isMMIO, 0); // assert
@@ -890,7 +891,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(Maybe#(PhyDst)))          st_dst       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Bit#(16)))                st_pcHash   <- replicateM(mkRegU);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(2, Addr))                 st_objIdPAddr    <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))         st_objIdPAddr    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
@@ -919,6 +920,10 @@ module mkSplitLSQ(SplitLSQ);
     let st_paddr_updAddr = getVEhrPort(st_paddr, 0); // write
     let st_paddr_issue   = getVEhrPort(st_paddr, 1);
     let st_paddr_deqSt   = getVEhrPort(st_paddr, 1);
+
+    let st_objIdPAddr_updAddr = getVEhrPort(st_objIdPAddr, 0); // write
+    let st_objIdPAddr_issue   = getVEhrPort(st_objIdPAddr, 1);
+    let st_objIdPAddr_deqSt   = getVEhrPort(st_objIdPAddr, 1);
 
     let st_isMMIO_verify  = getVEhrPort(st_isMMIO, 0);
     let st_isMMIO_updAddr = getVEhrPort(st_isMMIO, 0); // write
@@ -1245,7 +1250,7 @@ module mkSplitLSQ(SplitLSQ);
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
         joinActions(map(setVerified, idxVec));
 
-        if(verbose) $display("[LSQ - verifySt] st_verifyP %d", verP);
+        if(verbose) $display("[LSQ - verifySt] st_verifyP ", fshow(verP));
     endrule
 
 `ifdef BSIM
@@ -1456,7 +1461,7 @@ module mkSplitLSQ(SplitLSQ);
                         SpecBits spec_bits,
                         Bit#(16) pcHash) if(ld_can_enq_wire && !wrongSpec_conflict);
         if(verbose) begin
-            $display("[LSQ - enqLd] enqP %d; ", ld_enqP,
+            $display("[LSQ - enqLd] enqP ", fshow(ld_enqP),
                      "; ", fshow(inst_tag),
                      "; ", fshow(mem_inst),
                      "; ", fshow(dst),
@@ -1516,7 +1521,7 @@ module mkSplitLSQ(SplitLSQ);
                         SpecBits spec_bits,
                         Bit#(16) pcHash) if(st_can_enq_wire && !wrongSpec_conflict);
         if(verbose) begin
-            $display("[LSQ - enqSt] enqP %d; ", st_enqP,
+            $display("[LSQ - enqSt] enqP ", fshow(st_enqP),
                      "; ", fshow(inst_tag),
                      "; ", fshow(mem_inst),
                      "; ", fshow(dst),
@@ -1632,6 +1637,7 @@ module mkSplitLSQ(SplitLSQ);
             st_allowCapAmoLd_updAddr[tag] <= allowCap;
             st_computed_updAddr[tag] <= !isValid(fault);
             st_paddr_updAddr[tag] <= pa;
+            st_objIdPAddr_updAddr[tag] <= objIdPAddr;
             st_isMMIO_updAddr[tag] <= mmio;
             st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
 
@@ -1733,7 +1739,7 @@ module mkSplitLSQ(SplitLSQ);
                 LdKilledBy by = lsqTag matches tagged Ld .unuse ? Ld : St;
                 ld_killed_updAddr[killTag] <= Valid (by);
                 if(verbose) begin
-                    $display("[LSQ - updateAddr] kill tag %d", killTag, " ld_hash: %x", ld_pcHash[killTag]);
+                    $display("[LSQ - updateAddr] kill tag ", fshow(killTag), " ld_hash: %x", ld_pcHash[killTag]);
                 end
                 // checks
                 doAssert(ld_computed_updAddr[killTag], "must be computed");
@@ -2193,7 +2199,7 @@ module mkSplitLSQ(SplitLSQ);
     method Action deqLd if(deqLdGuard && !wrongSpec_conflict);
         LdQTag deqP = ld_deqP_deqLd;
 
-        if(verbose) $display("[LSQ - deqLd] deqP %d", deqP);
+        if(verbose) $display("[LSQ - deqLd] deqP ", fshow(deqP));
 
         // sanity check
         if(ld_atCommit_deqLd[deqP]) begin
@@ -2253,7 +2259,7 @@ module mkSplitLSQ(SplitLSQ);
     method Action deqSt if(deqStGuard && !wrongSpec_conflict);
         StQTag deqP = st_deqP;
 
-        if(verbose) $display("[LSQ - deqSt] deqP %d", deqP);
+        if(verbose) $display("[LSQ - deqSt] deqP ", fshow(deqP));
 
         // sanity check
         if(!isValid(st_fault_deqSt[deqP])) begin
@@ -2304,7 +2310,9 @@ module mkSplitLSQ(SplitLSQ);
 
 `ifdef TSO_MM
     method Action cacheEvict(LineAddr lineAddr) if (!wrongSpec_conflict);
-        if(verbose) $display("[LSQ - cacheEvict] ", fshow(lineAddr), "; ", fshow(Addr'({lineAddr, '0})));
+        if(verbose) $display("%t : [LSQ - cacheEvict] ", $time, fshow(lineAddr), "; ", fshow(Addr'({lineAddr, '0})), "; ", 
+                        fshow(getLineAddr('h80000100))
+                        );
         // kill a load if it satisfies the following conditions:
         // (1) valid
         // (2) executing and read from memory (just killing done loads is not
@@ -2317,9 +2325,10 @@ module mkSplitLSQ(SplitLSQ);
             Bool valid = ld_valid_evict[i];
             Bool executing = ld_executing_evict[i];
             Bool read_mem = True;//!isValid(ld_readFrom_evict[i]);
-            Bool overlap = (getLineAddr(ld_paddr_evict[i]) == lineAddr) ||
-                           (isValid(ld_objIdPAddr_evict[i]) ? (getLineAddr(fromMaybe(?, ld_objIdPAddr_evict[i])) == lineAddr) : False);
-            return valid && executing && read_mem && overlap;
+            Bool overlapLd = (getLineAddr(ld_paddr_evict[i]) == lineAddr);
+            Bool overlapObjIdLd = (isValid(ld_objIdPAddr_evict[i]) ? (getLineAddr(fromMaybe(?, ld_objIdPAddr_evict[i])) == lineAddr) :
+                                                                     False);
+            return valid && read_mem && executing && (overlapObjIdLd || overlapLd);
         endfunction
 
         // kill the oldest load
@@ -2416,7 +2425,7 @@ module mkSplitLSQ(SplitLSQ);
                         !ld_done_wrongSpec[i]) begin
                         if (verbose) $display("[LSQ - killLdQ] set wrong path ", fshow(i));
                         ld_waitWPRespLd_wrongSpec[i] <= True;
-                        if (!ld_objIdSealOk_wrongSpec[i]) ld_waitWPRespObjId_wrongSpec[i] <= True;
+                        if (isValid(ld_objIdPAddr_wrongSpec[i]) && !ld_objIdSealOk_wrongSpec[i]) ld_waitWPRespObjId_wrongSpec[i] <= True;
                         doAssert(ld_memFunc[i] == Ld,
                                  "only load resp can be wrong path");
                     end
