@@ -469,9 +469,6 @@ interface SplitLSQ;
     // for security: we cannot flush D$ until all wrong-path loads have
     // returned from D$
     method Bool noWrongPathLoads;
-
-    method Bool objIdSealCheckLd(LdStQTag tag);
-    method Bool objIdSealCheckFwd(LdStQTag tag);
 endinterface
 
 // --- auxiliary types and functions ---
@@ -726,12 +723,11 @@ module mkSplitLSQ(SplitLSQ);
     let ld_paddr_resp    = getVEhrPort(ld_paddr, 1);
 
     let ld_objIdPAddr_findIss       = getVEhrPort(ld_objIdPAddr, 0);
+    let ld_objIdPAddr_deqLd         = getVEhrPort(ld_objIdPAddr, 0);
     let ld_objIdPAddr_evict         = getVEhrPort(ld_objIdPAddr, 0);
     let ld_objIdPAddr_wrongSpec     = getVEhrPort(ld_objIdPAddr, 0);
     let ld_objIdPAddr_updAddr       = getVEhrPort(ld_objIdPAddr, 0); // write
     let ld_objIdPAddr_issue         = getVEhrPort(ld_objIdPAddr, 1);
-    let ld_objIdPAddr_resp          = getVEhrPort(ld_objIdPAddr, 1);
-    let ld_objIdPAddr_enq           = getVEhrPort(ld_objIdPAddr, 1); // write
 
     let ld_isMMIO_findIss = getVEhrPort(ld_isMMIO, 0);
     let ld_isMMIO_evict   = getVEhrPort(ld_isMMIO, 0); // assert
@@ -767,7 +763,6 @@ module mkSplitLSQ(SplitLSQ);
     let ld_objIdSealOk_findIss      = getVEhrPort(ld_objIdSealOk, 0);
     let ld_objIdSealOk_issue        = getVEhrPort(ld_objIdSealOk, 0); // assert
     let ld_objIdSealOk_updObjIdSeal = getVEhrPort(ld_objIdSealOk, 0); // write
-    let ld_objIdSealOk_resp         = getVEhrPort(ld_objIdSealOk, 1);
     let ld_objIdSealOk_enq          = getVEhrPort(ld_objIdSealOk, 1); // write
 
     let ld_executing_findIss   = getVEhrPort(ld_executing, 0);
@@ -871,7 +866,6 @@ module mkSplitLSQ(SplitLSQ);
     let ld_waitWPRespObjId_issue     = getVEhrPort(ld_waitWPRespObjId, 0); // assert
     let ld_waitWPRespObjId_enqIss    = getVEhrPort(ld_waitWPRespObjId, 0); // assert
     let ld_waitWPRespObjId_updObjIdSeal = getVEhrPort(ld_waitWPRespObjId, 0); // write
-    let ld_waitWPRespObjId_resp      = getVEhrPort(ld_waitWPRespObjId, 0); // write
     let ld_waitWPRespObjId_wrongSpec = getVEhrPort(ld_waitWPRespObjId, 0); // write
 
     Reg#(LdQTag) ld_deqP_deqLd  = ld_deqP[0]; // write
@@ -1367,7 +1361,8 @@ module mkSplitLSQ(SplitLSQ);
                 if(ld_memFunc[deqP] == Ld && !ld_isMMIO_deqLd[deqP]) begin
                     // normal non-MMIO Ld: done, older St (if exists) verified
                     return ld_done_deqLd[deqP] &&
-                           (no_older_st || ld_olderStVerified_deqLd[deqP]);
+                           (no_older_st || ld_olderStVerified_deqLd[deqP]) &&
+                           (!isValid(ld_objIdPAddr_deqLd[deqP]) || ld_objIdSealOk_deqLd[deqP]);
                 end
                 else begin
                     // Lr or MMIO: done, at commit, no older st
@@ -1482,7 +1477,6 @@ module mkSplitLSQ(SplitLSQ);
         ld_acq[ld_enqP] <= mem_inst.aq;
         ld_rel[ld_enqP] <= mem_inst.rl;
         ld_dst[ld_enqP] <= dst;
-        ld_objIdPAddr_enq[ld_enqP] <= Invalid;
         ld_fault_enq[ld_enqP] <= Invalid;
         ld_computed_enq[ld_enqP] <= False;
         ld_objIdSealOk_enq[ld_enqP] <= False;
@@ -1777,35 +1771,6 @@ module mkSplitLSQ(SplitLSQ);
         //     st_fault_updObjIdSeal[tag] <= fault;
         //     st_objIdSealOk_updObjIdSeal[tag] <= !isValid(fault);
         // end
-    endmethod
-
-    method Bool objIdSealCheckLd(LdStQTag tag);
-        if(!wrongSpec_conflict &&& tag matches tagged Ld .t) begin 
-            // return ld_waitWPResp_resp[t] || 
-            return !ld_waitWPRespObjId_resp[t] &&
-                    (ld_waitWPRespLd_resp[t] ||
-                        (ld_valid_resp[t] && 
-                            (ld_objIdSealOk_resp[t] || (ld_computed_resp[t] && !isValid(ld_objIdPAddr_resp[t])))));
-        end
-        else begin
-            return False;
-        end
-    endmethod
-
-    method Bool objIdSealCheckFwd(LdStQTag tag);
-        if(!wrongSpec_conflict &&& tag matches tagged Ld .t) begin 
-            // return ld_waitWPResp_resp[t] || 
-            return !ld_waitWPRespObjId_resp[t] &&
-                    (ld_waitWPRespLd_resp[t] ||
-                        (ld_valid_resp[t] && 
-                            (ld_objIdSealOk_resp[t] || (ld_computed_resp[t] && !isValid(ld_objIdPAddr_resp[t])))));
-        end
-        // else if(tag matches tagged St .t) begin
-        //     return st_objIdSealOk_resp[t];
-        // end
-        else begin
-            return False;
-        end
     endmethod
 
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,
@@ -2132,7 +2097,6 @@ module mkSplitLSQ(SplitLSQ);
 `endif
             data: ?
         };
-        doAssert(!ld_waitWPRespObjId_resp[t], "[LSQ] respLd: should not still be waiting for objId response");
         if(ld_waitWPRespLd_resp[t]) begin
             ld_waitWPRespLd_resp[t] <= False;
             res.wrongPath = True;

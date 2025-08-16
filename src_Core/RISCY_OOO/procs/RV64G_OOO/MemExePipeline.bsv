@@ -1106,7 +1106,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endaction
     endfunction
 
-    (* descending_urgency = "doObjIdRespLdMem, doRespLdMem" *)
+    // (* descending_urgency = "doObjIdRespLdMem, doRespLdMem" *)
     rule doObjIdRespLdMem;
         memObjIdRespLdQ.deq;
         let {t, f} = memObjIdRespLdQ.first;
@@ -1114,26 +1114,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (verbose) $display("[doObjIdRespLdMem] ", fshow(t), "; ", fshow(f));
     endrule
 
-    function Bool memRespLdQDeqGuard;
-        let {t, d} = memRespLdQ.first;
-        // LdQTag tag = t;
-        return lsq.objIdSealCheckLd(tagged Ld t);
-    endfunction
-
     (* descending_urgency = "doRespLdMem, doRespLdForward" *) // prioritize mem resp
-    rule doRespLdMem(memRespLdQDeqGuard);
+    rule doRespLdMem;
         memRespLdQ.deq;
         let {t, d} = memRespLdQ.first;
         doRespLd(t, d, "[doRespLdMem]");
     endrule
 
-    function Bool forwardQDeqGuard;
-        let {t, d} = forwardQ.first;
-        // LdQTag tag = t;
-        return lsq.objIdSealCheckFwd(tagged Ld t);
-    endfunction
-
-    rule doRespLdForward(forwardQDeqGuard);
+    rule doRespLdForward;
         forwardQ.deq;
         let {t, d} = forwardQ.first;
         doRespLd(t, d, "[doRespLdForward]");
