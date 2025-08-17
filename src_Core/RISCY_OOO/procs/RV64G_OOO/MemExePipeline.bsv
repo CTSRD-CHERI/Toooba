@@ -671,7 +671,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // calculate bitmap offset and send to TLB here
         Maybe#(Addr) objIdVAddr = Invalid;
         // if (getCCType(x.rVal1) != '0 && getCCType(x.rVal1) != '1)
-        objIdVAddr = Valid('h80000100);
+            objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >> 3) + inIfc.csrf_rd(csrAddrCCP) + Addr'('h80000100));
+        // objIdVAddr = Valid('h80000100);
 
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
