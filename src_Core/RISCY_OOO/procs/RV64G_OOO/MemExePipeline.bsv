@@ -668,10 +668,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             accessByteCount = fromInteger(valueOf(CacheUtils::CLineNumMemDataBytes));
         end
 
+        let ccp = inIfc.csrf_rd(csrAddrCCP);
+        Bit#(32) ccpt = cast(inIfc.csrf_rd(csrAddrCCPT)[31:0]);
+
         // calculate bitmap offset and send to TLB here
         Maybe#(Addr) objIdVAddr = Invalid;
-        // if (getCCType(x.rVal1) != '0 && getCCType(x.rVal1) != '1)
-            objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >> 3) + inIfc.csrf_rd(csrAddrCCP) + Addr'('h80000100));
+        if (isCCType(x.rVal1, ccpt))
+            objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >> 3) + ccp);
         // objIdVAddr = Valid('h80000100);
 
 `ifdef KONATA 
@@ -680,7 +683,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         // go to next stage by sending to TLB
-        if (x.mem_func == Ld && isValid(objIdVAddr) && False) begin
+        if (isValid(objIdVAddr) && (x.mem_func == Ld || x.mem_func == St)) begin
             objIdTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
                     mem_func: x.mem_func,
@@ -697,7 +700,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                     allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                     // capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrSCCP)[31:0])),
-                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrCCP)[31:0])),
+                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, ccpt),
                     check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
                                             ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
 `ifdef KONATA
@@ -725,7 +728,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                     allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                     // capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrSCCP)[31:0])),
-                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrCCP)[31:0])),
+                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, ccpt),
                     check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
                                             ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
 `ifdef KONATA
