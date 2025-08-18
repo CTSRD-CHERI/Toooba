@@ -1033,7 +1033,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         else begin
             doAssert(False, "load is stalled");
         end
-        // TODO: should we enq even when stalled?
         
 `ifdef PERFORMANCE_MONITORING
         events_reg[0] <= events;
@@ -1041,41 +1040,41 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endaction
     endfunction
 
-    rule debug;
-        if (verbose) begin
-            $display("[MemExe debug] reqObjIdSealLdQ: ", fshow(reqObjIdSealLdQ.notFull));
-            $display("[MemExe debug] reqLdQ: ", fshow(reqLdQ.notFull));
-            $display("[MemExe debug] forwardQ: ", fshow(forwardQ.notFull));
-            $display("[MemExe debug] forwardQ: ", fshow(forwardQ.notFull));
-            $display("[MemExe debug] memObjIdRespLdQ: ", fshow(memObjIdRespLdQ.notFull));
-            $display("[MemExe debug] memRespLdQ: ", fshow(memRespLdQ.notFull));
-        end
-    endrule
-    rule debug1;
-        if (verbose) begin
-            $display("[MemExe debug1] reqObjIdSealLdQ: ", fshow(reqObjIdSealLdQ.first));
-        end
-    endrule
-    rule debug2;
-        if (verbose) begin
-            $display("[MemExe debug2] reqLdQ: ", fshow(reqLdQ.first));
-        end
-    endrule
-    rule debug3;
-        if (verbose) begin
-            $display("[MemExe debug3] forwardQ: ", fshow(forwardQ.first));
-        end
-    endrule
-    rule debug4;
-        if (verbose) begin
-            $display("[MemExe debug4] memObjIdRespLdQ: ", fshow(memObjIdRespLdQ.first));
-        end
-    endrule
-    rule debug5;
-        if (verbose) begin
-            $display("[MemExe debug5] memRespLdQ: ", fshow(memRespLdQ.first));
-        end
-    endrule
+    // rule debug;
+    //     if (verbose) begin
+    //         $display("[MemExe debug] reqObjIdSealLdQ: ", fshow(reqObjIdSealLdQ.notFull));
+    //         $display("[MemExe debug] reqLdQ: ", fshow(reqLdQ.notFull));
+    //         $display("[MemExe debug] forwardQ: ", fshow(forwardQ.notFull));
+    //         $display("[MemExe debug] forwardQ: ", fshow(forwardQ.notFull));
+    //         $display("[MemExe debug] memObjIdRespLdQ: ", fshow(memObjIdRespLdQ.notFull));
+    //         $display("[MemExe debug] memRespLdQ: ", fshow(memRespLdQ.notFull));
+    //     end
+    // endrule
+    // rule debug1;
+    //     if (verbose) begin
+    //         $display("[MemExe debug1] reqObjIdSealLdQ: ", fshow(reqObjIdSealLdQ.first));
+    //     end
+    // endrule
+    // rule debug2;
+    //     if (verbose) begin
+    //         $display("[MemExe debug2] reqLdQ: ", fshow(reqLdQ.first));
+    //     end
+    // endrule
+    // rule debug3;
+    //     if (verbose) begin
+    //         $display("[MemExe debug3] forwardQ: ", fshow(forwardQ.first));
+    //     end
+    // endrule
+    // rule debug4;
+    //     if (verbose) begin
+    //         $display("[MemExe debug4] memObjIdRespLdQ: ", fshow(memObjIdRespLdQ.first));
+    //     end
+    // endrule
+    // rule debug5;
+    //     if (verbose) begin
+    //         $display("[MemExe debug5] memRespLdQ: ", fshow(memRespLdQ.first));
+    //     end
+    // endrule
 
     rule doIssueLdFromIssueQ;
         // get issue entry from LSQ
