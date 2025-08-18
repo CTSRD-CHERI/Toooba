@@ -632,6 +632,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
     );
     // sscratch
     Reg#(Data) sscratch_csr <- mkCsrReg(0);
+
     // scause
     Reg#(Bit#(1)) scause_interrupt_reg <- mkCsrReg(0);
     Reg#(Cause) scause_code_reg <- mkCsrReg(0);
@@ -641,6 +642,12 @@ module mkCsrFile #(Data hartid)(CsrFile);
     function Data fn_scause_val (Bit #(1) scause_interrupt_val, Cause scause_code_val);
        return { scause_interrupt_val, 0, scause_code_val };
     endfunction
+
+    // ccp and ccp threshold
+    // Reg#(Data) sccp_csr <- mkCsrReg(0);
+    // Reg#(Data) sccpt_csr <- mkCsrReg(0);
+    Reg#(Data) ccp_csr <- mkCsrReg(0);
+    Reg#(Data) ccpt_csr <- mkCsrReg(0);
 
     // stval (sbadaddr in spike)
     Reg#(Data) stval_csr <- mkCsrReg(0);
@@ -869,6 +876,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrINSTRET:    instret_csr;
             csrAddrTERMINATE:  terminate_csr;
             csrAddrSTATS:      stats_csr;
+            csrAddrCCP:        ccp_csr;
+            csrAddrCCPT:       ccpt_csr;
             // Supervisor CSRs
             csrAddrSSTATUS:    sstatus_csr;
             csrAddrSIE:        sie_csr;
@@ -881,6 +890,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrSIP:        sip_csr;
             csrAddrSATP:       satp_csr;
             csrAddrSCCSR:      sccsr_csr;
+            // csrAddrSCCP:       sccp_csr;
+            // csrAddrSCCPT:      sccpt_csr;
             // Machine CSRs
             csrAddrMSTATUS:    mstatus_csr;
             csrAddrMISA:       misa_csr;
@@ -1019,7 +1030,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrSCOUNTEREN: { 61'b0, x[2:0]};
             csrAddrSCAUSE:     { x[63], 59'b0, x[3:0] };
             csrAddrSATP:       { x[63], 3'b0, asid,  x [43:0] };
-
+            // csrAddrSCCP:        { x[63], 3'b0, asid,  x [43:0] };    //ehakeng: No idea if this is correct
+            // csrAddrSCCPT:       { x[63], 3'b0, asid,  x [43:0] };
             // User level CSRs
             csrAddrFFLAGS:     { 59'b0, x [4:0] };
             csrAddrFRM:        { 61'b0, x [2:0] };

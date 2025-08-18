@@ -44,6 +44,10 @@ CSR_Addr   csr_addr_sepc       = 12'h141;    // Supervisor exception program cou
 CSR_Addr   csr_addr_scause     = 12'h142;    // Supervisor trap cause
 CSR_Addr   csr_addr_stval      = 12'h143;    // Supervisor bad address or instruction
 CSR_Addr   csr_addr_sip        = 12'h144;    // Supervisor interrupt pending
+// CSR_Addr   csr_addr_sccp       = 12'h145;    // Colored capability address pointer
+// CSR_Addr   csr_addr_sccpt      = 12'h146;    // Colored capability threshold that determines if it is a sealed or colored capability
+CSR_Addr   csr_addr_sccp       = 12'h12;    // Colored capability address pointer
+CSR_Addr   csr_addr_sccpt      = 12'h13;    // Colored capability threshold that determines if it is a sealed or colored capability
 
 CSR_Addr   csr_addr_satp       = 12'h180;    // Supervisor address translation and protection
 

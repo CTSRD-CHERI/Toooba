@@ -696,7 +696,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
                     capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                     allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
-                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
+                    // capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrSCCP)[31:0])),
+                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrCCP)[31:0])),
                     check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
                                             ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
 `ifdef KONATA
@@ -723,7 +724,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
                     capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                     allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
-                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
+                    // capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrSCCP)[31:0])),
+                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrCCP)[31:0])),
                     check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
                                             ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
 `ifdef KONATA

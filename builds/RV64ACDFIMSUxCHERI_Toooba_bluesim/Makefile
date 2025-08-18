@@ -8,7 +8,8 @@ ARCH ?= RV64ACDFIMSUxCHERI
 
 # Default ISA test
 
-TEST ?= rv64ui-p-add
+#TEST ?= rv64ui-p-add
+TEST ?= coremark.elf
 
 #================================================================
 # Parameter settings for MIT RISCY, setup paths etc. for Include_Common

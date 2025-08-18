@@ -47,7 +47,8 @@ import ISA_Decls_CHERI::*;
 import CacheUtils::*; // For CLoadTags alignment
 
 (* noinline *)
-function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, CapChecks toCheck, ImmData imm);
+// function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, CapChecks toCheck, ImmData imm, Data ccpt);
+    function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, CapChecks toCheck, ImmData imm, Bit# (32) ccpt);
     function Maybe#(CSR_XCapCause) e1(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg: toCheck.rn1, cheri_exc_code: e});
     function Maybe#(CSR_XCapCause) e2(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg: toCheck.rn2, cheri_exc_code: e});
     function Maybe#(CSR_XCapCause) eDDC(CHERIException e) = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1, pack(scrAddrDDC)}, cheri_exc_code: e});
@@ -56,19 +57,20 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
         result = e1(cheriExcTagViolation);
     else if (toCheck.src2_tag                  && !isValidCap(b))
         result = e2(cheriExcTagViolation);
-    //else if (toCheck.src1_unsealed_or_sentry   && isValidCap(a) && (getKind(a) != UNSEALED) && (getKind(a) != SENTRY))
-    //    result = e1(cheriExcSealViolation);
-    //else if (toCheck.src1_unsealed_or_imm_zero && isValidCap(a) && (getKind(a) != UNSEALED) && (imm != 0))
-    //    result = e1(cheriExcSealViolation);
-    //else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
-    //    result = e1(cheriExcSealViolation);
-    //else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
-    //    result = e2(cheriExcSealViolation);
-    else if (toCheck.src1_type_not_reserved    && !validAsType(a, zeroExtend(getKind(a).SEALED_WITH_TYPE)))
+    else if (!isCCType(a, ccpt)) begin
+        if (toCheck.src1_unsealed_or_sentry   && isValidCap(a) && ( !isCCType(a, ccpt) && getKind(a) != UNSEALED) && (getKind(a) != SENTRY))
+        result = e1(cheriExcSealViolation);
+        else if (toCheck.src1_unsealed_or_imm_zero && isValidCap(a) && (getKind(a) != UNSEALED) && (imm != 0))
+        result = e1(cheriExcSealViolation);
+        else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
+        result = e1(cheriExcSealViolation);
+        else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
+        result = e2(cheriExcSealViolation);
+        else if (toCheck.src1_type_not_reserved    && !validAsType(a, zeroExtend(getKind(a).SEALED_WITH_TYPE)))
+            result = e1(cheriExcTypeViolation);
+        else if (toCheck.src1_src2_types_match     && getKind(a).SEALED_WITH_TYPE != getKind(b).SEALED_WITH_TYPE)
         result = e1(cheriExcTypeViolation);
-    else if (toCheck.src1_src2_types_match     && getKind(a).SEALED_WITH_TYPE != getKind(b).SEALED_WITH_TYPE)
-        result = e1(cheriExcTypeViolation);
-    else if (toCheck.src1_permit_ccall         && !getHardPerms(a).permitCCall)
+    end else if (toCheck.src1_permit_ccall         && !getHardPerms(a).permitCCall)
         result = e1(cheriExcPermitCCallViolation);
     else if (toCheck.src2_permit_ccall         && !getHardPerms(b).permitCCall)
         result = e2(cheriExcPermitCCallViolation);
@@ -80,7 +82,8 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
 endfunction
 
 (* noinline *)
-function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn);
+// function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn, Data ccpt);
+    function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn, Bit# (32) ccpt);
     function Maybe#(CSR_XCapCause) eAuth(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg: case (toCheck.check_authority_src) matches Src1: toCheck.rn1;
                                                                                                                                        Ddc: {1'b1, pack(scrAddrDDC)};
                                                                                               endcase
@@ -94,9 +97,8 @@ function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapCheck
     Bool storeValidCap = isStore && isValidCap(data) && byteOrTagEn == DataMemAccess(replicate(True));
     if      (!isValidCap(auth))
         result = eAuth(cheriExcTagViolation);
-    // todo merve 
-    //else if (getKind(auth) != UNSEALED)
-    //    result = eAuth(cheriExcSealViolation);
+    else if ( !isCCType(auth, ccpt) && getKind(auth) != UNSEALED)
+        result = eAuth(cheriExcSealViolation);
     else if (isLoad && !getHardPerms(auth).permitLoad)
         result = eAuth(cheriExcPermitRViolation);
     else if (isLoad && !getHardPerms(auth).permitLoadCap && byteOrTagEn == TagMemAccess)
@@ -401,7 +403,7 @@ function ControlFlow getControlFlow(DecodedInst dInst, Data rVal1, Data rVal2, A
 endfunction
 */
 (* noinline *)
-function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, CapPipe pcc, CapPipe ppc, Bit #(32) orig_inst);
+function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, CapPipe pcc, CapPipe ppc, Bit #(32) orig_inst, Bit# (32) ccpt);
     // just data, addr, and control flow
     CapPipe data = nullCap;
     CapPipe addr = nullCap;
@@ -423,7 +425,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
     cf.taken = aluBr(getAddr(rVal1), getAddr(rVal2), br_f);
     cf.nextPc = brAddrCalc(pcc, rVal1, dInst.iType, fromMaybe(0,getDInstImm(dInst)), cf.taken, orig_inst, newPcc);
 
-    Maybe#(CSR_XCapCause) capException = capChecksExec(rVal1, aluVal2, nullCap, dInst.capChecks, dInst.imm.Valid);
+    Maybe#(CSR_XCapCause) capException = capChecksExec(rVal1, aluVal2, nullCap, dInst.capChecks, dInst.imm.Valid, ccpt);
     if (dInst.execFunc matches tagged Br .unused) begin
         rVal1 = cf.nextPc;
         if (!cf.taken) dInst.capChecks.check_enable = False;
