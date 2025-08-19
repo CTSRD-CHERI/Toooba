@@ -9,7 +9,7 @@
 	url = https://github.com/CTSRD-CHERI/TagController.git
 [submodule "libs/cheri-cap-lib"]
 	path = libs/cheri-cap-lib
-	url = https://github.com/CTSRD-CHERI/cheri-cap-lib.git
+	url = git@gitlab.com:ssg-research/platsec/attack-tolerant-execution/coloredcap/chericaplib.git
 [submodule "libs/RISCV_HPM_Events"]
 	path = libs/RISCV_HPM_Events
 	url = https://github.com/CTSRD-CHERI/RISCV_HPM_Events.git
