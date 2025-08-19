@@ -53,6 +53,7 @@ import Exec::*;
 import FP_Utils::*;
 import CacheUtils::*; // For CLoadTags alignment
 import RegFile::*; // Just for the interface
+import ISA_Decls_CHERI::*;
 
 // I don't want to export auxiliary functions, so manually export all types
 export LdQMemFunc(..);
@@ -378,11 +379,12 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Maybe#(Addr) objIdPAddr
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE,
+        Maybe#(Addr) objIdPAddr, Bit#(3) objIdOffset
     );
     // update objSeal. Called when ld resp is received for objId bitmap read
-    method Action updateLdObjIdSeal(LdQTag tag, Maybe#(Trap) fault);
-    method Action updateStObjIdSeal(StQTag tag, Maybe#(Trap) fault);
+    method Action updateLdObjIdSeal(LdQTag tag, MemTaggedData d);
+    method Action updateStObjIdSeal(StQTag tag, MemTaggedData d);
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, ByteOrTagEn shiftedBE, SBSearchRes sbRes
@@ -566,6 +568,10 @@ function Bool isStQMemFunc(MemFunc f);
     endcase);
 endfunction
 
+function Bool extractObjIdSeal(MemTaggedData d, Bit#(3) offset);
+    return ((fromMemTaggedData(d) >> offset) & 1'b1) == 1'b1;
+endfunction
+
 // issueQ of LSQ tags for issue
 typedef SpecFifo_SB_deq_enq_C_deq_enq#(2, LSQIssueLdInfo) LSQIssueLdQ;
 (* synthesize *)
@@ -674,6 +680,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_waitForOlderSt  <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Ehr#(2, Addr))                 ld_paddr           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))         ld_objIdPAddr      <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Bit#(3)))              ld_objIdOffset     <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(Trap)))         ld_fault           <- replicateM(mkEhr(?));
@@ -731,6 +738,9 @@ module mkSplitLSQ(SplitLSQ);
     let ld_objIdPAddr_updAddr       = getVEhrPort(ld_objIdPAddr, 0); // write
     let ld_objIdPAddr_updObjIdSeal  = getVEhrPort(ld_objIdPAddr, 1); // assert
     let ld_objIdPAddr_issue         = getVEhrPort(ld_objIdPAddr, 1);
+
+    let ld_objIdOffset_updAddr      = getVEhrPort(ld_objIdOffset, 0); // write
+    let ld_objIdOffset_updObjIdSeal = getVEhrPort(ld_objIdOffset, 1);
 
     let ld_isMMIO_findIss = getVEhrPort(ld_isMMIO, 0);
     let ld_isMMIO_evict   = getVEhrPort(ld_isMMIO, 0); // assert
@@ -889,6 +899,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(Bit#(16)))                st_pcHash   <- replicateM(mkRegU);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))         st_objIdPAddr    <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Bit#(3)))              st_objIdOffset   <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
@@ -922,6 +933,9 @@ module mkSplitLSQ(SplitLSQ);
     // let st_objIdPAddr_issue         = getVEhrPort(st_objIdPAddr, 1);
     let st_objIdPAddr_deqSt         = getVEhrPort(st_objIdPAddr, 1);
     let st_objIdPAddr_updObjIdSeal  = getVEhrPort(st_objIdPAddr, 1); // assert
+
+    let st_objIdOffset_updAddr      = getVEhrPort(st_objIdOffset, 0); // write
+    let st_objIdOffset_updObjIdSeal = getVEhrPort(st_objIdOffset, 1);
 
     let st_isMMIO_verify  = getVEhrPort(st_isMMIO, 0);
     let st_isMMIO_updAddr = getVEhrPort(st_isMMIO, 0); // write
@@ -1562,7 +1576,8 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Maybe#(Addr) objIdPAddr
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be,
+        Maybe#(Addr) objIdPAddr, Bit#(3) objIdOffset
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1605,6 +1620,7 @@ module mkSplitLSQ(SplitLSQ);
             ld_computed_updAddr[tag] <= !isValid(fault);
             ld_paddr_updAddr[tag] <= pa;
             ld_objIdPAddr_updAddr[tag] <= objIdPAddr;
+            ld_objIdOffset_updAddr[tag] <= objIdOffset;
             ld_allowCap[tag] <= allowCap;
             ld_isMMIO_updAddr[tag] <= mmio;
             ld_shiftedBE_updAddr[tag] <= shift_be;
@@ -1638,6 +1654,7 @@ module mkSplitLSQ(SplitLSQ);
             st_computed_updAddr[tag] <= !isValid(fault);
             st_paddr_updAddr[tag] <= pa;
             st_objIdPAddr_updAddr[tag] <= objIdPAddr;
+            st_objIdOffset_updAddr[tag] <= objIdOffset;
             st_isMMIO_updAddr[tag] <= mmio;
             st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
 
@@ -1759,12 +1776,17 @@ module mkSplitLSQ(SplitLSQ);
         };
     endmethod
 
-    method Action updateLdObjIdSeal(LdQTag tag, Maybe#(Trap) fault) if (!wrongSpec_conflict);
+    method Action updateLdObjIdSeal(LdQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
         if(!ld_waitWPRespObjId_updObjIdSeal[tag]) begin
             if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp ", fshow(tag));
             doAssert(isValid(ld_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
+            
+            // get objId seal bit using offset
+            Bool isSealed = extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
+            Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation})) :
+                                            Invalid;
             ld_fault_updObjIdSeal[tag] <= fault;
-            ld_objIdSealOk_updObjIdSeal[tag] <= !isValid(fault);
+            ld_objIdSealOk_updObjIdSeal[tag] <= !isSealed;
         end
         else begin
             if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp for WP ", fshow(tag));
@@ -1772,11 +1794,16 @@ module mkSplitLSQ(SplitLSQ);
         end
     endmethod
 
-    method Action updateStObjIdSeal(StQTag tag, Maybe#(Trap) fault) if (!wrongSpec_conflict);
+    method Action updateStObjIdSeal(StQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
         if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp ", fshow(tag));
         doAssert(isValid(st_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
+
+        // get objId seal bit using offset
+        Bool isSealed = extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
+        Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation})) :
+                                        Invalid;
         st_fault_updObjIdSeal[tag] <= fault;
-        st_objIdSealOk_updObjIdSeal[tag] <= !isValid(fault);
+        st_objIdSealOk_updObjIdSeal[tag] <= !isSealed;
     endmethod
 
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,

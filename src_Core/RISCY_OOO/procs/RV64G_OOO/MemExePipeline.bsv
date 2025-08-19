@@ -125,6 +125,7 @@ typedef struct {
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
     Maybe#(Addr) objIdAddr;
+    Bit#(3) objIdOffset;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
     Data    store_data;
@@ -390,8 +391,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
-    Fifo#(2, Tuple2#(LdQTag, Maybe#(Trap))) memObjIdRespLdQ <- mkCFFifo;
-    Fifo#(2, Tuple2#(StQTag, Maybe#(Trap))) memObjIdRespStQ <- mkCFFifo;
+    Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
+    Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
     // resp ifc to D$
@@ -404,10 +405,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 end
                 // TODO: figure out if obj ID seal is ok here
                 if (objSealRdType == Ld) begin
-                    memObjIdRespLdQ.enq(tuple2(truncate(id), Invalid));
+                    memObjIdRespLdQ.enq(tuple2(truncate(id), d));
                 end
                 else if (objSealRdType == St) begin
-                    memObjIdRespStQ.enq(tuple2(truncate(id), Invalid));
+                    memObjIdRespStQ.enq(tuple2(truncate(id), d));
                 end
                 else begin
                     doAssert(False, "unknown objSealRdType");
@@ -676,6 +677,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (isCCType(x.rVal1, ccpt))
             objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >> 3) + ccp);
         // objIdVAddr = Valid('h80000100);
+        Bit#(3) objIdOffset = truncate(getCCType(x.rVal1)); // valid only if isValid(obIdVAddr)
 
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
@@ -692,6 +694,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
                     objIdAddr: objIdVAddr, //Valid('h80010000),
+                    objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
                     store_data_BE: origBE,
@@ -720,6 +723,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
                     objIdAddr: objIdVAddr, //Invalid,
+                    objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
                     store_data_BE: origBE,
@@ -769,6 +773,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 vaddr: x.vaddr,
                 // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
                 objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
+                objIdOffset: x.objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.store_data,
                 store_data_BE: x.store_data_BE,
@@ -915,8 +920,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            // x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, (x.mem_func == Ld && !isMMIO) ? Valid('h80000100) : Invalid //x.objIdAddr
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, (((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE,
+            (((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid), x.objIdOffset
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 
@@ -1136,16 +1141,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // (* descending_urgency = "doObjIdRespLdMem, doRespLdMem" *)
     rule doObjIdRespLdMem;
         memObjIdRespLdQ.deq;
-        let {t, f} = memObjIdRespLdQ.first;
-        lsq.updateLdObjIdSeal(t, f);
-        if (verbose) $display("[doObjIdRespLdMem] ", fshow(t), "; ", fshow(f));
+        let {t, d} = memObjIdRespLdQ.first;
+        lsq.updateLdObjIdSeal(t, d);
+        if (verbose) $display("[doObjIdRespLdMem] ", fshow(t), "; ", fshow(d));
     endrule
 
     rule doObjIdRespStMem;
         memObjIdRespStQ.deq;
-        let {t, f} = memObjIdRespStQ.first;
-        lsq.updateStObjIdSeal(t, f);
-        if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(f));
+        let {t, d} = memObjIdRespStQ.first;
+        lsq.updateStObjIdSeal(t, d);
+        if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(d));
     endrule
 
     (* descending_urgency = "doRespLdMem, doRespLdForward" *) // prioritize mem resp
