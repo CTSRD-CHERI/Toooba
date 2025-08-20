@@ -647,7 +647,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
     // Reg#(Data) sccp_csr <- mkCsrReg(0);
     // Reg#(Data) sccpt_csr <- mkCsrReg(0);
     Reg#(Data) ccp_csr <- mkCsrReg(0);
-    Reg#(Data) ccpt_csr <- mkCsrReg(0);
+    Reg#(Data) ccpt_csr <- mkCsrReg('h1ffffc);
 
     // stval (sbadaddr in spike)
     Reg#(Data) stval_csr <- mkCsrReg(0);
