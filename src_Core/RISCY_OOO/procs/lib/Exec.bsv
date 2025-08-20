@@ -628,10 +628,10 @@ function Maybe#(Trap) checkForException(
     CapPipe pcc_start = cast(pcc);
     Maybe#(CSR_XCapCause) capException = Invalid;
     if (!isValidCap(pcc_start)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_check_type: cheriCheckFetch, cheri_exc_code: cheriExcTagViolation});
-    if (getKind(pcc_start) != UNSEALED) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_check_type: cheriCheckFetch, cheri_exc_code: cheriExcSealViolation});
-    if (!getHardPerms(pcc_start).permitExecute) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_check_type: cheriCheckFetch, cheri_exc_code: cheriExcPermitXViolation});
-    if (!isInBounds(pcc_end, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_check_type: cheriCheckFetch, cheri_exc_code: cheriExcLengthViolation});
-    if (!isInBounds(pcc_start, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_check_type: cheriCheckFetch, cheri_exc_code: cheriExcLengthViolation});
+    else if (getKind(pcc_start) != UNSEALED) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_check_type: cheriCheckFetch, cheri_exc_code: cheriExcSealViolation});
+    else if (!getHardPerms(pcc_start).permitExecute) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_check_type: cheriCheckFetch, cheri_exc_code: cheriExcPermitXViolation});
+    else if (!isInBounds(pcc_end, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_check_type: cheriCheckFetch, cheri_exc_code: cheriExcLengthViolation});
+    else if (!isInBounds(pcc_start, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_check_type: cheriCheckFetch, cheri_exc_code: cheriExcLengthViolation});
 
     Maybe#(Trap) retval = Invalid;
     if (capException matches tagged Valid .ce) retval = Valid(CapException(ce));
