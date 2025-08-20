@@ -165,7 +165,7 @@ function Maybe#(BoundsCheck) prepareBoundsCheck(CapPipe a, CapPipe b, CapPipe pc
     endcase
 
     case(toCheck.check_high_src)
-        Src1AddrPlus2: ret.check_high = {1'b0,getAddr(a)+2};
+        Src1AddrPlus2: ret.check_high = {1'b0,getAddr(a)}+2;
         Src1Top: ret.check_high = getTop(a);
 `ifndef ZCHERI
         Src1Type: ret.check_high = zeroExtend(getKind(a).SEALED_WITH_TYPE);
