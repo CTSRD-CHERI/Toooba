@@ -722,7 +722,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     ldstq_tag: x.ldstq_tag,
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
-                    objIdAddr: objIdVAddr, //Invalid,
+                    objIdAddr: Invalid,
                     objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
