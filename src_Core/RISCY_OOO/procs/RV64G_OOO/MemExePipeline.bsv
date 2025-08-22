@@ -670,15 +670,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
 
         let ccp = inIfc.csrf_rd(csrAddrCCP);
-        Bit#(32) ccpt = cast(inIfc.csrf_rd(csrAddrCCPT)[31:0]);
+        Bit#(32) ccpt = 'h1ffffc;
 
         // calculate bitmap offset and send to TLB here
         Maybe#(Addr) objIdVAddr = Invalid;
-        if (isCCType(x.rVal1, ccpt) && (ccp != '0))
+        Bit#(3) objIdOffset = 'b000 ;
+        if (isCCType(x.rVal1, ccpt) && (ccp != '0) && isValidCap(x.rVal1)) begin 
             objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >> 3) + ccp);
-        // objIdVAddr = Valid('h80000100);
-        Bit#(3) objIdOffset = truncate(getCCType(x.rVal1)); // valid only if isValid(obIdVAddr)
-
+            objIdOffset= truncate(getCCType(x.rVal1)); // valid only if isValid(obIdVAddr)
+        end
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
