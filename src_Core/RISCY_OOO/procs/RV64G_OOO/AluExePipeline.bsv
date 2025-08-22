@@ -398,7 +398,7 @@ module mkAluExePipeline#(AluExeInput inIfc)(AluExePipeline);
         // execution
         Data ccp = inIfc.csrf_rd(csrAddrCCP);
         // Bit# (32) ccpt = cast(inIfc.csrf_rd(csrAddrSCCPT)[31:0]);
-        Bit# (32) ccpt = cast(inIfc.csrf_rd(csrAddrCCPT)[31:0]);
+        Bit# (32) ccpt = 'h1ffffc;
         ExecResult exec_result = basicExec(x.dInst, x.rVal1, x.rVal2, cast(x.pc), cast(x.ppc), x.orig_inst, ccpt);
 
         Bool link = (case (x.dInst.iType)

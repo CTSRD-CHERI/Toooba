@@ -58,18 +58,18 @@ import CacheUtils::*; // For CLoadTags alignment
     else if (toCheck.src2_tag                  && !isValidCap(b))
         result = e2(cheriExcTagViolation);
     else if (!isCCType(a, ccpt)) begin
-        if (toCheck.src1_unsealed_or_sentry   && isValidCap(a) && ( !isCCType(a, ccpt) && getKind(a) != UNSEALED) && (getKind(a) != SENTRY))
-        result = e1(cheriExcSealViolation);
-        else if (toCheck.src1_unsealed_or_imm_zero && isValidCap(a) && (getKind(a) != UNSEALED) && (imm != 0))
-        result = e1(cheriExcSealViolation);
-        else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
-        result = e1(cheriExcSealViolation);
-        else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
-        result = e2(cheriExcSealViolation);
-        else if (toCheck.src1_type_not_reserved    && !validAsType(a, zeroExtend(getKind(a).SEALED_WITH_TYPE)))
-            result = e1(cheriExcTypeViolation);
-        else if (toCheck.src1_src2_types_match     && getKind(a).SEALED_WITH_TYPE != getKind(b).SEALED_WITH_TYPE)
-        result = e1(cheriExcTypeViolation);
+        //if (toCheck.src1_unsealed_or_sentry   && isValidCap(a) && ( !isCCType(a, ccpt) && getKind(a) != UNSEALED) && (getKind(a) != SENTRY))
+        //result = e1(cheriExcSealViolation);
+        //else if (toCheck.src1_unsealed_or_imm_zero && isValidCap(a) && (getKind(a) != UNSEALED) && (imm != 0))
+        //result = e1(cheriExcSealViolation);
+        //else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
+        //result = e1(cheriExcSealViolation);
+        //else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
+        //result = e2(cheriExcSealViolation);
+        //else if (toCheck.src1_type_not_reserved    && !validAsType(a, zeroExtend(getKind(a).SEALED_WITH_TYPE)))
+        //    result = e1(cheriExcTypeViolation);
+        //else if (toCheck.src1_src2_types_match     && getKind(a).SEALED_WITH_TYPE != getKind(b).SEALED_WITH_TYPE)
+        //result = e1(cheriExcTypeViolation);
     end else if (toCheck.src1_permit_ccall         && !getHardPerms(a).permitCCall)
         result = e1(cheriExcPermitCCallViolation);
     else if (toCheck.src2_permit_ccall         && !getHardPerms(b).permitCCall)
