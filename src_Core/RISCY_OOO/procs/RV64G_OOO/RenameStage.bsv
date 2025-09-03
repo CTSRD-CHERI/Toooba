@@ -277,7 +277,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         let mstatus   = csrf.rd (csrAddrMSTATUS);
 
         // Check CSR access permission
-        if (x.dInst.csr == tagged Valid csrAddrFCSR && x.dInst.iType == Csr) begin
+        if ((x.dInst.csr == tagged Valid csrAddrFCSR || x.dInst.csr == tagged Valid csrAddrFRM || x.dInst.csr == tagged Valid csrAddrFFLAGS) && x.dInst.iType == Csr) begin
              fpr_access = True;
         end
 
