@@ -572,7 +572,7 @@ function Bool extractObjIdSeal(MemTaggedData d, Bit#(7) offset);
     if(offset <64)
         return (d.data[0][offset] == 1'b1);
     else 
-        return (d.data[1][offset%64] == 1'b1);
+        return (d.data[1][offset-64] == 1'b1);
 endfunction
 
 // issueQ of LSQ tags for issue
