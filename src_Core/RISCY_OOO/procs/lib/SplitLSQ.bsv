@@ -380,7 +380,7 @@ interface SplitLSQ;
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
         Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE,
-        Maybe#(Addr) objIdPAddr, Bit#(3) objIdOffset
+        Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset
     );
     // update objSeal. Called when ld resp is received for objId bitmap read
     method Action updateLdObjIdSeal(LdQTag tag, MemTaggedData d);
@@ -568,8 +568,11 @@ function Bool isStQMemFunc(MemFunc f);
     endcase);
 endfunction
 
-function Bool extractObjIdSeal(MemTaggedData d, Bit#(3) offset);
-    return ((fromMemTaggedData(d) >> offset) & 1'b1) == 1'b1;
+function Bool extractObjIdSeal(MemTaggedData d, Bit#(7) offset);
+    if(offset <64)
+        return (d.data[0][offset] == 1'b1);
+    else 
+        return (d.data[1][offset%64] == 1'b1);
 endfunction
 
 // issueQ of LSQ tags for issue
@@ -680,7 +683,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_waitForOlderSt  <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Ehr#(2, Addr))                 ld_paddr           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))         ld_objIdPAddr      <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(2, Bit#(3)))              ld_objIdOffset     <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Bit#(7)))             ld_objIdOffset     <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(Trap)))         ld_fault           <- replicateM(mkEhr(?));
@@ -899,7 +902,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(Bit#(16)))                st_pcHash   <- replicateM(mkRegU);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))         st_objIdPAddr    <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(2, Bit#(3)))              st_objIdOffset   <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Bit#(7)))             st_objIdOffset   <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
@@ -1577,7 +1580,7 @@ module mkSplitLSQ(SplitLSQ);
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be,
-        Maybe#(Addr) objIdPAddr, Bit#(3) objIdOffset
+        Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1778,30 +1781,35 @@ module mkSplitLSQ(SplitLSQ);
 
     method Action updateLdObjIdSeal(LdQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
         if(!ld_waitWPRespObjId_updObjIdSeal[tag]) begin
-            if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp ", fshow(tag));
+            if(verbose) $display("[LSQ - updateLdObjIdSeal] 1 objIdResp:", fshow(tag), ", MemTaggedData:", fshow(d));
             doAssert(isValid(ld_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
             
             // get objId seal bit using offset
             Bool isSealed = extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
             Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation})) :
                                             Invalid;
+            
+            Bit#(7) offset=ld_objIdOffset_updObjIdSeal[tag];
+            if(verbose) $display("[LSQ - updateLdObjIdSeal] isSealed:", fshow(isSealed), ", fault:", fshow(fault), ", offset:", fshow(offset));                               
             ld_fault_updObjIdSeal[tag] <= fault;
             ld_objIdSealOk_updObjIdSeal[tag] <= !isSealed;
         end
         else begin
-            if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp for WP ", fshow(tag));
+            if(verbose) if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp for WP ", fshow(tag));
             ld_waitWPRespObjId_updObjIdSeal[tag] <= False;
         end
     endmethod
 
     method Action updateStObjIdSeal(StQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
-        if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp ", fshow(tag));
+        if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp ", fshow(tag), "MemTaggedData:", fshow(d));
         doAssert(isValid(st_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
 
         // get objId seal bit using offset
         Bool isSealed = extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
         Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation})) :
                                         Invalid;
+        Bit#(7) offset=st_objIdOffset_updObjIdSeal[tag];
+        if(verbose) $display("[LSQ - updateStObjIdSeal] isSealed:", fshow(isSealed), ", fault:", fshow(fault), ", offset:", fshow(offset));
         st_fault_updObjIdSeal[tag] <= fault;
         st_objIdSealOk_updObjIdSeal[tag] <= !isSealed;
     endmethod

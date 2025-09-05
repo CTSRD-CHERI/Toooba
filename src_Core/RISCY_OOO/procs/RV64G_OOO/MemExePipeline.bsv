@@ -125,7 +125,7 @@ typedef struct {
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
     Maybe#(Addr) objIdAddr;
-    Bit#(3) objIdOffset;
+    Bit#(7) objIdOffset;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
     Data    store_data;
@@ -674,10 +674,17 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         // calculate bitmap offset and send to TLB here
         Maybe#(Addr) objIdVAddr = Invalid;
-        Bit#(3) objIdOffset = 'b000 ;
+        Bit#(7) objIdOffset = 'h0 ;
         if (isCCType(x.rVal1, ccpt) && (ccp != '0) && isValidCap(x.rVal1)) begin 
-            objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >> 3) + ccp);
+            objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >> 7) + ccp);
             objIdOffset= truncate(getCCType(x.rVal1)); // valid only if isValid(obIdVAddr)
+            $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
+                    " objIdVAddr ", fshow(objIdVAddr), 
+                    " objIdOffset:", fshow(objIdOffset),
+                    " ccType:", fshow(getCCType(x.rVal1)),
+                    " ccp:", fshow(ccp),
+                    " ccpt:", fshow(ccpt)
+                    );
         end
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
