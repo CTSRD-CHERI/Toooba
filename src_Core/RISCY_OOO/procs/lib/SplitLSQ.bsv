@@ -1801,7 +1801,7 @@ module mkSplitLSQ(SplitLSQ);
     endmethod
 
     method Action updateStObjIdSeal(StQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
-        if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp ", fshow(tag), "MemTaggedData:", fshow(d));
+        if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp:", fshow(tag), ", MemTaggedData:", fshow(d),", d[0]:", fshow(d.data[0]),", d[1]:", fshow(d.data[1]));
         doAssert(isValid(st_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
 
         // get objId seal bit using offset
