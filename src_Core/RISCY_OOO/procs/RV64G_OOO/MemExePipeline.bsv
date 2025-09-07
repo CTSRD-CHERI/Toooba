@@ -676,8 +676,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Maybe#(Addr) objIdVAddr = Invalid;
         Bit#(7) objIdOffset = 'h0 ;
         if (isCCType(x.rVal1, ccpt) && (ccp != '0) && isValidCap(x.rVal1)) begin 
-            objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >> 7) + ccp);
-            objIdOffset= truncate(getCCType(x.rVal1)); // valid only if isValid(obIdVAddr)
+            
+            Bit#(64) byteIndex = zeroExtend(getCCType(x.rVal1) >> 3);   
+            Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
+            objIdVAddr = Valid(blockAddr + ccp);
+            objIdOffset = truncate(getCCType(x.rVal1));
+            // objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >>3) + ccp);
+            //objIdOffset= truncate(); // valid only if isValid(obIdVAddr)
             $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
                     " objIdVAddr ", fshow(objIdVAddr), 
                     " objIdOffset:", fshow(objIdOffset),
