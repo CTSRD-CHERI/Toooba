@@ -233,9 +233,15 @@ function Maybe#(RVFI_DII_Execution#(DataSz,DataSz)) genRVFI(ToReorderBuffer rot,
     ByteEn rmask = replicate(False);
     ByteEn wmask = replicate(False);
     Bit#(5) rd = 0;
+    Bool gpr_write = False;
     if (!isValid(rot.trap)) begin
         if (rot.dst matches tagged Valid .regWrite) begin
             if (regWrite matches tagged Gpr .regNum) begin
+                data = rot.traceBundle.regWriteData;
+                rd = regNum;
+                gpr_write = True;
+            end
+            else if (regWrite matches tagged Fpu .regNum) begin
                 data = rot.traceBundle.regWriteData;
                 rd = regNum;
             end
@@ -277,7 +283,7 @@ function Maybe#(RVFI_DII_Execution#(DataSz,DataSz)) genRVFI(ToReorderBuffer rot,
         rvfi_pc_wdata: next_pc,
         rvfi_mem_wdata: wdata,
         rvfi_rd_addr: rd,
-        rvfi_rd_wdata: ((rd==0) ? 0:data),
+        rvfi_rd_wdata: ((rd==0 && gpr_write) ? 0:data),
         rvfi_mem_addr: addr,
         rvfi_mem_rmask: pack(rmask),
         rvfi_mem_wmask: pack(wmask),
