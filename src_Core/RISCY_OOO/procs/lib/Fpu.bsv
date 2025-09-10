@@ -684,7 +684,7 @@ function FpuResult execFpuSimple(FpuInst fpu_inst, Data rVal1, Data rVal2);
             FMv_FX:     full_dst = tagged Valid pack(in1);
             // Float -> Float
             FCvt_FF:    begin
-                Float in1_float = unpack(rVal1[31:0]);
+                Float in1_float = fv_unbox(rVal1);
                 {dst, e} = fcvt_d_s(in1_float, fpu_rm);
                 if (isNaN(dst)) dst = canonicalNaN;
             end
