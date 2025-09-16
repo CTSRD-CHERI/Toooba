@@ -893,8 +893,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 x.capException = Valid(CSR_XCapCause{cheri_exc_reg: check.authority_idx, cheri_exc_code: cheriExcLengthViolation});
         end
         if (x.capException matches tagged Valid .c) cause = Valid(CapException(c));
+        let needsObjIdCheck = (x.mem_func == St) && !isMMIO && isValid(x.objIdAddr);
         Bool access_at_commit = !isValid(cause) && (isMMIO || isLrScAmo);
-        Bool non_mmio_st_done = !isValid(cause) && !isMMIO && x.mem_func == St;
+        Bool non_mmio_st_done = !isValid(cause) && !isMMIO && (x.mem_func == St) && !needsObjIdCheck;
         inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
 `ifdef INCLUDE_TANDEM_VERIF
                                           store_data, store_data_BE,
@@ -1161,8 +1162,25 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doObjIdRespStMem;
         memObjIdRespStQ.deq;
         let {t, d} = memObjIdRespStQ.first;
-        lsq.updateStObjIdSeal(t, d);
-        if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(d));
+        let mInstTag <- lsq.updateStObjIdSeal(t, d);
+        if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(d), "; instTagReady=", fshow(isValid(mInstTag)));
+
+        // If this ObjID response made a non-MMIO store become “done”,
+        // tell the ROB now (non_mmio_st_done = True).
+        if (mInstTag matches tagged Valid .instTag) begin
+            inIfc.rob_setExecuted_doFinishMem(
+                instTag,
+                0, // vaddr not needed for this bookkeeping pulse
+`ifdef INCLUDE_TANDEM_VERIF
+                0, 0, // store_data, store_data_BE (unused here)
+`endif
+                False, // access_at_commit
+                True   // non_mmio_st_done
+`ifdef RVFI
+                , unpack(0) // ExtraTraceBundle default
+`endif
+            );
+        end
     endrule
 
     (* descending_urgency = "doRespLdMem, doRespLdForward" *) // prioritize mem resp

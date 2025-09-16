@@ -384,7 +384,7 @@ interface SplitLSQ;
     );
     // update objSeal. Called when ld resp is received for objId bitmap read
     method Action updateLdObjIdSeal(LdQTag tag, MemTaggedData d);
-    method Action updateStObjIdSeal(StQTag tag, MemTaggedData d);
+    method ActionValue#(Maybe#(InstTag))  updateStObjIdSeal(StQTag t, MemTaggedData d);
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, ByteOrTagEn shiftedBE, SBSearchRes sbRes
@@ -1800,18 +1800,34 @@ module mkSplitLSQ(SplitLSQ);
         end
     endmethod
 
-    method Action updateStObjIdSeal(StQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
-        if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp:", fshow(tag), ", MemTaggedData:", fshow(d),", d[0]:", fshow(d.data[0]),", d[1]:", fshow(d.data[1]));
+    method ActionValue#(Maybe#(InstTag)) updateStObjIdSeal(StQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
+        if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp:", fshow(tag), ", MemTaggedData:", fshow(d),
+                             ", d[0]:", fshow(d.data[0]), ", d[1]:", fshow(d.data[1]));
         doAssert(isValid(st_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
 
-        // get objId seal bit using offset
+        // Compute seal state and corresponding fault.
         Bool isSealed = extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
-        Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation})) :
-                                        Invalid;
-        Bit#(7) offset=st_objIdOffset_updObjIdSeal[tag];
+        Maybe#(Trap) fault = isSealed
+            ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}))
+            : Invalid;
+
+        Bit#(7) offset = st_objIdOffset_updObjIdSeal[tag];
         if(verbose) $display("[LSQ - updateStObjIdSeal] isSealed:", fshow(isSealed), ", fault:", fshow(fault), ", offset:", fshow(offset));
-        st_fault_updObjIdSeal[tag] <= fault;
+
+       // Record results into the store entry.
+        st_fault_updObjIdSeal[tag]       <= fault;
         st_objIdSealOk_updObjIdSeal[tag] <= !isSealed;
+
+        // If this is a non-MMIO store and the seal check passed (no fault),
+        // we can now mark it "done" at the ROB by returning its InstTag.
+        let isNonMMIO  = !st_isMMIO_deqSt[tag];
+        let becameDone = isNonMMIO && !isSealed;
+        if (becameDone) begin
+            return Valid(st_instTag[tag]);
+        end
+        else begin
+            return Invalid;
+        end
     endmethod
 
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,
