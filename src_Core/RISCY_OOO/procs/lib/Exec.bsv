@@ -58,18 +58,18 @@ import CacheUtils::*; // For CLoadTags alignment
     else if (toCheck.src2_tag                  && !isValidCap(b))
         result = e2(cheriExcTagViolation);
     else if (!isCCType(a, ccpt)) begin
-        //if (toCheck.src1_unsealed_or_sentry   && isValidCap(a) && ( !isCCType(a, ccpt) && getKind(a) != UNSEALED) && (getKind(a) != SENTRY))
-        //result = e1(cheriExcSealViolation);
-        //else if (toCheck.src1_unsealed_or_imm_zero && isValidCap(a) && (getKind(a) != UNSEALED) && (imm != 0))
-        //result = e1(cheriExcSealViolation);
-        //else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
-        //result = e1(cheriExcSealViolation);
-        //else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
-        //result = e2(cheriExcSealViolation);
-        //else if (toCheck.src1_type_not_reserved    && !validAsType(a, zeroExtend(getKind(a).SEALED_WITH_TYPE)))
+        // if (toCheck.src1_unsealed_or_sentry   && isValidCap(a) && ( !isCCType(a, ccpt) && getKind(a) != UNSEALED) && (getKind(a) != SENTRY))
+        // result = e1(cheriExcSealViolation);
+        // else if (toCheck.src1_unsealed_or_imm_zero && isValidCap(a) && (getKind(a) != UNSEALED) && (imm != 0))
+        // result = e1(cheriExcSealViolation);
+        // else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
+        // result = e1(cheriExcSealViolation);
+        // else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
+        // result = e2(cheriExcSealViolation);
+        // else if (toCheck.src1_type_not_reserved    && !validAsType(a, zeroExtend(getKind(a).SEALED_WITH_TYPE)))
         //    result = e1(cheriExcTypeViolation);
-        //else if (toCheck.src1_src2_types_match     && getKind(a).SEALED_WITH_TYPE != getKind(b).SEALED_WITH_TYPE)
-        //result = e1(cheriExcTypeViolation);
+        // else if (toCheck.src1_src2_types_match     && getKind(a).SEALED_WITH_TYPE != getKind(b).SEALED_WITH_TYPE)
+        // result = e1(cheriExcTypeViolation);
     end else if (toCheck.src1_permit_ccall         && !getHardPerms(a).permitCCall)
         result = e1(cheriExcPermitCCallViolation);
     else if (toCheck.src2_permit_ccall         && !getHardPerms(b).permitCCall)
@@ -97,8 +97,8 @@ endfunction
     Bool storeValidCap = isStore && isValidCap(data) && byteOrTagEn == DataMemAccess(replicate(True));
     if      (!isValidCap(auth))
         result = eAuth(cheriExcTagViolation);
-    else if ( !isCCType(auth, ccpt) && getKind(auth) != UNSEALED)
-        result = eAuth(cheriExcSealViolation);
+    //else if ( !isCCType(auth, ccpt) && getKind(auth) != UNSEALED)
+   //     result = eAuth(cheriExcSealViolation);
     else if (isLoad && !getHardPerms(auth).permitLoad)
         result = eAuth(cheriExcPermitRViolation);
     else if (isLoad && !getHardPerms(auth).permitLoadCap && byteOrTagEn == TagMemAccess)
@@ -229,6 +229,7 @@ function Tuple2#(Data, Bool) extractType(CapPipe a);
     else return tuple2(zeroExtend(getKind(a).SEALED_WITH_TYPE), False);
 endfunction
 
+
 function CapPipe clearTagIf(CapPipe a, Bool cond);
     return setValidCap(a, isValidCap(a) && !cond);
 endfunction
@@ -242,7 +243,9 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
     Bool sealIllegal = getKind(b) != UNSEALED || !getHardPerms(b).permitSeal || !validAsType(b, getAddr(b));
     let new_hard_perms = getHardPerms(a);
     new_hard_perms.global = new_hard_perms.global && getHardPerms(b).global;
-    Bool unsealIllegal = !isValidCap(b) || getKind(b) != UNSEALED || getKind(a) == UNSEALED || a_res || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
+     
+    //Bool unsealIllegal = !isValidCap(b) || getKind(a) != UNSEALED || getKind(b) == UNSEALED || a_res || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
+    Bool unsealIllegal = !isValidCap(b) || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
     Bool buildCapIllegal = !isValidCap(b) || getKind(b) != UNSEALED || !isDerivable(a) || (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b); // XXX needs optimisation
     CapPipe res = (case(func) matches
             tagged ModifyOffset .offsetOp :
@@ -320,7 +323,7 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                tagged GetHigh                :
                    zeroExtend(tpl_2(toMem(a))[127:64]);
                tagged GetType                :
-                   tpl_1(extractType(a));
+                   zeroExtend(getCCType(a));
                tagged ToPtr                  :
                    (isValidCap(a) ? getAddr(a) - getBase(b) : 0);
                default: ?;
@@ -581,7 +584,7 @@ function Maybe#(Trap) checkForException(
     CapPipe pcc_start = cast(pcc);
     Maybe#(CSR_XCapCause) capException = Invalid;
     if (!isValidCap(pcc_start)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcTagViolation});
-    if (getKind(pcc_start) != UNSEALED) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcSealViolation});
+    //if (getKind(pcc_start) != UNSEALED) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcSealViolation});
     if (!getHardPerms(pcc_start).permitExecute) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcPermitXViolation});
     if (!isInBounds(pcc_end, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcLengthViolation});
     if (!isInBounds(pcc_start, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcLengthViolation});
