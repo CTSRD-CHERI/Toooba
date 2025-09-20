@@ -46,7 +46,8 @@ module mkL1LLConnect#(
                 canUpToE: r.canUpToE,
                 id: r.id,
                 child: child,
-                isPrefetchRq: r.isPrefetchRq
+                isPrefetchRq: r.isPrefetchRq,
+                alloc_policy: r.alloc_policy
             }
         };
     endfunction

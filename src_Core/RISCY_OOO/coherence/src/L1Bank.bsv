@@ -378,7 +378,8 @@ endfunction
             data: ?,
             amoInst: ?,
             loadTags: ?,
-            pcHash: ?
+            pcHash: ?,
+            alloc_policy: ?
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
         // send to pipeline
@@ -504,7 +505,8 @@ endfunction
             canUpToE: True,
             id: 0,
             child: ?,
-            isPrefetchRq: True
+            isPrefetchRq: True,
+            alloc_policy: 2'b00
         };
         rqToPQ.enq(cRqToP);
         if (verbose)

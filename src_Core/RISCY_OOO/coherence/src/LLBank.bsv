@@ -434,7 +434,8 @@ endfunction
             canUpToE: True,
             child: child,
             byteEn: ?,
-            id: Child (?)
+            id: Child (?),
+            alloc_policy: 2'b00
         };
         // setup new MSHR entry
         cRqIndexT n <- cRqMshr.transfer.getEmptyEntryInit(cRq, Invalid);
@@ -467,7 +468,8 @@ endfunction
             canUpToE: True,
             child: child,
             byteEn: ?,
-            id: Child (?)
+            id: Child (?),
+            alloc_policy: 2'b00
         };
         // setup new MSHR entry
         cRqIndexT n <- cRqMshr.transfer.getEmptyEntryInit(cRq, Invalid);
@@ -519,7 +521,8 @@ endfunction
             canUpToE: False, // DMA should not go to E
             child: ?,
             byteEn: r.byteEn,
-            id: Dma (r.id)
+            id: Dma (r.id),
+            alloc_policy: 2'b00
         };
         // setup new MSHR entry and data
         cRqIndexT n <- cRqMshr.transfer.getEmptyEntryInit(cRq, write ? Valid (r.data) : Invalid);
