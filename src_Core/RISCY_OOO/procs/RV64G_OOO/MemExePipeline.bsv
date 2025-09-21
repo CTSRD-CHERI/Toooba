@@ -271,7 +271,7 @@ interface MemExePipeline;
 endinterface
 
 module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
-    Bool verbose = False;
+    Bool verbose = True;
 
     // we change cache request in case of single core, becaues our MSI protocol
     // is not good with single core
@@ -350,9 +350,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, Tuple4#(LdQTag, Addr, Bool, Bit#(16))) reqLdQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
-    Fifo#(1, Tuple2#(Addr, Bit#(16))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple3#(Addr, Bit#(2), Bit#(16))) reqStQ <- mkBypassFifo;
 `else
-    Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(16))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple4#(SBIndex, Addr, Bit#(2), Bit#(16))) reqStQ <- mkBypassFifo;
 `endif
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
@@ -605,13 +605,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let shiftBE = DataMemAccess(x.shiftBEData);
         if (x.origBE == TagMemAccess) begin
             shiftBE = TagMemAccess;
+        end 
+        else if(x.origBE == CacheLine_NWZ) begin
+            shiftBE = CacheLine_NWZ;
         end
 
         CapPipe ddc = cast(inIfc.scaprf_rd(scrAddrDDC));
 
         // get size of the access
         Bit#(TAdd#(CacheUtils::LogCLineNumMemDataBytes,1)) accessByteCount = zeroExtend(pack(countOnes(pack(x.origBE.DataMemAccess))));
-        if (x.origBE == TagMemAccess) begin
+        if (x.origBE == TagMemAccess || x.origBE == CacheLine_NWZ) begin
             accessByteCount = fromInteger(valueOf(CacheUtils::CLineNumMemDataBytes));
         end
 
@@ -1225,11 +1228,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
         // send to mem
         Addr addr = lsqDeqSt.paddr;
-        reqStQ.enq(tuple2(addr, lsqDeqSt.pcHash));
+        Bit#(2) alloc_policy = 2'b00;
+        if(lsqDeqSt.shiftedBE == CacheLine_NWZ) alloc_policy = 2'b01;
+        reqStQ.enq(tuple3(addr, alloc_policy,lsqDeqSt.pcHash));
         // record waiting for store resp
         waitStRespQ.enq(WaitStResp {
             offset: getLineMemDataOffset(addr),
-            shiftedBE: lsqDeqSt.shiftedBE,
+            shiftedBE: lsqDeqSt.shiftedBE.DataMemAccess,
             shiftedData: lsqDeqSt.stData
         });
         // we leave deq to resp time
@@ -1259,7 +1264,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // send store to mem
     rule doIssueSB;
         let {sbIdx, en} <- stb.issue;
-        reqStQ.enq(tuple3(sbIdx, {en.addr, 0}, en.pcHash));
+        Bit#(2) alloc_policy = 2'b00;
+        if( en.shiftedBE == CacheLine_NWZ) alloc_policy = 2'b01;
+        reqStQ.enq(tuple4(sbIdx, {en.addr, 0}, alloc_policy, en.pcHash));
         // perf: store mem latency
         stMemLatTimer.start(sbIdx);
     endrule
@@ -1343,7 +1350,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             // XXX Amo uses **original** data (firstSt.stData is the original
             // data for Amo). AMO doesn't use BE. Sc uses **shifted** BE and
             // data (firstSt.stData is shifted for Sc).
-            byteEn: lsqDeqSt.shiftedBE,
+            byteEn: lsqDeqSt.shiftedBE.DataMemAccess,
             data: lsqDeqSt.stData,
             amoInst: AmoInst {
                 func: lsqDeqSt.amoFunc,
@@ -1460,7 +1467,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                        Amo: (Amo (lsqDeqSt.amoFunc));
                        default: ?;
                    endcase),
-            byteEn: lsqDeqSt.shiftedBE, // BE is LSQ is always shifted
+            byteEn: lsqDeqSt.shiftedBE.DataMemAccess, // BE is LSQ is always shifted
             data: lsqDeqSt.stData, // stData in LSQ is not shifted for AMO but for St
             loadTags: False
         };
@@ -1586,10 +1593,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     (* descending_urgency = "sendLdToMem, sendStToMem" *) // prioritize Ld over St
     rule sendStToMem;
 `ifdef TSO_MM
-        let {addr, pcHash} <- toGet(reqStQ).get;
+        let {addr, alloc_policy, pcHash} <- toGet(reqStQ).get;
         DProcReqId id = 0;
 `else
-        let {sbIdx, addr, pcHash} <- toGet(reqStQ).get;
+        let {sbIdx, addr, alloc_policy, pcHash} <- toGet(reqStQ).get;
         DProcReqId id = zeroExtend(sbIdx);
 `endif
         dMem.procReq.req(ProcRq {
@@ -1602,7 +1609,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             amoInst: ?,
             loadTags: False,
             pcHash: pcHash,
-            alloc_policy: 2'b00
+            alloc_policy: alloc_policy
         });
     endrule
     (* descending_urgency = "sendLrScAmoToMem, sendStToMem" *) // prioritize Lr/Sc/Amo over St

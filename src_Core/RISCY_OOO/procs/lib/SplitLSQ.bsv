@@ -239,7 +239,7 @@ typedef struct {
     Bool              isMMIO;
     // byte enable after shift to align with dword boudary. This is valid
     // for all types of memory accesses.
-    MemDataByteEn     shiftedBE;
+    ByteOrTagEn     shiftedBE;
     // St/Sc/Amo data
     // for St/Sc: store data after shift to align with dword boudary
     // for Amo: data is **NOT** shifted, this doesn't affect forwarding to Ld,
@@ -339,7 +339,7 @@ typedef struct {
     Maybe#(PhyDst)    dst;
     Addr              paddr;
     Bool              isMMIO;
-    MemDataByteEn     shiftedBE;
+    ByteOrTagEn     shiftedBE;
     MemTaggedData     stData;
     Bool              allowCapAmoLd;
     Maybe#(Trap)      fault;
@@ -508,7 +508,7 @@ endfunction
 // check whether mem op addr is aligned w.r.t data size
 function Bool checkAddrAlign(Addr addr, ByteOrTagEn byteOrTagEn);
     let byteEn = byteOrTagEn.DataMemAccess;
-    if (byteOrTagEn == TagMemAccess) begin
+    if (byteOrTagEn == TagMemAccess || byteOrTagEn == CacheLine_NWZ) begin
         return isCLineAlignAddr(addr);
     end
     else if(byteEn[15]) begin
@@ -648,7 +648,7 @@ module mkSplitLSQ(SplitLSQ);
     // request faults), we should first copy the MMIO request to a reg, and
     // then kill using the info in reg.
 
-    Bool verbose = False;
+    Bool verbose = True;
 
     // we may simplify things in case of single core
     Bool multicore = valueof(CoreNum) > 1;
@@ -847,14 +847,14 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(InstTag))                 st_instTag   <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(StQMemFunc))              st_memFunc   <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(AmoFunc))                 st_amoFunc   <- replicateM(mkRegU);
-    Vector#(StQSize, Reg#(MemDataByteEn))           st_byteEn    <- replicateM(mkRegU);
+    Vector#(StQSize, Reg#(ByteOrTagEn))           st_byteEn    <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Bool))                    st_acq       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Bool))                    st_rel       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Maybe#(PhyDst)))          st_dst       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Bit#(16)))                st_pcHash   <- replicateM(mkRegU);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
-    Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, ByteOrTagEn))        st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Trap)))         st_fault     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_allowCapAmoLd <- replicateM(mkEhr(?));
@@ -1378,7 +1378,7 @@ module mkSplitLSQ(SplitLSQ);
     method ByteOrTagEn getOrigBE(LdStQTag t);
         return (case(t) matches
             tagged Ld .tag: (ld_byteOrTagEn[tag]);
-            tagged St .tag: (DataMemAccess(st_byteEn[tag]));
+            tagged St .tag: (st_byteEn[tag]);
             default: ?;
         endcase);
     endmethod
@@ -1485,7 +1485,7 @@ module mkSplitLSQ(SplitLSQ);
         st_instTag[st_enqP] <= inst_tag;
         st_memFunc[st_enqP] <= getStQMemFunc(mem_inst.mem_func);
         st_amoFunc[st_enqP] <= mem_inst.amo_func;
-        st_byteEn[st_enqP] <= mem_inst.byteOrTagEn.DataMemAccess;
+        st_byteEn[st_enqP] <= mem_inst.byteOrTagEn;
         st_acq[st_enqP] <= mem_inst.aq;
         st_rel[st_enqP] <= mem_inst.rl;
         st_dst[st_enqP] <= dst;
@@ -1584,7 +1584,7 @@ module mkSplitLSQ(SplitLSQ);
             st_computed_updAddr[tag] <= !isValid(fault);
             st_paddr_updAddr[tag] <= pa;
             st_isMMIO_updAddr[tag] <= mmio;
-            st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
+            st_shiftedBE_updAddr[tag] <= shift_be;
 
             // A store always try to kill younger loads
             doKill = True;
@@ -1754,7 +1754,7 @@ module mkSplitLSQ(SplitLSQ);
             Bool computed = st_computed_issue[i];
             Bool overlap = overlapAddr(pa, shift_be,
                                        st_paddr_issue[i],
-                                       DataMemAccess(st_shiftedBE_issue[i]));
+                                       st_shiftedBE_issue[i]);
             return valid_older && computed && overlap;
         endfunction
         Vector#(StQSize, Bool) overlapSts = map(isOverlapSt,
@@ -1770,7 +1770,7 @@ module mkSplitLSQ(SplitLSQ);
                 end
                 St: begin
                     // check if forwarding is possible
-                    if(be1CoverBe2(DataMemAccess(st_shiftedBE_issue[stTag]), shift_be)) begin
+                    if(be1CoverBe2(st_shiftedBE_issue[stTag], shift_be)) begin
                         // store covers the issuing load, forward
                         issRes = Forward (LSQForwardResult {
                             dst: ld_dst[tag],
@@ -2105,7 +2105,7 @@ module mkSplitLSQ(SplitLSQ);
 
         // sanity check
         if(!isValid(st_fault_deqSt[deqP])) begin
-            doAssert(checkAddrAlign(st_paddr_deqSt[deqP], DataMemAccess(st_byteEn[deqP])),
+            doAssert(checkAddrAlign(st_paddr_deqSt[deqP], st_byteEn[deqP]),
                      "addr BE should be naturally aligned");
             doAssert(st_specBits_deqSt[deqP] == 0,
                      "must have zero spec bits");
