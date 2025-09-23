@@ -697,7 +697,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         // go to next stage by sending to TLB
-        if (isValid(objIdVAddr) && (x.mem_func == Ld || x.mem_func == St)) begin
+        // if (isValid(objIdVAddr) && (x.mem_func == Ld || x.mem_func == St)) begin
             objIdTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
                     mem_func: x.mem_func,
@@ -724,95 +724,94 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 },
                 specBits: regToExe.spec_bits
             });
-        end
-        else begin
-            // dTlb.procReq(
-            dTlbReqQ.enq(ToSpecFifo {
-                data: MemExeToFinish {
-                    mem_func: x.mem_func,
-                    tag: x.tag,
-                    ldstq_tag: x.ldstq_tag,
-                    shiftedBE: shiftBE,
-                    vaddr: x.vaddr,
-                    objIdAddr: Invalid,
-                    objIdOffset: objIdOffset,
-`ifdef INCLUDE_TANDEM_VERIF
-                    store_data: x.rVal2,
-                    store_data_BE: origBE,
-`endif
-                    misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
-                    capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
-                    allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
-                    // capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrSCCP)[31:0])),
-                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, ccpt),
-                    check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                            ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
-`ifdef KONATA
-                    , u_id: x.u_id
-`endif
-                },
-                spec_bits: regToExe.spec_bits
-            });
-        end
-    endrule
-
-    (* descending_urgency = "doObjIdTlb, doExeMem" *)
-    rule doObjIdTlb;
-        objIdTlb.deqProcResp;
-        let objIdTlbResp = objIdTlb.procResp;
-        let x = objIdTlbResp.inst;
-        Maybe#(Addr) objIdPAddr = Invalid;
-        Bool allowCapPTE = False;
-        Maybe#(Trap) cause = Invalid;
-        if (objIdTlbResp.resp matches tagged Valid .rsp) begin
-            Maybe#(Exception) expCause = Invalid;
-            Addr a = 0;
-            {a, expCause, allowCapPTE} = rsp;
-            objIdPAddr = Valid(a);
-            if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
-        end
-
-        if(verbose) $display("%t : [doObjIdTlb] ", $time, fshow(objIdTlbResp));
-        if(isValid(cause) && verbose) $display("  [doObjIdTlb - objIdTlb response] PAGEFAULT!");
-
-        // dTlb.procReq(
-        dTlbReqQ.enq(ToSpecFifo {
-            data: MemExeToFinish {
+        // end
+        // dTlbReqQ.enq(ToSpecFifo {
+            // data: MemExeToFinish {
+        dTlb.procReq(DTlbReq {
+            inst: MemExeToFinish {
                 mem_func: x.mem_func,
                 tag: x.tag,
                 ldstq_tag: x.ldstq_tag,
-                shiftedBE: x.shiftedBE,
+                shiftedBE: shiftBE,
                 vaddr: x.vaddr,
-                // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
-                objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
-                objIdOffset: x.objIdOffset,
+                objIdAddr: Invalid,
+                objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
-                store_data: x.store_data,
-                store_data_BE: x.store_data_BE,
+                store_data: x.rVal2,
+                store_data_BE: origBE,
 `endif
-                misaligned: x.misaligned,
-                capStore: x.capStore,
-                allowCapLoad: x.allowCapLoad,
-                capException: x.capException,
-                check: x.check
+                misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
+                capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
+                allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
+                // capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrSCCP)[31:0])),
+                capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, ccpt),
+                check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
+                                        ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
 `ifdef KONATA
                 , u_id: x.u_id
 `endif
             },
-            spec_bits: objIdTlbResp.specBits
+            specBits: regToExe.spec_bits
         });
     endrule
 
-    rule doDTlb;
-        dTlbReqQ.deq;
-        let memExeFin = dTlbReqQ.first;
-        let x = memExeFin.data;
-        dTlb.procReq(DTlbReq {
-            inst: x,
-            specBits: memExeFin.spec_bits
-        });
-        if (verbose) $display("%t : [doDTlb] ", $time, fshow(memExeFin));
-    endrule
+//     (* descending_urgency = "doObjIdTlb, doExeMem" *)
+//     rule doObjIdTlb;
+//         objIdTlb.deqProcResp;
+//         let objIdTlbResp = objIdTlb.procResp;
+//         let x = objIdTlbResp.inst;
+//         Maybe#(Addr) objIdPAddr = Invalid;
+//         Bool allowCapPTE = False;
+//         Maybe#(Trap) cause = Invalid;
+//         if (objIdTlbResp.resp matches tagged Valid .rsp) begin
+//             Maybe#(Exception) expCause = Invalid;
+//             Addr a = 0;
+//             {a, expCause, allowCapPTE} = rsp;
+//             objIdPAddr = Valid(a);
+//             if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
+//         end
+
+//         if(verbose) $display("%t : [doObjIdTlb] ", $time, fshow(objIdTlbResp));
+//         if(isValid(cause) && verbose) $display("  [doObjIdTlb - objIdTlb response] PAGEFAULT!");
+
+//         // dTlb.procReq(
+//         dTlbReqQ.enq(ToSpecFifo {
+//             data: MemExeToFinish {
+//                 mem_func: x.mem_func,
+//                 tag: x.tag,
+//                 ldstq_tag: x.ldstq_tag,
+//                 shiftedBE: x.shiftedBE,
+//                 vaddr: x.vaddr,
+//                 // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
+//                 objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
+//                 objIdOffset: x.objIdOffset,
+// `ifdef INCLUDE_TANDEM_VERIF
+//                 store_data: x.store_data,
+//                 store_data_BE: x.store_data_BE,
+// `endif
+//                 misaligned: x.misaligned,
+//                 capStore: x.capStore,
+//                 allowCapLoad: x.allowCapLoad,
+//                 capException: x.capException,
+//                 check: x.check
+// `ifdef KONATA
+//                 , u_id: x.u_id
+// `endif
+//             },
+//             spec_bits: objIdTlbResp.specBits
+//         });
+//     endrule
+
+    // rule doDTlb;
+    //     dTlbReqQ.deq;
+    //     let memExeFin = dTlbReqQ.first;
+    //     let x = memExeFin.data;
+    //     dTlb.procReq(DTlbReq {
+    //         inst: x,
+    //         specBits: memExeFin.spec_bits
+    //     });
+    //     if (verbose) $display("%t : [doDTlb] ", $time, fshow(memExeFin));
+    // endrule
 
     rule doFinishMem;
         dTlb.deqProcResp;
@@ -830,8 +829,19 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             doAssert(False, "[doFinishMem] Regular DTlb response must be valid");
         end
 
-        if(verbose) $display("%t : [doFinishMem] ", $time, fshow(dTlbResp));
-        if(isValid(cause) && verbose) $display("  [doFinishMem - dTlb response] PAGEFAULT!");
+        objIdTlb.deqProcResp;
+        let objIdTlbResp = objIdTlb.procResp;
+        Maybe#(Addr) objIdPAddr = Invalid;
+        if (objIdTlbResp.resp matches tagged Valid .rsp) begin
+            Maybe#(Exception) expCause = Invalid;
+            Addr a = 0;
+            {a, expCause, allowCapPTE} = rsp;
+            objIdPAddr = Valid(a);
+            if (!isValid(cause) &&& expCause matches tagged Valid .c) cause = Valid(Exception(c)); // priority to dTlb faults
+        end
+
+        if(verbose) $display("%t : [doFinishMem] dTlbResp: ", $time, fshow(dTlbResp), " objIdTlbResp: ", fshow(objIdTlbResp));
+        if(isValid(cause) && verbose) $display("  [doFinishMem - Tlb responses] PAGEFAULT!");
 
         Data store_data = ?;
         ByteEn store_data_BE = ?;
@@ -893,7 +903,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 x.capException = Valid(CSR_XCapCause{cheri_exc_reg: check.authority_idx, cheri_exc_code: cheriExcLengthViolation});
         end
         if (x.capException matches tagged Valid .c) cause = Valid(CapException(c));
-        let needsObjIdCheck = (x.mem_func == St) && !isMMIO && isValid(x.objIdAddr);
+        let needsObjIdCheck = (x.mem_func == St) && !isMMIO && isValid(objIdPAddr);
         Bool access_at_commit = !isValid(cause) && (isMMIO || isLrScAmo);
         Bool non_mmio_st_done = !isValid(cause) && !isMMIO && (x.mem_func == St) && !needsObjIdCheck;
         inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
@@ -934,7 +944,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE,
-            (((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid), x.objIdOffset
+            (((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 
@@ -954,12 +964,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
-                objIdPAddr: x.objIdAddr,
+                objIdPAddr: objIdPAddr,
                 pcHash: hash(getAddr(pc))
             });
         end
         else if (x.mem_func == St && !isMMIO &&
-                 !isValid(cause) && isValid(x.objIdAddr)) begin
+                 !isValid(cause) && isValid(objIdPAddr)) begin
             StQTag stTag = ?;
             if(x.ldstq_tag matches tagged St .t) begin
                 stTag = t;
@@ -967,7 +977,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             else begin
                 doAssert(False, "must be in StQ");
             end
-            reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, x.objIdAddr)));
+            reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, objIdPAddr)));
         end
 
 `ifdef PERF_COUNT
