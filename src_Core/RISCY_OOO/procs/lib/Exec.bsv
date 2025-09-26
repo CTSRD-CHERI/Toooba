@@ -142,7 +142,7 @@ function Maybe#(BoundsCheck) prepareBoundsCheck(CapPipe a, CapPipe b, CapPipe pc
     case(toCheck.check_low_src)
         Src1Addr: ret.check_low = getAddr(a);
         Src1Base: ret.check_low = getBase(a);
-        Src1Type: ret.check_low = zeroExtend(getKind(a).SEALED_WITH_TYPE);
+        Src1Type: ret.check_low = zeroExtend(getBaseKind(a).SEALED_WITH_TYPE);
         Src2Addr: ret.check_low = getAddr(b);
         Vaddr:    ret.check_low = vaddr;
     endcase
@@ -150,7 +150,7 @@ function Maybe#(BoundsCheck) prepareBoundsCheck(CapPipe a, CapPipe b, CapPipe pc
     case(toCheck.check_high_src)
         Src1AddrPlus2: ret.check_high = {1'b0,getAddr(a)+2};
         Src1Top: ret.check_high = getTop(a);
-        Src1Type: ret.check_high = zeroExtend(getKind(a).SEALED_WITH_TYPE);
+        Src1Type: ret.check_high = zeroExtend(getBaseKind(a).SEALED_WITH_TYPE);
         Src2Addr: ret.check_high = {1'b0,getAddr(b)};
         ResultTop: ret.check_high = {1'b0,getAddr(a)} + {1'b0,getAddr(b)};
         VaddrPlusSize: ret.check_high = {1'b0,vaddr} + zeroExtend(size);
@@ -222,11 +222,11 @@ function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWFunc scrType
 endfunction
 
 function Tuple2#(Data, Bool) extractType(CapPipe a);
-    if      (getKind(a) == UNSEALED) return tuple2(otype_unsealed_ext, True);
-    else if (getKind(a) == SENTRY  ) return tuple2(otype_sentry_ext, True);
-    else if (getKind(a) == RES0    ) return tuple2(otype_res0_ext, True);
-    else if (getKind(a) == RES1    ) return tuple2(otype_res1_ext, True);
-    else return tuple2(zeroExtend(getKind(a).SEALED_WITH_TYPE), False);
+    if      (getBaseKind(a) == UNSEALED) return tuple2(otype_unsealed_ext, True);
+    else if (getBaseKind(a) == SENTRY  ) return tuple2(otype_sentry_ext, True);
+    else if (getBaseKind(a) == RES0    ) return tuple2(otype_res0_ext, True);
+    else if (getBaseKind(a) == RES1    ) return tuple2(otype_res1_ext, True);
+    else return tuple2(zeroExtend(getBaseKind(a).SEALED_WITH_TYPE), False);
 endfunction
 
 
@@ -239,7 +239,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
     let a_mut = setValidCap(a, isValidCap(a) && getKind(a) == UNSEALED);
     let b_mut = setValidCap(b, isValidCap(b) && getKind(b) == UNSEALED);
     match {.a_type, .a_res} = extractType(a);
-    Bool sealPassthrough = !isValidCap(b) || getKind(a) != UNSEALED || !isInBounds(b, False) || getAddr(b) == otype_unsealed_ext;
+    Bool sealPassthrough = !isValidCap(b) || getBaseKind(a) != UNSEALED || !isInBounds(b, False) || getAddr(b) == otype_unsealed_ext;
     Bool sealIllegal = getKind(b) != UNSEALED || !getHardPerms(b).permitSeal || !validAsType(b, getAddr(b));
     let new_hard_perms = getHardPerms(a);
     new_hard_perms.global = new_hard_perms.global && getHardPerms(b).global;
