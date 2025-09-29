@@ -1293,7 +1293,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
                                           /* ie_vec [prvM] */ prev_ie_vec[prvM],
                                           ie_vec [prvS],
                                           ie_vec [prvU]);
-        return RET_Updates {new_pcc: cast(setKind(mepcc_reg[0], getKind(mepcc_reg[0]) == SENTRY ? UNSEALED : getKind(mepcc_reg[0])))
+        return RET_Updates {new_pcc: cast(setKind(mepcc_reg[0], getBaseKind(mepcc_reg[0]) == SENTRY ? UNSEALED : getBaseKind(mepcc_reg[0])))
 `ifdef INCLUDE_TANDEM_VERIF
                             , prv:    prev_prv_vec[prvM],
                             status: mstatus_val
@@ -1322,7 +1322,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
                                           ie_vec [prvM],
                                           /* ie_vec [prvS] */ prev_ie_vec[prvS],
                                           ie_vec [prvU]);
-        return RET_Updates {new_pcc: cast(setKind(sepcc_reg[0], getKind(sepcc_reg[0]) == SENTRY ? UNSEALED : getKind(sepcc_reg[0])))
+        return RET_Updates {new_pcc: cast(setKind(sepcc_reg[0], getBaseKind(sepcc_reg[0]) == SENTRY ? UNSEALED : getBaseKind(sepcc_reg[0])))
 `ifdef INCLUDE_TANDEM_VERIF
                             , prv:    prev_prv_vec[prvS],
                             status: mstatus_val
