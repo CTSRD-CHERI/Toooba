@@ -239,7 +239,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
     Bool sealIllegal = getKind(b) != UNSEALED || !getHardPerms(b).permitSeal || !validAsType(b, getAddr(b));
     let new_hard_perms = getHardPerms(a);
     new_hard_perms.global = new_hard_perms.global && getHardPerms(b).global;
-    Bool unsealIllegal = !isValidCap(b) || getKind(a) != UNSEALED || getKind(b) == UNSEALED || a_res || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
+    Bool unsealIllegal = !isValidCap(b) || getKind(b) != UNSEALED || getKind(a) == UNSEALED || a_res || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
     Bool buildCapIllegal = !isValidCap(b) || getKind(b) != UNSEALED || !isDerivable(a) || (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b); // XXX needs optimisation
     CapPipe res = (case(func) matches
             tagged ModifyOffset .offsetOp :
