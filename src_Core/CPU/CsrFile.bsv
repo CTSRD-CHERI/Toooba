@@ -512,13 +512,10 @@ module mkCsrFile #(Data hartid)(CsrFile);
         software_int_en_vec[prvS], readOnlyReg(1'b0)     // only if misa.N: software_int_en_vec[prvU]
     );
     // mcounteren
-    Reg#(Bit#(1)) mcounteren_ir_reg <- mkCsrReg(0);
-    Reg#(Bit#(1)) mcounteren_tm_reg <- mkCsrReg(0);
-    Reg#(Bit#(1)) mcounteren_cy_reg <- mkCsrReg(0);
-    Reg#(Data) mcounteren_csr = concatReg5(
+    Reg#(Bit#(32)) mcounteren_data <- mkCsrReg(0);
+    Reg#(Data) mcounteren_csr = concatReg2(
         readOnlyReg(32'b0),
-        readOnlyReg(~29'b0), // hpmcounter 3-31 currently always accessible in S mode
-        mcounteren_ir_reg, mcounteren_tm_reg, mcounteren_cy_reg
+        mcounteren_data
     );
     // mscratch
     Reg#(Data) mscratch_csr <- mkCsrReg(0);
@@ -632,13 +629,10 @@ module mkCsrFile #(Data hartid)(CsrFile);
         software_int_en_vec[prvS], readOnlyReg(1'b0)    // only if misa.N: software_int_en_vec[prvU]
     );
     // scounteren
-    Reg#(Bit#(1)) scounteren_ir_reg <- mkCsrReg(0);
-    Reg#(Bit#(1)) scounteren_tm_reg <- mkCsrReg(0);
-    Reg#(Bit#(1)) scounteren_cy_reg <- mkCsrReg(0);
-    Reg#(Data) scounteren_csr = concatReg5(
+    Reg#(Bit#(32)) scounteren_data <- mkCsrReg(0);
+    Reg#(Data) scounteren_csr = concatReg2(
         readOnlyReg(32'b0),
-        readOnlyReg(~29'b0), // hpmcounter 3-31 currently always accessible in U mode
-        scounteren_ir_reg, scounteren_tm_reg, scounteren_cy_reg
+        scounteren_data
     );
     // sscratch
     Reg#(Data) sscratch_csr <- mkCsrReg(0);
@@ -1458,13 +1452,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
         prv: prv_reg,
         trapVM: tvm_reg == 1,
         timeoutWait: tw_reg == 1,
-        trapSret: tsr_reg == 1,
-        cycleReadableByS: mcounteren_cy_reg == 1,
-        cycleReadableByU: mcounteren_cy_reg == 1 && scounteren_cy_reg == 1,
-        instretReadableByS: mcounteren_ir_reg == 1,
-        instretReadableByU: mcounteren_ir_reg == 1 && scounteren_ir_reg == 1,
-        timeReadableByS: mcounteren_tm_reg == 1,
-        timeReadableByU: mcounteren_tm_reg == 1 && scounteren_tm_reg == 1
+        trapSret: tsr_reg == 1
     };
 
     method Action incInstret(SupCnt x);

@@ -538,13 +538,6 @@ typedef struct {
     Bool timeoutWait; // mstatus.tw: trap on WFI after waiting N cycles in S
                       // mode. This is currently ignore since WFI is a NOP.
     Bool trapSret; // mstatus.tsr: trap on SRET executed in S mode
-    // for decoding rdcycle/time/instret
-    Bool cycleReadableByS; // S mode can do rdcycle
-    Bool cycleReadableByU; // U mode can do rdcycle
-    Bool instretReadableByS; // S mode can do rdinstret
-    Bool instretReadableByU; // U mode can do rdinstret
-    Bool timeReadableByS; // S mode can do rdtime
-    Bool timeReadableByU; // U mode can do rdtime
 } CsrDecodeInfo deriving (Bits, Eq, FShow);
 
 typedef struct {
