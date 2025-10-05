@@ -229,7 +229,7 @@ function Tuple2#(Data, Bool) extractType(CapPipe a);
     else return tuple2(zeroExtend(getBaseKind(a).SEALED_WITH_TYPE), False);
 endfunction
 
-
+/* if the condition is True, it will clear the tag!!! */
 function CapPipe clearTagIf(CapPipe a, Bool cond);
     return setValidCap(a, isValidCap(a) && !cond);
 endfunction
@@ -261,17 +261,23 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                       tagged EPC ._: nullWithAddr(getAddr(b));
                    endcase
             tagged SetAddr .addrSource    :
-                clearTagIf(setAddr(b_mut, (addrSource == Src1Type) ? a_type : getAddr(a) ).value, (addrSource == Src1Type) ? a_res : False);
+                //clearTagIf(setAddr(b_mut, (addrSource == Src1Type) ? a_type :getAddr(a) ).value, (addrSource == Src1Type) ? a_res : False);
+                setAddr(b_mut, (addrSource == Src1Type) ? a_type : getAddr(a) ).value;    
             tagged SealEntry              :
                 setKind(a_mut, SENTRY);
             tagged Seal                   :
-                clearTagIf( setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b))))
-                          , sealPassthrough || sealIllegal);
+                //clearTagIf( setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b)))), sealPassthrough || sealIllegal);
+                setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b))));
             tagged CSeal                  :
-                (sealPassthrough ? a :
-                     clearTagIf(setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b)))), sealIllegal));
+                //(sealPassthrough ? a :
+                //     clearTagIf(setKind(a_mut, SEALED_WITH_TYPE
+                //     (truncate(getAddr(b)))), sealIllegal));
+                sealPassthrough ? a :
+                     setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b))));
             tagged Unseal .src            :
-                clearTagIf(setHardPerms(setKind(((src == Src1) ? a:b), UNSEALED), new_hard_perms), (src == Src1) && unsealIllegal);
+                //clearTagIf(setHardPerms(setKind(((src == Src1) ? a:b), UNSEALED), new_hard_perms), (src == Src1) && unsealIllegal);
+                
+                setHardPerms(setKind(((src == Src1) ? a:b), UNSEALED), new_hard_perms);
             tagged AndPerm                :
                 setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
             tagged CCSetType                :
