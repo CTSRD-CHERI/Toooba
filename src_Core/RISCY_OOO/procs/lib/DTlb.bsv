@@ -543,7 +543,7 @@ module mkDTlb#(
                         end
                         else begin
                             // doAssert(False, "[DTLB] Pending request cannot be Invalid - miss");
-                            return True;
+                            return False;
                         end
                     endfunction
                     Vector#(DTlbReqNum, DTlbReqIdx) idxVec = genWith(fromInteger);
