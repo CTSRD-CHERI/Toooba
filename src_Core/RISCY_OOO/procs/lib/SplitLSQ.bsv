@@ -2159,6 +2159,10 @@ module mkSplitLSQ(SplitLSQ);
             res.wrongPath = True;
             res.dst = Invalid; // drop wrong path resp
         end
+        else if(!ld_valid_resp[t] || ld_memFunc[t] != Ld) begin
+            res.wrongPath = True;
+            res.dst = Invalid;
+        end
         else begin
             doAssert(ld_valid_resp[t] && ld_memFunc[t] == Ld,
                      "valid resp must come for Ld");
