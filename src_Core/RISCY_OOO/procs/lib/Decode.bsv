@@ -964,10 +964,12 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
         opcSystem: begin
             if (funct3 == fnPRIV) begin
                 if (funct7 == privSFENCEVMA) begin
-                    dInst.iType = SFence;
-                    legalInst = True;
-                    // FIXME SFENCE.VMA is implemented in coarse grain,
-                    // ignoring rs1 and rs2
+                    if(rd == 0) begin
+                        dInst.iType = SFence;
+                        legalInst = True;
+                        // FIXME SFENCE.VMA is implemented in coarse grain,
+                        // ignoring rs1 and rs2
+                    end
                 end
                 else begin
                     Maybe#(IType) mIType = case (truncate(immI))
