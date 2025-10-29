@@ -688,7 +688,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(Trap)))         ld_fault           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_computed        <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(2, Bool))                 ld_objIdSealOk     <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Maybe#(Bool)))         ld_objIdSealOk     <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_executing       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_done            <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(LdKilledBy)))   ld_killed          <- replicateM(mkEhr(?));
@@ -1384,7 +1384,7 @@ module mkSplitLSQ(SplitLSQ);
                     // normal non-MMIO Ld: done, older St (if exists) verified
                     return ld_done_deqLd[deqP] &&
                            (no_older_st || ld_olderStVerified_deqLd[deqP]) &&
-                           (!isValid(ld_objIdPAddr_deqLd[deqP]) || ld_objIdSealOk_deqLd[deqP]);
+                           (!isValid(ld_objIdPAddr_deqLd[deqP]) || isValid(ld_objIdSealOk_deqLd[deqP]));
                 end
                 else begin
                     // Lr or MMIO: done, at commit, no older st
@@ -1501,7 +1501,7 @@ module mkSplitLSQ(SplitLSQ);
         ld_dst[ld_enqP] <= dst;
         ld_fault_enq[ld_enqP] <= Invalid;
         ld_computed_enq[ld_enqP] <= False;
-        ld_objIdSealOk_enq[ld_enqP] <= False;
+        ld_objIdSealOk_enq[ld_enqP] <= Invalid;
         ld_executing_enq[ld_enqP] <= False;
         ld_done_enq[ld_enqP] <= False;
         ld_killed_enq[ld_enqP] <= Invalid;
@@ -1791,8 +1791,8 @@ module mkSplitLSQ(SplitLSQ);
             
             Bit#(7) offset=ld_objIdOffset_updObjIdSeal[tag];
             if(verbose) $display("[LSQ - updateLdObjIdSeal] isSealed:", fshow(isSealed), ", fault:", fshow(fault), ", offset:", fshow(offset));                               
-            ld_fault_updObjIdSeal[tag] <= fault;
-            ld_objIdSealOk_updObjIdSeal[tag] <= !isSealed;
+            // ld_fault_updObjIdSeal[tag] <= fault;
+            ld_objIdSealOk_updObjIdSeal[tag] <= Valid(!isSealed);
         end
         else begin
             if(verbose) if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp for WP ", fshow(tag));
@@ -1860,7 +1860,7 @@ module mkSplitLSQ(SplitLSQ);
         );
         doAssert(!ld_waitWPRespLd_issue[tag], "issuing Ld cannot wait for WP resp");
         doAssert(!ld_waitWPRespObjId_issue[tag], "issuing Ld cannot wait for WP objId resp");
-        doAssert(!ld_objIdSealOk_issue[tag], "issuing Ld cannot already have received objId");
+        doAssert(!isValid(ld_objIdSealOk_issue[tag]), "issuing Ld cannot already have received objId");
 
         // issue result
         LSQIssueLdResult issRes = Stall (StQ);
@@ -2199,6 +2199,12 @@ module mkSplitLSQ(SplitLSQ);
 
     method LdQDeqEntry firstLd if(deqLdGuard);
         LdQTag deqP = ld_deqP_deqLd;
+        Maybe#(Trap) fault = ld_fault_deqLd[deqP];
+        if (!isValid(fault) &&& ld_objIdSealOk_deqLd[deqP] matches tagged Valid .o &&& !o) begin
+            // objId seal check failed, set fault
+            fault = Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}));
+        end
+
         return LdQDeqEntry {
             tag: deqP,
             instTag: ld_instTag[deqP],
@@ -2211,7 +2217,7 @@ module mkSplitLSQ(SplitLSQ);
             paddr: ld_paddr_deqLd[deqP],
             isMMIO: ld_isMMIO_deqLd[deqP],
             shiftedBE: ld_shiftedBE_deqLd[deqP],
-            fault: ld_fault_deqLd[deqP],
+            fault: fault, //ld_fault_deqLd[deqP],
             allowCap: ld_allowCap[deqP],
             killed: ld_killed_deqLd[deqP]
         };
@@ -2447,7 +2453,7 @@ module mkSplitLSQ(SplitLSQ);
                         !ld_done_wrongSpec[i]) begin
                         if (verbose) $display("[LSQ - killLdQ] set wrong path ", fshow(i));
                         ld_waitWPRespLd_wrongSpec[i] <= True;
-                        if (isValid(ld_objIdPAddr_wrongSpec[i]) && !ld_objIdSealOk_wrongSpec[i]) ld_waitWPRespObjId_wrongSpec[i] <= True;
+                        if (isValid(ld_objIdPAddr_wrongSpec[i]) && !isValid(ld_objIdSealOk_wrongSpec[i])) ld_waitWPRespObjId_wrongSpec[i] <= True;
                         doAssert(ld_memFunc[i] == Ld,
                                  "only load resp can be wrong path");
                     end
