@@ -229,6 +229,8 @@ function Tuple2#(Data, Bool) extractType(CapPipe a);
     else return tuple2(zeroExtend(getBaseKind(a).SEALED_WITH_TYPE), False);
 endfunction
 
+
+
 /* if the condition is True, it will clear the tag!!! */
 function CapPipe clearTagIf(CapPipe a, Bool cond);
     return setValidCap(a, isValidCap(a) && !cond);
@@ -329,7 +331,7 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                tagged GetHigh                :
                    zeroExtend(tpl_2(toMem(a))[127:64]);
                tagged GetType                :
-                   zeroExtend(getCCType(a));
+                   tpl_1(extractType(a));
                tagged ToPtr                  :
                    (isValidCap(a) ? getAddr(a) - getBase(b) : 0);
                default: ?;
