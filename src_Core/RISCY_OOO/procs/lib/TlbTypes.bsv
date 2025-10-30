@@ -225,7 +225,7 @@ function TlbPermissionCheck hasVMPermission(
         // when mstatus.sum is set. We follow spike here.
         if (vm_info.prv == prvS &&
             (access == InstFetch || !vm_info.userAccessibleByS)) begin
-            fault = True;
+            // fault = True;
         end
     end
     else begin
