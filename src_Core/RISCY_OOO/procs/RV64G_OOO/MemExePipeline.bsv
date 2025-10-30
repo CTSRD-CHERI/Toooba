@@ -775,32 +775,41 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(verbose) $display("%t : [doObjIdTlb] ", $time, fshow(objIdTlbResp));
         if(isValid(cause) && verbose) $display("  [doObjIdTlb - objIdTlb response] PAGEFAULT!");
 
-        // dTlb.procReq(
-        dTlbReqQ.enq(ToSpecFifo {
-            data: MemExeToFinish {
-                mem_func: x.mem_func,
-                tag: x.tag,
-                ldstq_tag: x.ldstq_tag,
-                shiftedBE: x.shiftedBE,
-                vaddr: x.vaddr,
-                // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
-                objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
-                objIdOffset: x.objIdOffset,
+        if(isValid(cause)) begin
+            // update LSQ with fault
+            LSQUpdateAddrResult updRes <- lsq.updateAddr(
+                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE,
+                /*(((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)*/ Invalid, x.objIdOffset
+        );
+        end
+        else begin
+            // dTlb.procReq(
+            dTlbReqQ.enq(ToSpecFifo {
+                data: MemExeToFinish {
+                    mem_func: x.mem_func,
+                    tag: x.tag,
+                    ldstq_tag: x.ldstq_tag,
+                    shiftedBE: x.shiftedBE,
+                    vaddr: x.vaddr,
+                    // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
+                    objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
+                    objIdOffset: x.objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
-                store_data: x.store_data,
-                store_data_BE: x.store_data_BE,
+                    store_data: x.store_data,
+                    store_data_BE: x.store_data_BE,
 `endif
-                misaligned: x.misaligned,
-                capStore: x.capStore,
-                allowCapLoad: x.allowCapLoad,
-                capException: x.capException,
-                check: x.check
+                    misaligned: x.misaligned,
+                    capStore: x.capStore,
+                    allowCapLoad: x.allowCapLoad,
+                    capException: x.capException,
+                    check: x.check
 `ifdef KONATA
-                , u_id: x.u_id
+                    , u_id: x.u_id
 `endif
-            },
-            spec_bits: objIdTlbResp.specBits
-        });
+                },
+                spec_bits: objIdTlbResp.specBits
+            });
+        end
     endrule
 
     rule doDTlb;
