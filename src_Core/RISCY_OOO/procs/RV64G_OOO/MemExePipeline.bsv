@@ -777,6 +777,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         if(isValid(cause)) begin
             // update LSQ with fault
+            inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
+`ifdef INCLUDE_TANDEM_VERIF
+                                             x.store_data, x.store_data_BE,
+`endif
+                                             False, False
+`ifdef RVFI
+                                             , ExtraTraceBundle{
+                                                 regWriteData: memData[pack(x.ldstq_tag)],
+                                                 memByteEn: unpack(truncate(pack(x.shiftedBE.DataMemAccess) >> getAddr(x.vaddr)[3:0]))
+                                             }
+`endif
+                                            );
             LSQUpdateAddrResult updRes <- lsq.updateAddr(
                 x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE,
                 /*(((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)*/ Invalid, x.objIdOffset
