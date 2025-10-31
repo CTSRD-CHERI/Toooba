@@ -1189,23 +1189,17 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // If this ObjID response made a non-MMIO store become “done”,
         // tell the ROB now (non_mmio_st_done = True).
         if (mInstTag matches tagged Valid .instTag) begin
-//             inIfc.rob_setExecuted_doFinishMem(
-//                 instTag,
-//                 0, // vaddr not needed for this bookkeeping pulse
-// `ifdef INCLUDE_TANDEM_VERIF
-//                 0, 0, // store_data, store_data_BE (unused here)
-// `endif
-//                 False, // access_at_commit
-//                 True   // non_mmio_st_done
-// `ifdef RVFI
-//                 , unpack(0) // ExtraTraceBundle default
-// `endif
-//             );
-            // TODO: set fault if objId check fails
-            inIfc.rob_setExecuted_deqLSQ(
+            inIfc.rob_setExecuted_doFinishMem(
                 instTag,
-                Invalid,
-                Invalid
+                0, // vaddr not needed for this bookkeeping pulse
+`ifdef INCLUDE_TANDEM_VERIF
+                0, 0, // store_data, store_data_BE (unused here)
+`endif
+                False, // access_at_commit
+                True   // non_mmio_st_done
+`ifdef RVFI
+                , unpack(0) // ExtraTraceBundle default
+`endif
             );
         end
     endrule
