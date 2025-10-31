@@ -777,7 +777,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         if(isValid(cause)) begin
             // update LSQ with fault
-            inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
+            doAssert(isValid(x.objIdAddr), "fault must have come from translation of valid objId VAddr");
+            inIfc.rob_setExecuted_doFinishMem(x.tag, fromMaybe(0, x.objIdAddr),
 `ifdef INCLUDE_TANDEM_VERIF
                                              x.store_data, x.store_data_BE,
 `endif
