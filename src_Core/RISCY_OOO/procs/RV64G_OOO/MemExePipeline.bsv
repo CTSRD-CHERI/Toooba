@@ -790,7 +790,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
                                             );
             LSQUpdateAddrResult updRes <- lsq.updateAddr(
-                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE,
+                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, objIdPAddr, False /*isMMIO*/, x.shiftedBE,
                 /*(((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)*/ Invalid, x.objIdOffset
         );
         end
