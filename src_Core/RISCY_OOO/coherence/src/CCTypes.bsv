@@ -46,11 +46,11 @@ import GetPut::*;
 import ClientServer::*;
 
 typedef enum {
-    I = 2'd0,
-    T = 2'd1,
-    S = 2'd2,
-    E = 2'd3,
-    M = 2'd4
+    I = 3'd0,
+    T = 3'd1,
+    S = 3'd2,
+    E = 3'd3,
+    M = 3'd4
 } MESI deriving(Bits, Eq, FShow);
 typedef MESI Msi;
 
