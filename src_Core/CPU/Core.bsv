@@ -970,7 +970,7 @@ module mkCore#(CoreId coreId)(Core);
         dMem.perf.setStatus(stats);
         iTlb.perf.setStatus(stats);
         dTlb.perf.setStatus(stats);
-        // objIdTlb.perf.setStatus(stats);
+        objIdTlb.perf.setStatus(stats);
         l2Tlb.perf.setStatus(stats);
         fetchStage.perf.setStatus(stats);
 
@@ -998,7 +998,9 @@ module mkCore#(CoreId coreId)(Core);
             end
             DTlb: begin
                 dTlb.perf.req(unpack(truncate(r.pType)));
-                // objIdTlb.perf.req(unpack(truncate(r.pType)));
+            end
+            ObjIdTlb: begin
+                objIdTlb.perf.req(unpack(truncate(r.pType)));
             end
             L2Tlb: begin
                 l2Tlb.perf.req(unpack(truncate(r.pType)));
@@ -1125,6 +1127,14 @@ module mkCore#(CoreId coreId)(Core);
             let r <- dTlb.perf.resp;
             resp = Valid(ProcPerfResp {
                 loc: DTlb,
+                pType: zeroExtend(pack(r.pType)),
+                data: r.data
+            });
+        end
+        else if(objIdTlb.perf.respValid) begin
+            let r <- objIdTlb.perf.resp;
+            resp = Valid(ProcPerfResp {
+                loc: ObjIdTlb,
                 pType: zeroExtend(pack(r.pType)),
                 data: r.data
             });

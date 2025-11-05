@@ -188,6 +188,7 @@ typedef enum {
     DCache,
     ITlb,
     DTlb,
+    ObjIdTlb,
     L2Tlb,
     DecStage,
     ExeStage,

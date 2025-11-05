@@ -283,107 +283,107 @@ module mkDTlb#(
         Maybe#(TlbReq) maybe_r = getTlbReq(pendInst[idx]);
         if (maybe_r matches tagged Valid .req) begin
             r = req;
-        end
-        else begin
-            doAssert(False, "[DTLB] Pending request cannot be Invalid");
-        end
 
-        if(pendPoisoned[idx]) begin
-            // poisoned inst, do nothing
-            if(verbose) $display("[DTLB] refill poisoned: idx %d; ", idx, fshow(r));
-        end
-        else if(pRs.entry matches tagged Valid .en) begin
-            // check permission
-            if (verbose)
-                $display("dPRs: vm_info: ", fshow(vm_info),
-                         "      en     : ", fshow(en),
-                         "      r      : ", fshow(r)
-                         );
-            let permCheck = hasVMPermission(vm_info,
-                                            en.pteType,
-                                            en.pteUpperType,
-                                            en.ppn,
-                                            en.level,
-                                            r.write ? DataStore : DataLoad,
-                                            r.capStore,
-                                            r.potentialCapLoad);
-            if (permCheck.allowed) begin
-                // fill TLB, and record resp
-                tlb.addEntry(en);
-                let trans_addr = translate(r.addr, en.ppn, en.level);
-                pendResp[idx] <= Valid(tuple3(trans_addr, Invalid, permCheck.allowCap));
-                if(verbose) begin
-                    $display("[DTLB] refill: idx %d; ", idx, fshow(r),
-                             "; ", fshow(trans_addr));
+            if(pendPoisoned[idx]) begin
+                // poisoned inst, do nothing
+                if(verbose) $display("[DTLB] refill poisoned: idx %d; ", idx, fshow(r));
+            end
+            else if(pRs.entry matches tagged Valid .en) begin
+                // check permission
+                if (verbose)
+                    $display("dPRs: vm_info: ", fshow(vm_info),
+                            "      en     : ", fshow(en),
+                            "      r      : ", fshow(r)
+                            );
+                let permCheck = hasVMPermission(vm_info,
+                                                en.pteType,
+                                                en.pteUpperType,
+                                                en.ppn,
+                                                en.level,
+                                                r.write ? DataStore : DataLoad,
+                                                r.capStore,
+                                                r.potentialCapLoad);
+                if (permCheck.allowed) begin
+                    // fill TLB, and record resp
+                    tlb.addEntry(en);
+                    let trans_addr = translate(r.addr, en.ppn, en.level);
+                    pendResp[idx] <= Valid(tuple3(trans_addr, Invalid, permCheck.allowCap));
+                    if(verbose) begin
+                        $display("[DTLB] refill: idx %d; ", idx, fshow(r),
+                                "; ", fshow(trans_addr));
+                    end
+                end
+                else begin
+                    // page fault
+                    Exception fault = permCheck.excCode;
+                    pendResp[idx] <= Valid(tuple3(?, Valid (fault), False));
+                    if(verbose) begin
+                        $display("[DTLB] refill no permission: idx %d; ", idx, fshow(r));
+                    end
                 end
             end
             else begin
                 // page fault
-                Exception fault = permCheck.excCode;
+                Exception fault = r.write ? excStorePageFault : excLoadPageFault;
                 pendResp[idx] <= Valid(tuple3(?, Valid (fault), False));
-                if(verbose) begin
-                    $display("[DTLB] refill no permission: idx %d; ", idx, fshow(r));
-                end
+                if(verbose) $display("[DTLB] refill page fault: idx %d; ", idx, fshow(r));
             end
-        end
-        else begin
-            // page fault
-            Exception fault = r.write ? excStorePageFault : excLoadPageFault;
-            pendResp[idx] <= Valid(tuple3(?, Valid (fault), False));
-            if(verbose) $display("[DTLB] refill page fault: idx %d; ", idx, fshow(r));
-        end
 
-        // get parent resp, miss resolved, reset wait bit
-        pendWait[idx] <= None;
+            // get parent resp, miss resolved, reset wait bit
+            pendWait[idx] <= None;
 
-        doAssert(pendValid_doPRs[idx], "entry must be valid");
-        if(isValid(respForOtherReq)) begin
-            doAssert(pendWait[idx] == WaitPeer (pRs.id), "entry must be waiting for resp");
-        end
-        else begin
-            doAssert(pendWait[idx] == WaitParent, "entry must be waiting for resp");
-        end
-
-        // find another req waiting for this resp
-        function Bool waitForResp(DTlbReqIdx i);
-            // we can ignore pendValid here, because not-None pendWait implies
-            // pendValid is true
-            return pendWait[i] == WaitPeer (pRs.id) && i != idx;
-        endfunction
-        Vector#(DTlbReqNum, DTlbReqIdx) idxVec = genWith(fromInteger);
-        if(find(waitForResp, idxVec) matches tagged Valid .i) begin
-            // still have req waiting for this resp, keep processing
-            respForOtherReq <= Valid (i);
-            doAssert(pendValid_doPRs[i], "waiting entry must be valid");
-        end
-        else begin
-            // all req done, deq the pRs
-            respForOtherReq <= Invalid;
-            ldTransRsFromPQ.deq;
-        end
-
-        // perf: miss
-        let lat <- latTimer.done(idx);
-`ifdef PERF_COUNT
-        if(doStats) begin
+            doAssert(pendValid_doPRs[idx], "entry must be valid");
             if(isValid(respForOtherReq)) begin
-                missPeerLat.incr(zeroExtend(lat));
-                missPeerCnt.incr(1);
+                doAssert(pendWait[idx] == WaitPeer (pRs.id), "entry must be waiting for resp");
             end
             else begin
-                missParentLat.incr(zeroExtend(lat));
-                missParentCnt.incr(1);
+                doAssert(pendWait[idx] == WaitParent, "entry must be waiting for resp");
             end
-        end
+
+            // find another req waiting for this resp
+            function Bool waitForResp(DTlbReqIdx i);
+                // we can ignore pendValid here, because not-None pendWait implies
+                // pendValid is true
+                return pendWait[i] == WaitPeer (pRs.id) && i != idx;
+            endfunction
+            Vector#(DTlbReqNum, DTlbReqIdx) idxVec = genWith(fromInteger);
+            if(find(waitForResp, idxVec) matches tagged Valid .i) begin
+                // still have req waiting for this resp, keep processing
+                respForOtherReq <= Valid (i);
+                doAssert(pendValid_doPRs[i], "waiting entry must be valid");
+            end
+            else begin
+                // all req done, deq the pRs
+                respForOtherReq <= Invalid;
+                ldTransRsFromPQ.deq;
+            end
+
+            // perf: miss
+            let lat <- latTimer.done(idx);
+`ifdef PERF_COUNT
+            if(doStats) begin
+                if(isValid(respForOtherReq)) begin
+                    missPeerLat.incr(zeroExtend(lat));
+                    missPeerCnt.incr(1);
+                end
+                else begin
+                    missParentLat.incr(zeroExtend(lat));
+                    missParentCnt.incr(1);
+                end
+            end
 `endif
 `ifdef PERFORMANCE_MONITORING
-        EventsL1D ev = unpack(0);
-        ev.evt_TLB_MISS_LAT = saturating_truncate(lat);
-        ev.evt_TLB_MISS = 1;
-        perf_events[0] <= ev;
+            EventsL1D ev = unpack(0);
+            ev.evt_TLB_MISS_LAT = saturating_truncate(lat);
+            ev.evt_TLB_MISS = 1;
+            perf_events[0] <= ev;
 `endif
-        // conflict with wrong spec
-        wrongSpec_doPRs_conflict.wset(?);
+            // conflict with wrong spec
+            wrongSpec_doPRs_conflict.wset(?);
+        end
+        else begin
+            doAssert(False, "[DTLB] Pending request cannot be Invalid");
+        end
     endrule
 
     // init freeQ
