@@ -697,7 +697,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         // go to next stage by sending to TLB
-        if (isValid(objIdVAddr) && (x.mem_func == Ld || x.mem_func == St)) begin
+        if (isValid(objIdVAddr) && (x.mem_func == Ld || x.mem_func == St)
+                && False) begin
             objIdTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
                     mem_func: x.mem_func,
@@ -734,7 +735,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     ldstq_tag: x.ldstq_tag,
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
-                    objIdAddr: Invalid,
+                    objIdAddr: objIdVAddr,
                     objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
@@ -915,7 +916,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 x.capException = Valid(CSR_XCapCause{cheri_exc_reg: check.authority_idx, cheri_exc_code: cheriExcLengthViolation});
         end
         if (x.capException matches tagged Valid .c) cause = Valid(CapException(c));
-        let needsObjIdCheck = (x.mem_func == St) && !isMMIO && isValid(x.objIdAddr);
+        Maybe#(Addr) objIdPAddr = isValid(x.objIdAddr) ? Valid(paddr) : Invalid; //x.objIdAddr;
+        let needsObjIdCheck = (x.mem_func == St) && !isMMIO && isValid(objIdPAddr);
         Bool access_at_commit = !isValid(cause) && (isMMIO || isLrScAmo);
         Bool non_mmio_st_done = !isValid(cause) && !isMMIO && (x.mem_func == St) && !needsObjIdCheck;
         inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
@@ -956,7 +958,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE,
-            (((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid), x.objIdOffset
+            (((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 
@@ -976,12 +978,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
-                objIdPAddr: x.objIdAddr,
+                objIdPAddr: objIdPAddr,
                 pcHash: hash(getAddr(pc))
             });
         end
         else if (x.mem_func == St && !isMMIO &&
-                 !isValid(cause) && isValid(x.objIdAddr)) begin
+                 !isValid(cause) && isValid(objIdPAddr)) begin
             StQTag stTag = ?;
             if(x.ldstq_tag matches tagged St .t) begin
                 stTag = t;
@@ -989,7 +991,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             else begin
                 doAssert(False, "must be in StQ");
             end
-            reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, x.objIdAddr)));
+            reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, objIdPAddr)));
         end
 
 `ifdef PERF_COUNT
