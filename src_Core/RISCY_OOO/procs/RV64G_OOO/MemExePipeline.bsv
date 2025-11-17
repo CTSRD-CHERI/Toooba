@@ -673,7 +673,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Bit#(32) ccpt = 'h1ffffc;
 
         // calculate bitmap offset and send to TLB here
-        Maybe#(Addr) objIdVAddr = Valid(getAddr(x.vaddr));
+        Maybe#(Addr) objIdVAddr = Invalid;
         Bit#(7) objIdOffset = 'h0 ;
         if (isCCType(x.rVal1, ccpt) && (ccp != '0) && isValidCap(x.rVal1)) begin 
             
