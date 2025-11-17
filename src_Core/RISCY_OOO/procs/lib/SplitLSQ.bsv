@@ -742,6 +742,7 @@ module mkSplitLSQ(SplitLSQ);
     let ld_objIdPAddr_updAddr       = getVEhrPort(ld_objIdPAddr, 0); // write
     let ld_objIdPAddr_updObjIdSeal  = getVEhrPort(ld_objIdPAddr, 1); // assert
     let ld_objIdPAddr_issue         = getVEhrPort(ld_objIdPAddr, 1);
+    let ld_objIdPAddr_enq           = getVEhrPort(ld_objIdPAddr, 1); // write
 
     let ld_objIdOffset_updAddr      = getVEhrPort(ld_objIdOffset, 0); // write
     let ld_objIdOffset_updObjIdSeal = getVEhrPort(ld_objIdOffset, 1);
@@ -903,43 +904,51 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(Bit#(16)))                st_pcHash   <- replicateM(mkRegU);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Addr)))         st_objIdPAddr    <- replicateM(mkEhr(?));
-    Vector#(StQSize, Ehr#(2, Bit#(7)))             st_objIdOffset   <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, Bit#(7)))              st_objIdOffset   <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Trap)))         st_fault     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_allowCapAmoLd <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_computed  <- replicateM(mkEhr(?));
-    Vector#(StQSize, Ehr#(2, Bool))                 st_objIdSealOk   <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, Maybe#(Bool)))         st_objIdSealOk   <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_verified  <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, SpecBits))             st_specBits  <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(TAdd#(1, SupSize), Bool)) st_atCommit  <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, Bool))                 st_waitWPRespObjId   <- replicateM(mkEhr(False));
     // enq/deq ptr
     Reg#(StQTag) st_enqP <- mkReg(0);
     Reg#(StQTag) st_deqP <- mkReg(0);
     Ehr#(2, StQTag) st_verifyP <- mkEhr(0);
 
-    let st_valid_empty     = getVEhrPort(st_valid, 0);
-    let st_valid_wrongSpec = getVEhrPort(st_valid, 0); // write
-    let st_valid_verify    = getVEhrPort(st_valid, 0);
-    let st_valid_updAddr   = getVEhrPort(st_valid, 0); // assert
-    let st_valid_issue     = getVEhrPort(st_valid, 0);
-    let st_valid_deqSt     = getVEhrPort(st_valid, 0); // write
-    let st_valid_setCom    = getVEhrPort(st_valid, 1); // assert
-    let st_valid_updData   = getVEhrPort(st_valid, 1); // assert
-    let st_valid_enq       = getVEhrPort(st_valid, 1); // write
+    let st_valid_empty          = getVEhrPort(st_valid, 0);
+    let st_valid_wrongSpec      = getVEhrPort(st_valid, 0); // write
+    let st_valid_verify         = getVEhrPort(st_valid, 0);
+    let st_valid_updAddr        = getVEhrPort(st_valid, 0); // assert
+    let st_valid_updObjIdSeal   = getVEhrPort(st_valid, 0); // assert
+    let st_valid_issue          = getVEhrPort(st_valid, 0);
+    let st_valid_deqSt          = getVEhrPort(st_valid, 0); // write
+    let st_valid_setCom         = getVEhrPort(st_valid, 1); // assert
+    let st_valid_updData        = getVEhrPort(st_valid, 1); // assert
+    let st_valid_enq            = getVEhrPort(st_valid, 1); // write
 
     let st_paddr_updAddr = getVEhrPort(st_paddr, 0); // write
     let st_paddr_issue   = getVEhrPort(st_paddr, 1);
     let st_paddr_deqSt   = getVEhrPort(st_paddr, 1);
 
+    let st_objIdPAddr_wrongSpec     = getVEhrPort(st_objIdPAddr, 0);
     let st_objIdPAddr_updAddr       = getVEhrPort(st_objIdPAddr, 0); // write
     // let st_objIdPAddr_issue         = getVEhrPort(st_objIdPAddr, 1);
     let st_objIdPAddr_deqSt         = getVEhrPort(st_objIdPAddr, 1);
     let st_objIdPAddr_updObjIdSeal  = getVEhrPort(st_objIdPAddr, 1); // assert
+    let st_objIdPAddr_enq           = getVEhrPort(st_objIdPAddr, 1); // write
 
     let st_objIdOffset_updAddr      = getVEhrPort(st_objIdOffset, 0); // write
     let st_objIdOffset_updObjIdSeal = getVEhrPort(st_objIdOffset, 1);
+
+    let st_waitWPRespObjId_wrongSpec    = getVEhrPort(st_waitWPRespObjId, 0); // write
+    let st_waitWPRespObjId_enq          = getVEhrPort(st_waitWPRespObjId, 1); // C with wrongSpec
+    let st_waitWPRespObjId_updObjIdSeal = getVEhrPort(st_waitWPRespObjId, 1); // write, C with wrongSpec
 
     let st_isMMIO_verify  = getVEhrPort(st_isMMIO, 0);
     let st_isMMIO_updAddr = getVEhrPort(st_isMMIO, 0); // write
@@ -969,6 +978,7 @@ module mkSplitLSQ(SplitLSQ);
     let st_computed_updData = getVEhrPort(st_computed, 1); // assert
     let st_computed_enq     = getVEhrPort(st_computed, 1); // write
 
+    let st_objIdSealOk_wrongSpec    = getVEhrPort(st_objIdSealOk, 0);
     let st_objIdSealOk_updObjIdSeal = getVEhrPort(st_objIdSealOk, 0); // write
     let st_objIdSealOk_deqSt        = getVEhrPort(st_objIdSealOk, 1);
     let st_objIdSealOk_enq          = getVEhrPort(st_objIdSealOk, 1); // write
@@ -1366,7 +1376,7 @@ module mkSplitLSQ(SplitLSQ);
     (* fire_when_enabled, no_implicit_conditions *)
     rule setForEnq;
         ld_can_enq_wire <= !ld_valid[ld_enqP][0];
-        st_can_enq_wire <= !st_valid[st_enqP][0];
+        st_can_enq_wire <= !st_valid[st_enqP][0] && !st_waitWPRespObjId[st_enqP][0];
     endrule
 
     // deqLd guard (see comments at the method declaration)
@@ -1410,7 +1420,9 @@ module mkSplitLSQ(SplitLSQ);
             else begin
                 // computed or fence, and at commit
                 return (st_computed_deqSt[deqP] ||
-                        st_memFunc[deqP] == Fence) && st_atCommit_deqSt[deqP];
+                        st_memFunc[deqP] == Fence) && 
+                       (!isValid(st_objIdPAddr_deqSt[deqP]) || isValid(st_objIdSealOk_deqSt[deqP])) && 
+                       st_atCommit_deqSt[deqP];
             end
         end
     endfunction
@@ -1511,6 +1523,7 @@ module mkSplitLSQ(SplitLSQ);
         ld_readFrom_enq[ld_enqP] <= Invalid;
         ld_depLdQDeq_enq[ld_enqP] <= Invalid;
         ld_depStQDeq_enq[ld_enqP] <= Invalid;
+        ld_objIdPAddr_enq[ld_enqP] <= Invalid;
 `ifndef TSO_MM
         ld_depLdEx_enq[ld_enqP] <= Invalid;
         ld_depSBDeq_enq[ld_enqP] <= Invalid;
@@ -1566,7 +1579,9 @@ module mkSplitLSQ(SplitLSQ);
         st_verified_enq[st_enqP] <= False;
         st_specBits_enq[st_enqP] <= spec_bits;
         st_atCommit_enq[st_enqP] <= False;
-        st_objIdSealOk_enq[st_enqP] <= False;
+        st_objIdSealOk_enq[st_enqP] <= Invalid;
+        st_waitWPRespObjId_enq[st_enqP] <= False;
+        st_objIdPAddr_enq[st_enqP] <= Invalid;
     endmethod
 
     method Action updateData(StQTag t, MemTaggedData d);
@@ -1804,29 +1819,39 @@ module mkSplitLSQ(SplitLSQ);
     method ActionValue#(Maybe#(InstTag)) updateStObjIdSeal(StQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
         if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp:", fshow(tag), ", MemTaggedData:", fshow(d),
                              ", d[0]:", fshow(d.data[0]), ", d[1]:", fshow(d.data[1]));
-        doAssert(isValid(st_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
+        if(!st_waitWPRespObjId_updObjIdSeal[tag]) begin
+            doAssert(isValid(st_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
+            doAssert(st_valid_updObjIdSeal[tag], "entry must be valid");
 
-        // Compute seal state and corresponding fault.
-        Bool isSealed = extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
-        Maybe#(Trap) fault = isSealed
-            ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}))
-            : Invalid;
+            // Compute seal state and corresponding fault.
+            Bool isSealed = extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
+            // Maybe#(Trap) fault = isSealed
+            //     ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}))
+            //     : Invalid;
 
-        Bit#(7) offset = st_objIdOffset_updObjIdSeal[tag];
-        if(verbose) $display("[LSQ - updateStObjIdSeal] isSealed:", fshow(isSealed), ", fault:", fshow(fault), ", offset:", fshow(offset));
+            Bit#(7) offset = st_objIdOffset_updObjIdSeal[tag];
+            if(verbose) $display("[LSQ - updateStObjIdSeal] isSealed:", fshow(isSealed), ", offset:", fshow(offset));
 
-       // Record results into the store entry.
-        st_fault_updObjIdSeal[tag]       <= fault;
-        st_objIdSealOk_updObjIdSeal[tag] <= !isSealed;
+            // Record results into the store entry.
+            // st_fault_updObjIdSeal[tag]       <= fault;
+            st_objIdSealOk_updObjIdSeal[tag] <= Valid(!isSealed);
 
-        // If this is a non-MMIO store and the seal check passed (no fault),
-        // we can now mark it "done" at the ROB by returning its InstTag.
-        let isNonMMIO  = !st_isMMIO_deqSt[tag];
-        let becameDone = isNonMMIO && !isSealed;
-        if (becameDone) begin
-            return Valid(st_instTag[tag]);
+            // If this is a non-MMIO store and the seal check passed (no fault),
+            // we can now mark it "done" at the ROB by returning its InstTag.
+            let isNonMMIO  = !st_isMMIO_deqSt[tag];
+            doAssert(isNonMMIO, "must be nonMMIO");
+            let becameDone = isNonMMIO && !isSealed;
+            if (becameDone) begin
+                return Valid(st_instTag[tag]);
+            end
+            else begin
+                return Invalid;
+            end
         end
         else begin
+            if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp for WP ", fshow(tag));
+            st_waitWPRespObjId_updObjIdSeal[tag] <= False;
+            doAssert(!st_valid_updObjIdSeal[tag], "entry must be invalid");
             return Invalid;
         end
     endmethod
@@ -2267,6 +2292,17 @@ module mkSplitLSQ(SplitLSQ);
 
     method StQDeqEntry firstSt if(deqStGuard && wrongSpec_urgent_firstSt);
         StQTag deqP = st_deqP;
+        Maybe#(Trap) fault = st_fault_deqSt[deqP];
+        if (!isValid(fault) &&& st_objIdSealOk_deqSt[deqP] matches tagged Valid .o &&& !o) begin
+            // objId seal check failed, set fault
+            fault = Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}));
+        end
+        Bool objIdSealOk = False;
+        if (st_objIdSealOk_deqSt[deqP] matches tagged Valid .o) begin
+            objIdSealOk = o;
+        end else if (!isValid(st_objIdPAddr_deqSt[deqP])) begin
+            objIdSealOk = True;
+        end
         return StQDeqEntry {
             instTag: st_instTag[deqP],
             memFunc: st_memFunc[deqP],
@@ -2279,8 +2315,8 @@ module mkSplitLSQ(SplitLSQ);
             shiftedBE: st_shiftedBE_deqSt[deqP],
             stData: st_stData_deqSt[deqP],
             allowCapAmoLd: st_allowCapAmoLd_deqSt[deqP],
-            fault: st_fault_deqSt[deqP],
-            objIdSealOk: st_objIdSealOk_deqSt[deqP] || !isValid(st_objIdPAddr_deqSt[deqP]),
+            fault: fault,
+            objIdSealOk: objIdSealOk,
             pcHash: st_pcHash[deqP]
         };
     endmethod
@@ -2476,6 +2512,11 @@ module mkSplitLSQ(SplitLSQ);
             action
                 if(stNeedKill[i]) begin
                     st_valid_wrongSpec[i] <= False;
+                    if (verbose) $display("[LSQ - killStQ] ", fshow(i));
+                    if (st_valid_wrongSpec[i] && isValid(st_objIdPAddr_wrongSpec[i]) && !isValid(st_objIdSealOk_wrongSpec[i])) begin
+                        st_waitWPRespObjId_wrongSpec[i] <= True;
+                        if(verbose) $display("[LSQ - killStQ] set wrong path ", fshow(i));
+                    end
                     doAssert(!st_atCommit_wrongSpec[i], "cannot be at commit");
                 end
             endaction
@@ -2545,7 +2586,7 @@ module mkSplitLSQ(SplitLSQ);
     endinterface
 
     method Bool stqFull_ehrPort0;
-        return st_enqP == st_deqP && st_valid[st_enqP][0];
+        return st_enqP == st_deqP && (st_valid[st_enqP][0] || st_waitWPRespObjId[st_enqP][0]);
     endmethod
 
     method Bool ldqFull_ehrPort0;

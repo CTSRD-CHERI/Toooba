@@ -1537,8 +1537,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doDeqStQ_St_Mem(
         !isValid(lsqDeqSt.fault) &&&
         lsqDeqSt.memFunc == St &&& !lsqDeqSt.isMMIO &&&
-        stb.getEnqIndex(lsqDeqSt.paddr) matches tagged Valid .sbIdx &&&
-        lsqDeqSt.objIdSealOk
+        stb.getEnqIndex(lsqDeqSt.paddr) matches tagged Valid .sbIdx //&&&
+        // lsqDeqSt.objIdSealOk
     );
         lsq.deqSt;
         // send to SB
