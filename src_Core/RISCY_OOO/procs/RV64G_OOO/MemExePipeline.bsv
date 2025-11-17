@@ -675,7 +675,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // calculate bitmap offset and send to TLB here
         Maybe#(Addr) objIdVAddr = Invalid;
         Bit#(7) objIdOffset = 'h0 ;
-        if (isCCType(x.rVal1, ccpt) && (ccp != '0) && isValidCap(x.rVal1)) begin 
+        if (isCCType(x.rVal1, ccpt) && (ccp != '0) && isValidCap(x.rVal1) && (x.mem_func == Ld || x.mem_func == St)) begin 
             
             Bit#(64) byteIndex = zeroExtend(getCCType(x.rVal1) >> 3);   
             Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
@@ -697,7 +697,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         // go to next stage by sending to TLB
-        if (isValid(objIdVAddr) && (x.mem_func == Ld || x.mem_func == St)) begin
+        if (isValid(objIdVAddr)) begin
             objIdTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
                     mem_func: x.mem_func,
