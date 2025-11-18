@@ -972,6 +972,7 @@ module mkSplitLSQ(SplitLSQ);
     let st_allowCapAmoLd_enq     = getVEhrPort(st_allowCapAmoLd, 1); // write
 
     let st_computed_verify  = getVEhrPort(st_computed, 0);
+    let st_computed_wrongSpec  = getVEhrPort(st_computed, 0);
     let st_computed_updAddr = getVEhrPort(st_computed, 0); // write
     let st_computed_issue   = getVEhrPort(st_computed, 1);
     let st_computed_deqSt   = getVEhrPort(st_computed, 1);
@@ -2517,7 +2518,9 @@ module mkSplitLSQ(SplitLSQ);
                 if(stNeedKill[i]) begin
                     st_valid_wrongSpec[i] <= False;
                     if (verbose) $display("[LSQ - killStQ] ", fshow(i));
-                    if (st_valid_wrongSpec[i] && isValid(st_objIdPAddr_wrongSpec[i]) && !isValid(st_objIdSealOk_wrongSpec[i])) begin
+                    if (st_valid_wrongSpec[i] &&
+                        st_computed_wrongSpec[i] &&
+                        isValid(st_objIdPAddr_wrongSpec[i]) && !isValid(st_objIdSealOk_wrongSpec[i])) begin
                         st_waitWPRespObjId_wrongSpec[i] <= True;
                         if(verbose) $display("[LSQ - killStQ] set wrong path ", fshow(i));
                     end
