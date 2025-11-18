@@ -2486,13 +2486,17 @@ module mkSplitLSQ(SplitLSQ);
                     if (verbose) $display("[LSQ - killLdQ] ", fshow(i));
                     // set wrong path load resp filter
                     if (ld_valid_wrongSpec[i] &&
-                        ld_executing_wrongSpec[i] &&
-                        !ld_done_wrongSpec[i]) begin
-                        if (verbose) $display("[LSQ - killLdQ] set wrong path ", fshow(i));
-                        ld_waitWPRespLd_wrongSpec[i] <= True;
-                        if (isValid(ld_objIdPAddr_wrongSpec[i]) && !isValid(ld_objIdSealOk_wrongSpec[i])) ld_waitWPRespObjId_wrongSpec[i] <= True;
-                        doAssert(ld_memFunc[i] == Ld,
+                        ld_executing_wrongSpec[i]) begin
+                        if (!ld_done_wrongSpec[i]) begin
+                            if (verbose) $display("[LSQ - killLdQ] set wrong path ", fshow(i));
+                            ld_waitWPRespLd_wrongSpec[i] <= True;
+                            doAssert(ld_memFunc[i] == Ld,
                                  "only load resp can be wrong path");
+                        end
+                        if (isValid(ld_objIdPAddr_wrongSpec[i]) && !isValid(ld_objIdSealOk_wrongSpec[i])) begin
+                            if (verbose) $display("[LSQ - killLdQ] set objId wrong path ", fshow(i));
+                            ld_waitWPRespObjId_wrongSpec[i] <= True;
+                        end
                     end
                     doAssert(!ld_atCommit_wrongSpec[i], "cannot be at commit");
                 end
