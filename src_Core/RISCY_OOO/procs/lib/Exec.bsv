@@ -244,17 +244,17 @@ endfunction
 
 (* noinline *)
 function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func, Bit# (21) ccpt );
-    let a_mut = setValidCap(a, isValidCap(a) && getKind(a) == UNSEALED);
-    let b_mut = setValidCap(b, isValidCap(b) && getKind(b) == UNSEALED);
+ let a_kind = getColorAwareKind(a,ccpt);
+    let b_kind = getColorAwareKind(b,ccpt);
+    let a_mut = setValidCap(a, isValidCap(a) && isUnsealedOrColored(a, ccpt));
+    let b_mut = setValidCap(b, isValidCap(b) && isUnsealedOrColored(b, ccpt));
     match {.a_type, .a_res} = extractType(a, ccpt);     //a_res only False if SEALED_WITH_TYPE
-    Bool sealPassthrough = !isValidCap(b) || getBaseKind(a) != UNSEALED || !isInBounds(b, False) || getAddr(b) == otype_unsealed_ext;
-    Bool sealIllegal = getKind(b) != UNSEALED || !getHardPerms(b).permitSeal || !validAsType(b, getAddr(b));
+    Bool sealPassthrough = !isValidCap(b) ||!isUnsealedOrColored(a, ccpt) || !isInBounds(b, False) || getAddr(b) == otype_unsealed_ext;
+    Bool sealIllegal = !isUnsealedOrColored(b, ccpt) || !getHardPerms(b).permitSeal || !validAsType(b, getAddr(b));
     let new_hard_perms = getHardPerms(a);
     new_hard_perms.global = new_hard_perms.global && getHardPerms(b).global;
-     
-    //Bool unsealIllegal = !isValidCap(b) || getKind(a) != UNSEALED || getKind(b) == UNSEALED || a_res || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
-    Bool unsealIllegal = !isValidCap(b) || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
-    Bool buildCapIllegal = !isValidCap(b) || getKind(b) != UNSEALED || !isDerivable(a) || (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b); // XXX needs optimisation
+    Bool unsealIllegal   = !isValidCap(b) || !isUnsealedOrColored(a, ccpt) || isUnsealedOrColored(b, ccpt) || a_res || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
+    Bool buildCapIllegal = !isValidCap(b) || !isUnsealedOrColored(b, ccpt) || !isDerivable(a) || (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b); // XXX needs optimisation
     CapPipe res = (case(func) matches
             tagged ModifyOffset .offsetOp :
                 modifyOffset(a_mut, getAddr(b), offsetOp == IncOffset).value;
@@ -262,42 +262,56 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func, Bit# (21) c
                 setBoundsALU(a_mut, getAddr(b), boundsOp);
             tagged SpecialRW .scrType     :
                 case (scrType) matches
-                      tagged TCC: b;
-                      tagged EPCC: b;
-                      tagged Normal: b;
-                      tagged TVEC ._: nullWithAddr(getAddr(b));
-                      tagged EPC ._: nullWithAddr(getAddr(b));
-                   endcase
-            tagged SetAddr .addrSource    :
-                //clearTagIf(setAddr(b_mut, (addrSource == Src1Type) ? a_type :getAddr(a) ).value, (addrSource == Src1Type) ? a_res : False);
-                setAddr(b_mut, (addrSource == Src1Type) ? a_type : getAddr(a) ).value;    
+                    tagged TCC: b;
+                    tagged EPCC: b;
+                    tagged Normal: b;
+                    tagged TVEC ._: nullWithAddr(getAddr(b));
+                    tagged EPC ._: nullWithAddr(getAddr(b));
+                endcase
+            tagged SetAddr .addrSource  : begin  //addrSource = {CSetAddr->Src1Addr , CCopyType->Src1Type} 
+                case (a_kind) matches
+                    tagged COLORED .col : begin
+                        let tmp_cap = setColor(b_mut, col);                                     // Set b color to a's color
+                        if  (addrSource == Src1Type)       return setAddr(tmp_cap, a_type).value;      // Allowed to copy type for COLORED kind
+                        else if (addrSource == Src1Addr)   return setAddr(tmp_cap, getAddr(a)).value;  // Allowed to set address for COLORED kind
+                        else return clearTagIf(setAddr(b_mut, getAddr(a)).value,True);      // Make the compiler happy
+                    end
+                    tagged SEALED_WITH_TYPE .otype : 
+                        if  (addrSource == Src1Type)       setAddr(b_mut, a_type).value;                        // Allowed to copy type of SEALED_WITH_TYPE
+                        else if (addrSource == Src1Addr)   clearTagIf(setAddr(b_mut, getAddr(a)).value,True);   // Not allowed to set allowed of SEALED_WITH_TYPE                //CopyType
+                        else clearTagIf(setAddr(b_mut, getAddr(a)).value,True);// Make the compiler happy
+                    default : 
+                        if  (addrSource == Src1Type)       clearTagIf(setAddr(b_mut, a_type).value, True);  //Not allowed to copy type for UNSEALED, SENTRY, RES0, RES1
+                        else if (addrSource == Src1Addr)   setAddr(b_mut, getAddr(a)).value;                //Allowed to set address for UNSEALED, SENTRY, RES0, RES1
+                        else clearTagIf(setAddr(b_mut, getAddr(a)).value,True);// Make the compiler happy
+                endcase
+            end
             tagged SealEntry              :
                 setKind(a_mut, SENTRY);
             tagged Seal                   :
-                //clearTagIf( setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b)))), sealPassthrough || sealIllegal);
-                setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b))));
+                clearTagIf( setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b))))
+                          , sealPassthrough || sealIllegal);
             tagged CSeal                  :
-                //(sealPassthrough ? a :
-                //     clearTagIf(setKind(a_mut, SEALED_WITH_TYPE
-                //     (truncate(getAddr(b)))), sealIllegal));
-                sealPassthrough ? a :
-                     setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b))));
+                (sealPassthrough ? a :
+                     clearTagIf(setKind(a_mut, SEALED_WITH_TYPE (truncate(getAddr(b)))), sealIllegal));
             tagged Unseal .src            :
-                //clearTagIf(setHardPerms(setKind(((src == Src1) ? a:b), UNSEALED), new_hard_perms), (src == Src1) && unsealIllegal);
-                
-                setHardPerms(setKind(((src == Src1) ? a:b), UNSEALED), new_hard_perms);
+                clearTagIf(setHardPerms(setKind(((src == Src1) ? a:b), UNSEALED), new_hard_perms), (src == Src1) && unsealIllegal);
             tagged AndPerm                :
                 setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
-            tagged CCSetType                :
-                setCCType(a_mut, truncate(getAddr(b)));
-            tagged SetFlags               :
+            tagged CCSetType   :
+                setColor(a_mut, truncate(getAddr(b))); 
+            tagged SetFlags               : 
                 setFlags(a_mut, truncate(getAddr(b)));
             tagged FromPtr                :
                 (getAddr(a) == 0 ? nullCap : setAddr(b_mut, getAddr(a)).value);
             tagged SetHigh:
                 fromMem(tuple2(False, {getAddr(b), getAddr(a)}));
-            tagged BuildCap               :
-                setKind(setValidCap(a_mut, !buildCapIllegal), getKind(a)==SENTRY ? SENTRY : UNSEALED);
+            tagged BuildCap :
+                case (a_kind) matches
+                    tagged SENTRY :     setKind(setValidCap(a_mut, !buildCapIllegal), SENTRY);
+                    tagged COLORED .col:setKind(setValidCap(a_mut, !buildCapIllegal), COLORED (col));
+                    default:            setKind(setValidCap(a_mut, !buildCapIllegal), UNSEALED);
+                endcase
             tagged Move                   :
                 a;
             tagged ClearTag               :
