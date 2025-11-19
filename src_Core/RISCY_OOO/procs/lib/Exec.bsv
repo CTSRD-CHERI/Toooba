@@ -47,29 +47,30 @@ import ISA_Decls_CHERI::*;
 import CacheUtils::*; // For CLoadTags alignment
 
 (* noinline *)
-// function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, CapChecks toCheck, ImmData imm, Data ccpt);
-    function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, CapChecks toCheck, ImmData imm, Bit# (32) ccpt);
+function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, CapChecks toCheck, ImmData imm, Bit# (21) ccpt);
     function Maybe#(CSR_XCapCause) e1(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg: toCheck.rn1, cheri_exc_code: e});
     function Maybe#(CSR_XCapCause) e2(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg: toCheck.rn2, cheri_exc_code: e});
     function Maybe#(CSR_XCapCause) eDDC(CHERIException e) = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1, pack(scrAddrDDC)}, cheri_exc_code: e});
     Maybe#(CSR_XCapCause) result = Invalid;
     if (toCheck.src1_tag                  && !isValidCap(a))
         result = e1(cheriExcTagViolation);
-    else if (toCheck.src2_tag                  && !isValidCap(b))
+    else if (toCheck.src2_tag             && !isValidCap(b))
         result = e2(cheriExcTagViolation);
-    else if (!isCCType(a, ccpt)) begin
-        // if (toCheck.src1_unsealed_or_sentry   && isValidCap(a) && ( !isCCType(a, ccpt) && getKind(a) != UNSEALED) && (getKind(a) != SENTRY))
-        // result = e1(cheriExcSealViolation);
-        // else if (toCheck.src1_unsealed_or_imm_zero && isValidCap(a) && (getKind(a) != UNSEALED) && (imm != 0))
-        // result = e1(cheriExcSealViolation);
-        // else if (toCheck.src1_sealed_with_type     && (getKind (a) matches tagged SEALED_WITH_TYPE .t ? False : True))
-        // result = e1(cheriExcSealViolation);
-        // else if (toCheck.src2_sealed_with_type     && (getKind (b) matches tagged SEALED_WITH_TYPE .t ? False : True))
-        // result = e2(cheriExcSealViolation);
-        // else if (toCheck.src1_type_not_reserved    && !validAsType(a, zeroExtend(getKind(a).SEALED_WITH_TYPE)))
-        //    result = e1(cheriExcTypeViolation);
-        // else if (toCheck.src1_src2_types_match     && getKind(a).SEALED_WITH_TYPE != getKind(b).SEALED_WITH_TYPE)
-        // result = e1(cheriExcTypeViolation);
+    if (!isColoredCap(a, ccpt) || !isColoredCap(b, ccpt)) begin
+        let a_kind = getColorAwareKind(a,ccpt);
+        let b_kind = getColorAwareKind(b,ccpt);
+        if (toCheck.src1_unsealed_or_sentry && isValidCap(a) && !isUnsealedOrColored(a, ccpt) && (a_kind!=SENTRY)  )
+            result = e1(cheriExcSealViolation);
+        else if (toCheck.src1_unsealed_or_imm_zero && isValidCap(a) && !isUnsealedOrColored(a, ccpt) && (imm != 0))
+            result = e1(cheriExcSealViolation);
+        else if (toCheck.src1_sealed_with_type     && (a_kind matches tagged SEALED_WITH_TYPE .t ? False : True))
+            result = e1(cheriExcSealViolation);
+        else if (toCheck.src2_sealed_with_type     && (b_kind matches tagged SEALED_WITH_TYPE .t ? False : True))
+            result = e1(cheriExcSealViolation);
+        else if (toCheck.src1_type_not_reserved    && !validAsType(a, zeroExtend(a_kind.SEALED_WITH_TYPE)))
+           result = e1(cheriExcTypeViolation);
+        else if (toCheck.src1_src2_types_match     && a_kind.SEALED_WITH_TYPE != b_kind.SEALED_WITH_TYPE)
+            result = e1(cheriExcTypeViolation);
     end else if (toCheck.src1_permit_ccall         && !getHardPerms(a).permitCCall)
         result = e1(cheriExcPermitCCallViolation);
     else if (toCheck.src2_permit_ccall         && !getHardPerms(b).permitCCall)
@@ -82,11 +83,10 @@ import CacheUtils::*; // For CLoadTags alignment
 endfunction
 
 (* noinline *)
-// function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn, Data ccpt);
-    function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn, Bit# (32) ccpt);
-    function Maybe#(CSR_XCapCause) eAuth(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg: case (toCheck.check_authority_src) matches Src1: toCheck.rn1;
+function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn, Bit# (21) ccpt);
+    function Maybe#(CSR_XCapCause) eAuth(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg:   case (toCheck.check_authority_src) matches Src1: toCheck.rn1;
                                                                                                                                        Ddc: {1'b1, pack(scrAddrDDC)};
-                                                                                              endcase
+                                                                                                    endcase
                                                                              , cheri_exc_code: e});
     Maybe#(CSR_XCapCause) result = Invalid;
     match {.isLoad, .isStore} = case (mem_func)
@@ -95,10 +95,10 @@ endfunction
         Amo:    tuple2(True, True);
     endcase;
     Bool storeValidCap = isStore && isValidCap(data) && byteOrTagEn == DataMemAccess(replicate(True));
-    if      (!isValidCap(auth))
+    if (!isValidCap(auth))
         result = eAuth(cheriExcTagViolation);
-    //else if ( !isCCType(auth, ccpt) && getKind(auth) != UNSEALED)
-   //     result = eAuth(cheriExcSealViolation);
+    else if (!isUnsealedOrColored(auth, ccpt))
+       result = eAuth(cheriExcSealViolation);
     else if (isLoad && !getHardPerms(auth).permitLoad)
         result = eAuth(cheriExcPermitRViolation);
     else if (isLoad && !getHardPerms(auth).permitLoadCap && byteOrTagEn == TagMemAccess)
@@ -115,7 +115,7 @@ endfunction
 (* noinline *)
 function Maybe#(BoundsCheck) prepareBoundsCheck(CapPipe a, CapPipe b, CapPipe pcc,
                                                 CapPipe ddc, Data vaddr, Bit#(TAdd#(CacheUtils::LogCLineNumMemDataBytes,1)) size, // These two are only used in the memory pipe. May factor into two functions later.
-                                                CapChecks toCheck);
+                                                CapChecks toCheck, Bit# (21) ccpt);
     BoundsCheck ret = ?;
     CapPipe authority = ?;
     case(toCheck.check_authority_src)
@@ -138,11 +138,15 @@ function Maybe#(BoundsCheck) prepareBoundsCheck(CapPipe a, CapPipe b, CapPipe pc
     endcase
     ret.authority_base = getBase(authority);
     ret.authority_top = getTop(authority);
-
+    Addr kind;
+    case (getColorAwareKind(a,ccpt)) matches
+        tagged SEALED_WITH_TYPE .t : kind = zeroExtend(t);
+        default: kind = zeroExtend(32'h0);
+    endcase
     case(toCheck.check_low_src)
         Src1Addr: ret.check_low = getAddr(a);
         Src1Base: ret.check_low = getBase(a);
-        Src1Type: ret.check_low = zeroExtend(getBaseKind(a).SEALED_WITH_TYPE);
+        Src1Type: ret.check_low = zeroExtend(kind);
         Src2Addr: ret.check_low = getAddr(b);
         Vaddr:    ret.check_low = vaddr;
     endcase
@@ -150,7 +154,7 @@ function Maybe#(BoundsCheck) prepareBoundsCheck(CapPipe a, CapPipe b, CapPipe pc
     case(toCheck.check_high_src)
         Src1AddrPlus2: ret.check_high = {1'b0,getAddr(a)+2};
         Src1Top: ret.check_high = getTop(a);
-        Src1Type: ret.check_high = zeroExtend(getBaseKind(a).SEALED_WITH_TYPE);
+        Src1Type: ret.check_high = zeroExtend(kind);
         Src2Addr: ret.check_high = {1'b0,getAddr(b)};
         ResultTop: ret.check_high = {1'b0,getAddr(a)} + {1'b0,getAddr(b)};
         VaddrPlusSize: ret.check_high = {1'b0,vaddr} + zeroExtend(size);
@@ -202,7 +206,7 @@ function CapPipe setBoundsALU(CapPipe cap, Data len, SetBoundsFunc boundsOp);
 endfunction
 
 (* noinline *)
-function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWFunc scrType);
+function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWFunc scrType, Bit# (21) ccpt);
     function csrOp (oldAddr, val, f) =
         case (f)
             Write: val;
@@ -212,21 +216,23 @@ function CapPipe specialRWALU(CapPipe cap, CapPipe oldCap, SpecialRWFunc scrType
     let addr = getAddr(cap);
     let oldAddr = getAddr(oldCap);
     CapPipe res = (case (scrType) matches
-        tagged TVEC .csrf: update_scr_via_csr(oldCap, csrOp(oldAddr, getAddr(cap), csrf) & ~64'h2, False);
-        tagged EPC .csrf: update_scr_via_csr(oldCap, csrOp(oldAddr, getAddr(cap), csrf) & ~64'h1, False);
-        tagged TCC: update_scr_via_csr(cap, addr & ~64'h2, False); // Mask out bit 1
-        tagged EPCC: update_scr_via_csr(cap, addr & ~64'h1, addr[0] == 1'b0); // Mask out bit 0
+        tagged TVEC .csrf: update_scr_via_csr(oldCap, csrOp(oldAddr, getAddr(cap), csrf) & ~64'h2, False, ccpt);
+        tagged EPC .csrf: update_scr_via_csr(oldCap, csrOp(oldAddr, getAddr(cap), csrf) & ~64'h1, False,ccpt);
+        tagged TCC: update_scr_via_csr(cap, addr & ~64'h2, False,ccpt); // Mask out bit 1
+        tagged EPCC: update_scr_via_csr(cap, addr & ~64'h1, addr[0] == 1'b0,ccpt); // Mask out bit 0
         tagged Normal: cap;
     endcase);
     return res;
 endfunction
 
-function Tuple2#(Data, Bool) extractType(CapPipe a);
-    if      (getBaseKind(a) == UNSEALED) return tuple2(otype_unsealed_ext, True);
-    else if (getBaseKind(a) == SENTRY  ) return tuple2(otype_sentry_ext, True);
-    else if (getBaseKind(a) == RES0    ) return tuple2(otype_res0_ext, True);
-    else if (getBaseKind(a) == RES1    ) return tuple2(otype_res1_ext, True);
-    else return tuple2(zeroExtend(getBaseKind(a).SEALED_WITH_TYPE), False);
+function Tuple2#(Data, Bool) extractType(CapPipe a, Bit# (21) ccpt);
+    let kind = getColorAwareKind(a,ccpt);
+    if      (kind == UNSEALED) return tuple2(otype_unsealed_ext, True);
+    else if (kind == SENTRY  ) return tuple2(otype_sentry_ext, True);
+    else if (kind == RES0    ) return tuple2(otype_res0_ext, True);
+    else if (kind == RES1    ) return tuple2(otype_res1_ext, True);
+    else if (kind matches tagged COLORED .col) return tuple2(zeroExtend(kind.COLORED), True);
+    else return tuple2(zeroExtend(kind.SEALED_WITH_TYPE), False);
 endfunction
 
 
@@ -237,10 +243,10 @@ function CapPipe clearTagIf(CapPipe a, Bool cond);
 endfunction
 
 (* noinline *)
-function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
+function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func, Bit# (21) ccpt );
     let a_mut = setValidCap(a, isValidCap(a) && getKind(a) == UNSEALED);
     let b_mut = setValidCap(b, isValidCap(b) && getKind(b) == UNSEALED);
-    match {.a_type, .a_res} = extractType(a);
+    match {.a_type, .a_res} = extractType(a, ccpt);     //a_res only False if SEALED_WITH_TYPE
     Bool sealPassthrough = !isValidCap(b) || getBaseKind(a) != UNSEALED || !isInBounds(b, False) || getAddr(b) == otype_unsealed_ext;
     Bool sealIllegal = getKind(b) != UNSEALED || !getHardPerms(b).permitSeal || !validAsType(b, getAddr(b));
     let new_hard_perms = getHardPerms(a);
@@ -302,7 +308,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
 endfunction
 
 (* noinline *)
-function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
+function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func, Bit# (21) ccpt);
     Data res = (case(func) matches
                tagged TestSubset             :
                    // TODO will be bad for timing. Would like to reuse bounds check
@@ -319,7 +325,7 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                tagged GetTag                 :
                    zeroExtend(pack(isValidCap(a)));
                tagged GetSealed              :
-                   zeroExtend(pack(getKind(a) != UNSEALED));
+                   zeroExtend(pack(!isUnsealedOrColored(a, ccpt)));
                tagged GetAddr                :
                    getAddr(a);
                tagged GetOffset              :
@@ -331,7 +337,7 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                tagged GetHigh                :
                    zeroExtend(tpl_2(toMem(a))[127:64]);
                tagged GetType                :
-                   tpl_1(extractType(a));
+                   tpl_1(extractType(a,ccpt));
                tagged ToPtr                  :
                    (isValidCap(a) ? getAddr(a) - getBase(b) : 0);
                default: ?;
@@ -339,12 +345,12 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
     return res;
 endfunction
 
-function CapPipe capALU(CapPipe a, CapPipe b, CapFunc func);
+function CapPipe capALU(CapPipe a, CapPipe b, CapFunc func, Bit# (21) ccpt);
     CapPipe res = (case (func) matches
         tagged CapInspect .x:
-            nullWithAddr(capInspect(a,b,func.CapInspect));
+            nullWithAddr(capInspect(a,b,func.CapInspect,ccpt));
         default:
-            capModify(a,b,func.CapModify);
+            capModify(a,b,func.CapModify,ccpt);
     endcase);
     return res;
 endfunction
@@ -414,7 +420,7 @@ function ControlFlow getControlFlow(DecodedInst dInst, Data rVal1, Data rVal2, A
 endfunction
 */
 (* noinline *)
-function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, CapPipe pcc, CapPipe ppc, Bit #(32) orig_inst, Bit# (32) ccpt);
+function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, CapPipe pcc, CapPipe ppc, Bit #(32) orig_inst, Bit# (21) ccpt);
     // just data, addr, and control flow
     CapPipe data = nullCap;
     CapPipe addr = nullCap;
@@ -428,7 +434,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
     AluFunc alu_f = dInst.execFunc matches tagged Alu .alu_f ? alu_f : Add;
     Data alu_result = alu(getAddr(rVal1), getAddr(aluVal2), alu_f);
 
-    CapPipe cap_alu_result = capALU(rVal1, aluVal2, dInst.capFunc);
+    CapPipe cap_alu_result = capALU(rVal1, aluVal2, dInst.capFunc,ccpt);
     CapPipe link_pcc = addPc(pcc, ((orig_inst [1:0] == 2'b11) ? 4 : 2));
 
     // Default branch function is not taken
@@ -443,7 +449,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
     end
     Maybe#(BoundsCheck) boundsCheck = prepareBoundsCheck(rVal1, aluVal2, pcc,
                                                          nullCap, 0, 0, // These three are only used in the memory pipe
-                                                         dInst.capChecks);
+                                                         dInst.capChecks,ccpt);
 
     cf.nextPc = setKind(cf.nextPc, UNSEALED);
     cf.mispredict = cf.nextPc != ppc;
@@ -465,7 +471,7 @@ function ExecResult basicExec(DecodedInst dInst, CapPipe rVal1, CapPipe rVal2, C
             default     : nullWithAddr(alu_result);
         endcase);
     CapMem csr_data = (case (dInst.iType)
-                       Scr: cast(specialRWALU(fromMaybe(rVal1, capImm), rVal2, dInst.capFunc.CapModify.SpecialRW));
+                       Scr: cast(specialRWALU(fromMaybe(rVal1, capImm), rVal2, dInst.capFunc.CapModify.SpecialRW, ccpt));
                        default: nullWithAddr(alu_result);
                     endcase);
     addr = (case (dInst.iType)
@@ -482,7 +488,8 @@ function Maybe#(Trap) checkForException(
     ArchRegs regs,
     CsrDecodeInfo csrState,
     CapMem pcc,
-    Bool fourByteInst
+    Bool fourByteInst,
+    Bit# (21) ccpt
 ); // regs needed to check if x0 is a src
     Maybe#(Trap) exception = Invalid;
     let prv = csrState.prv;
@@ -592,7 +599,7 @@ function Maybe#(Trap) checkForException(
     CapPipe pcc_start = cast(pcc);
     Maybe#(CSR_XCapCause) capException = Invalid;
     if (!isValidCap(pcc_start)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcTagViolation});
-    //if (getKind(pcc_start) != UNSEALED) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcSealViolation});
+    if (!isUnsealedOrColored(pcc_start, ccpt)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcSealViolation});
     if (!getHardPerms(pcc_start).permitExecute) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcPermitXViolation});
     if (!isInBounds(pcc_end, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcLengthViolation});
     if (!isInBounds(pcc_start, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcLengthViolation});

@@ -670,27 +670,30 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
 
         let ccp = inIfc.csrf_rd(csrAddrCCP);
-        Bit#(32) ccpt = 'h1ffffc;
+        let ccpt = inIfc.csrf_rd(csrAddrCCPT)[20:0];
 
         // calculate bitmap offset and send to TLB here
         Maybe#(Addr) objIdVAddr = Invalid;
         Bit#(7) objIdOffset = 'h0 ;
-        if (isCCType(x.rVal1, ccpt) && (ccp != '0) && isValidCap(x.rVal1) && (x.mem_func == Ld || x.mem_func == St)) begin 
-            
-            Bit#(64) byteIndex = zeroExtend(getCCType(x.rVal1) >> 3);   
-            Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
-            objIdVAddr = Valid(blockAddr + ccp);
-            objIdOffset = truncate(getCCType(x.rVal1));
-            // objIdVAddr = Valid((zeroExtend(getCCType(x.rVal1)) >>3) + ccp);
-            //objIdOffset= truncate(); // valid only if isValid(obIdVAddr)
-            $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
-                    " objIdVAddr ", fshow(objIdVAddr), 
-                    " objIdOffset:", fshow(objIdOffset),
-                    " ccType:", fshow(getCCType(x.rVal1)),
-                    " ccp:", fshow(ccp),
-                    " ccpt:", fshow(ccpt)
+        let kind = getColorAwareKind(x.rVal1, ccpt);
+        case(kind)
+            matches tagged COLORED .color:
+                if ( (x.mem_func == Ld || x.mem_func == St) && (ccp != '0) && isValidCap(x.rVal1) ) begin
+                    Bit#(64) byteIndex = zeroExtend(getCCType(x.rVal1) >> 3);   
+                    Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
+                    objIdVAddr = Valid(blockAddr + ccp);
+                    objIdOffset = truncate(getCCType(x.rVal1));
+                    $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
+                                        " objIdVAddr ", fshow(objIdVAddr), 
+                                        " objIdOffset:", fshow(objIdOffset),
+                                        " ccType:", fshow(getCCType(x.rVal1)),
+                                        " ccp:", fshow(ccp),
+                                        " ccpt:", fshow(ccpt)
                     );
-        end
+                end
+            default:
+                if(verbose) $display("%0d",cur_cycle," [Color][MemExePipeline][rule:doExeMem]: not colored cap");
+        endcase
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
@@ -717,7 +720,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     // capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrSCCP)[31:0])),
                     capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, ccpt),
                     check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                            ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
+                                            ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks, ccpt)
 `ifdef KONATA
                     , u_id: x.u_id
 `endif
@@ -746,7 +749,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     // capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, cast(inIfc.csrf_rd(csrAddrSCCP)[31:0])),
                     capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, ccpt),
                     check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                            ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
+                                            ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks, ccpt)
 `ifdef KONATA
                     , u_id: x.u_id
 `endif

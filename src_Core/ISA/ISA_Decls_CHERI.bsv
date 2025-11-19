@@ -91,10 +91,10 @@ function SCR unpackSCR(Bit#(5) addr);
     endcase);
 endfunction
 
-function CapPipe update_scr_via_csr (CapPipe old_scr, WordXL new_csr, Bool allow_sealed);
+function CapPipe update_scr_via_csr (CapPipe old_scr, WordXL new_csr, Bool allow_sealed, Bit# (21) ccpt);
     let new_scr = setAddr(old_scr, new_csr);
     let ret = new_scr.value;
-    if (!new_scr.exact || (getKind(old_scr) != UNSEALED && !allow_sealed)) begin
+     if (!new_scr.exact ||  (!isUnsealedOrColored (old_scr,ccpt) && !allow_sealed)) begin
         ret = setValidCap(ret, False);
     end
     return ret;

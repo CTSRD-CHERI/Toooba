@@ -267,7 +267,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         Maybe#(Trap) trap = tagged Invalid;
         let csr_state = csrf.decodeInfo;
         let pending_interrupt = csrf.pending_interrupt;
-        let new_exception = checkForException(x.dInst, x.regs, csr_state, x.pc, x.orig_inst[1:0]==2'b11);
+        Bit#(21) ccpt = csrf.rd(csrAddrCCPT)[20:0];
+        let new_exception = checkForException(x.dInst, x.regs, csr_state, x.pc, x.orig_inst[1:0]==2'b11, ccpt);
 
         // If Fpu regs are accessed, trap if mstatus_fs is "Off" (2'b00)
         Bool fpr_access = (   fn_ArchReg_is_FpuReg (x.regs.src1)

@@ -1803,7 +1803,7 @@ module mkSplitLSQ(SplitLSQ);
             
             // get objId seal bit using offset
             Bool isSealed = extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
-            Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation})) :
+            Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcColorViolation})) :
                                             Invalid;
             
             Bit#(7) offset=ld_objIdOffset_updObjIdSeal[tag];
@@ -1827,7 +1827,7 @@ module mkSplitLSQ(SplitLSQ);
             // Compute seal state and corresponding fault.
             Bool isSealed = extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
             // Maybe#(Trap) fault = isSealed
-            //     ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}))
+            //     ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcColorViolation}))
             //     : Invalid;
 
             Bit#(7) offset = st_objIdOffset_updObjIdSeal[tag];

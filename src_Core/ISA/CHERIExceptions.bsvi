@@ -10,6 +10,7 @@
 `CHERIException(MMUStoreCapProhibit,      5'd9)
 // 5'd10 reserved (obsolete InexactBoundsViolation)
 `CHERIException(UnalignedBase,            5'd11)
+`CHERIException(ColorViolation,           5'd12)
 // 5'd12 - 5'd15 reserved
 `CHERIException(GlobalViolation,          5'd16)
 `CHERIException(PermitXViolation,         5'd17)

@@ -1280,7 +1280,12 @@ module mkCsrFile #(Data hartid)(CsrFile);
         prev_prv_vec[prvM] <= prvU;
         ie_vec[prvM] <= prev_ie_vec[prvM];
         prev_ie_vec[prvM] <= 1;
-
+        let kind_in = getColorAwareKind(mepcc_reg[0], ccpt_csr[20:0]);
+        let kind_out;
+        case (kind_in) matches
+            tagged SENTRY :         kind_out = UNSEALED;
+            default:                kind_out = kind_in;
+        endcase
         Data mstatus_val = fn_mstatus_val(sxl_reg, uxl_reg,
                                           tsr_reg, tw_reg,  tvm_reg,
                                           mxr_reg, sum_reg, mprv_reg,
@@ -1293,7 +1298,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
                                           /* ie_vec [prvM] */ prev_ie_vec[prvM],
                                           ie_vec [prvS],
                                           ie_vec [prvU]);
-        return RET_Updates {new_pcc: cast(setKind(mepcc_reg[0], getBaseKind(mepcc_reg[0]) == SENTRY ? UNSEALED : getBaseKind(mepcc_reg[0])))
+        return RET_Updates {new_pcc: cast(setKind(mepcc_reg[0], kind_out))
 `ifdef INCLUDE_TANDEM_VERIF
                             , prv:    prev_prv_vec[prvM],
                             status: mstatus_val
@@ -1306,7 +1311,12 @@ module mkCsrFile #(Data hartid)(CsrFile);
         prev_prv_vec[prvS] <= prvU;
         ie_vec[prvS] <= prev_ie_vec[prvS];
         prev_ie_vec[prvS] <= 1;
-
+        let kind_in = getColorAwareKind(mepcc_reg[0], ccpt_csr[20:0]);
+        let kind_out;
+        case (kind_in) matches
+            tagged SENTRY :         kind_out = UNSEALED;
+            default:                kind_out = kind_in;
+        endcase
         // For Tandem Verification, we return the full underlying MSTATUS register
         Data mstatus_val = fn_mstatus_val(sxl_reg, uxl_reg,
                                           tsr_reg, tw_reg,  tvm_reg,
@@ -1322,7 +1332,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
                                           ie_vec [prvM],
                                           /* ie_vec [prvS] */ prev_ie_vec[prvS],
                                           ie_vec [prvU]);
-        return RET_Updates {new_pcc: cast(setKind(sepcc_reg[0], getBaseKind(sepcc_reg[0]) == SENTRY ? UNSEALED : getBaseKind(sepcc_reg[0])))
+        return RET_Updates {new_pcc: cast(setKind(sepcc_reg[0], kind_out))
 `ifdef INCLUDE_TANDEM_VERIF
                             , prv:    prev_prv_vec[prvS],
                             status: mstatus_val
