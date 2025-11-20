@@ -1311,7 +1311,7 @@ module mkCsrFile #(Data hartid)(CsrFile);
         prev_prv_vec[prvS] <= prvU;
         ie_vec[prvS] <= prev_ie_vec[prvS];
         prev_ie_vec[prvS] <= 1;
-        let kind_in = getColorAwareKind(mepcc_reg[0], ccpt_csr[20:0]);
+        let kind_in = getColorAwareKind(sepcc_reg[0], ccpt_csr[20:0]);
         let kind_out;
         case (kind_in) matches
             tagged SENTRY :         kind_out = UNSEALED;
