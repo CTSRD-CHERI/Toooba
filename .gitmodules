@@ -7,6 +7,7 @@
 [submodule "libs/TagController"]
 	path = libs/TagController
 	url = https://github.com/CTSRD-CHERI/TagController.git
+	branch = ptag
 [submodule "libs/cheri-cap-lib"]
 	path = libs/cheri-cap-lib
 	url = https://github.com/CTSRD-CHERI/cheri-cap-lib.git
