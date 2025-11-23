@@ -251,6 +251,7 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
     ByteOrTagEn byteOrTagEn =  DataMemAccess(byteEn);
     if(alloc_policy ==2'b01) byteOrTagEn = CacheLine_NWZ;
     else if (alloc_policy == 2'b10) byteOrTagEn = CapWord_POISON;
+    else if (alloc_policy == 2'b11) byteOrTagEn = CapWord_POISONLine;
     else byteOrTagEn =  DataMemAccess(byteEn);
 
     if (illegalInst) begin

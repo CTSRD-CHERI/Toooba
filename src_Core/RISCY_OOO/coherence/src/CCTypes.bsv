@@ -201,7 +201,7 @@ typedef struct {
     Msi toState;
     // below are detailed mem op
     MemOp op; // Ld, St, Lr, Sc, Amo
-    Bit#(2) alloc_policy; //allocation policy. 00: normal write allocate; 01: non-write allocate for store miss; 10: non-temporal store
+    Bit#(3) alloc_policy; //allocation policy. 00: normal write allocate; 01: non-write allocate for store miss; 10: non-temporal store
     MemDataByteEn byteEn; // valid when op == Sc
     MemTaggedData data; // valid when op == Sc/Amo
     AmoInst amoInst; // valid when op == Amo
@@ -267,7 +267,7 @@ typedef struct {
     idT id; // slot id in child cache
     childT child; // from which child
     Bool isPrefetchRq;
-    Bit#(2) alloc_policy;
+    Bit#(3) alloc_policy;
 } CRqMsg#(type idT, type childT) deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -326,7 +326,7 @@ typedef struct {
     LineByteEn byteEn;
     // req id: distinguish between child and dma
     LLRqId#(cRqIdT, dmaRqIdT) id;
-    Bit#(2) alloc_policy;
+    Bit#(3) alloc_policy;
 } LLRq#(type cRqIdT, type dmaRqIdT, type childT) deriving(Bits, Eq, FShow);
 
 // memory msg
@@ -347,7 +347,7 @@ typedef struct {
     Addr addr;
     LineByteEn byteEn;
     Line data;
-    Bit#(2) poison_operation;
+    Bit#(3) poison_operation;
 } WbMemRs deriving(Bits, Eq, FShow);
 
 typedef union tagged {

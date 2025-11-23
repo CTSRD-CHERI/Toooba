@@ -434,7 +434,7 @@ module mkIBank#(
             id: 0,
             child: ?,
             isPrefetchRq: True,
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         rqToPQ.enq(cRqToP);
         if (verbose)
@@ -456,7 +456,7 @@ module mkIBank#(
             id: slot.way,
             child: ?,
             isPrefetchRq: False,
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         rqToPQ.enq(cRqToP);
        if (verbose)

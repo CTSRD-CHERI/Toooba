@@ -379,7 +379,7 @@ endfunction
             amoInst: ?,
             loadTags: ?,
             pcHash: ?,
-            alloc_policy: 2'b00,
+            alloc_policy: 3'b000,
             permitPoison: False
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
@@ -507,7 +507,7 @@ endfunction
             id: 0,
             child: ?,
             isPrefetchRq: True,
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         rqToPQ.enq(cRqToP);
         if (verbose)
@@ -589,7 +589,7 @@ endfunction
                 if (!cRqIsPrefetch[n]) begin
                     if (req.loadTags) begin
                         procResp.respLd(req.id, getTagsAt(curLine));
-                    end else if (req.alloc_policy == 2'b11) begin 
+                    end else if (req.alloc_policy == 3'b011) begin 
                         procResp.respLd(req.id, getPoisonAt(curLine, dataSel));
                     end else begin
                         procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel));
@@ -613,7 +613,8 @@ endfunction
                 // calculate new data to write
                 if(succeed) begin
                     let taggedData = getTaggedDataAt(curLine, dataSel);
-                    if(taggedData.tag == True && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
+                    //if(taggedData.tag == True && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
+                    if(taggedData.tag == True && taggedData.data[1][46] == 1'b1 ) begin 
                         newLine = curLine;
                         $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
                             $time,
@@ -633,14 +634,15 @@ endfunction
                 let {be, wrLine, permitPoison} <- procResp.respSt(req.id);
                     // calculate new data to write
                 MemTaggedData curData = getTaggedDataAt(curLine, dataSel);
-                if(curData.tag == True && curData.data[1][46] == 1'b1 && !permitPoison) begin 
+                //if(curData.tag == True && curData.data[1][46] == 1'b1 && !permitPoison) begin 
+                if(curData.tag == True && curData.data[1][46] == 1'b1 ) begin
                     newLine = curLine;
                     $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
                         $time,
                         fshow(curData)
                     );
                 end else begin 
-                    if(req.alloc_policy == 2'b01) begin //zeroing
+                    if(req.alloc_policy == 3'b001) begin //zeroing
                         newLine = getUpdatedLine(curLine, be, unpack(0));
                     end else begin 
                         newLine = getUpdatedLine(curLine, be, wrLine);

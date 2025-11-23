@@ -150,6 +150,7 @@ typedef union tagged {
   void PoisonMemAccess;
   void CacheLine_NWZ; //cache line non-write allocate zeroing
   void CapWord_POISON;
+  void CapWord_POISONLine;
   MemDataByteEn DataMemAccess;
 } ByteOrTagEn deriving (FShow, Eq, Bits);
 

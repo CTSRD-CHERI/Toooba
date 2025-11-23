@@ -435,7 +435,7 @@ endfunction
             child: child,
             byteEn: ?,
             id: Child (?),
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         // setup new MSHR entry
         cRqIndexT n <- cRqMshr.transfer.getEmptyEntryInit(cRq, Invalid);
@@ -469,7 +469,7 @@ endfunction
             child: child,
             byteEn: ?,
             id: Child (?),
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         // setup new MSHR entry
         cRqIndexT n <- cRqMshr.transfer.getEmptyEntryInit(cRq, Invalid);
@@ -522,7 +522,7 @@ endfunction
             child: ?,
             byteEn: r.byteEn,
             id: Dma (r.id),
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         // setup new MSHR entry and data
         cRqIndexT n <- cRqMshr.transfer.getEmptyEntryInit(cRq, write ? Valid (r.data) : Invalid);
@@ -700,7 +700,7 @@ endfunction
         // take actions according to type
         if(t == Ld) begin
             // only load mem: can be child or dma req
-            if(cRq.alloc_policy == 2'b01) begin 
+            if(cRq.alloc_policy == 3'b001) begin 
                 memRsT nwz_msg = MemRsMsg {
                   data: unpack(0),
                   child: ?,
@@ -745,7 +745,7 @@ endfunction
                 addr: cRq.addr,
                 byteEn: cRq.byteEn,
                 data: validValue(data),
-		poison_operation: 2'b00
+		poison_operation: 3'b00
             });
             toMQ.enq(msg);
             toMInfoQ.deq; // deq info
@@ -786,7 +786,7 @@ endfunction
                     addr: {cSlot.repTag, truncate(cRq.addr)},
                     byteEn: replicate(replicate(True)),
                     data: validValue(data),
-	  	    poison_operation: 2'b00
+	  	    poison_operation: 3'b000
                 });
                 toMQ.enq(msg);
                 // don't deq info, do ld next time
