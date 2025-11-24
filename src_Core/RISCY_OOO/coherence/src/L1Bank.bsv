@@ -583,6 +583,7 @@ endfunction
         // TODO when we have MESI, cache state may also need update
         Line curLine = ram.line;
         Line newLine = curLine;
+        Bool line_poisoned = False;
         LineMemDataOffset dataSel = getLineMemDataOffset(req.addr);
         case(req.op) matches
             Ld: begin
@@ -631,6 +632,7 @@ endfunction
             end
             St: begin
                 // resp processor, get write data & BE
+                
                 let {be, wrLine, permitPoison} <- procResp.respSt(req.id);
                     // calculate new data to write
                 MemTaggedData curData = getTaggedDataAt(curLine, dataSel);
@@ -646,6 +648,14 @@ endfunction
                         newLine = getUpdatedLine(curLine, be, unpack(0));
                     end else begin 
                         newLine = getUpdatedLine(curLine, be, wrLine);
+                        if(req.alloc_policy == 3'b010) begin 
+
+                        end 
+                        else if (req.alloc_policy == 3'b100) begin 
+                            line_poisoned = True;
+                        end else begin 
+                            line_poisoned = False;
+                        end 
                     end
                 end 
             end
@@ -667,7 +677,8 @@ endfunction
                     cs: max(ram.info.cs, req.toState),
                     dir: ?,
                     owner: succ,
-                    other: ?
+                    other: ?,
+                    poisoned : line_poisoned
                 },
                 line: newLine // write new data into cache
             }, isValid(succ) ? pipeOutNextInQueue : pipeOutSecondInQueue, True); // hit, so update rep info
@@ -743,7 +754,8 @@ endfunction
                 cs: M, // AMO always gets to M
                 dir: ?,
                 owner: succ,
-                other: ?
+                other: ?,
+                poisoned : False
             },
             line: newLine // write new data into cache
         }, amoHit.nextInQueue, True); // hit, so update rep info
@@ -786,7 +798,8 @@ endfunction
                     cs: ram.info.cs,
                     dir: ram.info.dir,
                     owner: resetOwner ? Invalid : ram.info.owner,
-                    other: ram.info.other
+                    other: ram.info.other,
+                    poisoned: ram.info.poisoned
                 },
                 line: ram.line
             }, pipeOutNextInQueue, False);
@@ -833,7 +846,8 @@ endfunction
                     cs: ram.info.cs,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
-                    other: ?
+                    other: ?,
+                    poisoned: False
                 },
                 line: ram.line
             }, pipeOutNextInQueue, False);
@@ -854,7 +868,8 @@ endfunction
                     cs: I,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
-                    other: ?
+                    other: ?,
+                    poisoned: ?
                 },
                 line: ? // data is no longer used
             }, pipeOutNextInQueue, False);
@@ -1090,7 +1105,8 @@ endfunction
                     cs: I, // downgraded to I
                     dir: ?,
                     owner: ram.info.owner, // keep owner to cRq
-                    other: ?
+                    other: ?,
+                    poisoned: ram.info.poisoned
                 },
                 line: ram.line
             }, pipeOutNextInQueue, False);
@@ -1121,7 +1137,8 @@ endfunction
                     cs: pRq.toState,
                     dir: ?,
                     owner: Invalid, // no successor
-                    other: ?
+                    other: ?,
+                    poisoned: ram.info.poisoned
                 },
                 line: ram.line
             }, pipeOutSecondInQueue, False);
@@ -1185,7 +1202,8 @@ endfunction
                 cs: I, // downgraded to I
                 dir: ?,
                 owner: Invalid, // no successor
-                other: ?
+                other: ?,
+                poisoned: False
             },
             line: ?
         }, Invalid, False);

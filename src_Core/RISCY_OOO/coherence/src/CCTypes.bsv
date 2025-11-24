@@ -173,6 +173,7 @@ typedef struct {
     dirT dir;
     ownerT owner;
     otherT other;
+    Bool poisoned;
 } CacheInfo#(
     type tagT,
     type msiT,
