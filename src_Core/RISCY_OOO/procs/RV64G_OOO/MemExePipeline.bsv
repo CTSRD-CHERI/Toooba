@@ -767,7 +767,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE,
+            getHardPerms(x.vaddr).permitElevateLevel, getHardPerms(x.vaddr).capabilityLevel
         );
 
         // issue non-MMIO Ld which has no exception and is not waiting for
@@ -899,6 +900,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(verbose) $display("%t : ", $time, rule_name, " ", fshow(tag), "; ", fshow(data), "; ", fshow(res));
         if(res.dst matches tagged Valid .dst) begin
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
+            if(!res.elevate) begin
+                let hp = getHardPerms(dataUnpacked);
+                hp.capabilityLevel = res.maxLevel;
+                if(getKind(dataUnpacked) == SENTRY) hp.permitElevateLevel = False;
+                dataUnpacked = setHardPerms(dataUnpacked, hp);
+            end
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
             inIfc.writeRegFile(dst.indx, dataUnpacked);
 
