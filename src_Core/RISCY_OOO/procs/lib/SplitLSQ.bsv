@@ -377,7 +377,7 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bool elevate, UInt#(1) maxLevel
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bool elevate
     );
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
@@ -1512,7 +1512,7 @@ module mkSplitLSQ(SplitLSQ);
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be,
-        Bool elevate, UInt#(1) maxLevel
+        Bool elevate
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1555,6 +1555,7 @@ module mkSplitLSQ(SplitLSQ);
             ld_computed_updAddr[tag] <= !isValid(fault);
             ld_paddr_updAddr[tag] <= pa;
             ld_allowCap[tag] <= allowCap;
+            ld_elevate[tag] <= elevate;
             ld_isMMIO_updAddr[tag] <= mmio;
             ld_shiftedBE_updAddr[tag] <= shift_be;
 

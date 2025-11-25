@@ -767,7 +767,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, getHardPerms(x.vaddr).permitElevateLevel, getHardPerms(x.vaddr).permissionStoreLevel
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, getHardPerms(x.vaddr).permitElevateLevel
         );
 
         // issue non-MMIO Ld which has no exception and is not waiting for
