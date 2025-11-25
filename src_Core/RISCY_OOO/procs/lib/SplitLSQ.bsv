@@ -306,6 +306,7 @@ typedef struct {
     InstTag instTag;    // For recording Ld data in ROB
 `endif
     MemTaggedData data;
+    Bool elevate;
 } LSQRespLdResult deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -376,7 +377,7 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bool elevate, UInt#(1) maxLevel
     );
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
@@ -662,6 +663,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_unsigned        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(ByteOrTagEn))             ld_byteOrTagEn     <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_allowCap        <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Reg#(Bool))                    ld_elevate         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_acq             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_rel             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Maybe#(PhyDst)))          ld_dst             <- replicateM(mkConfigRegU);
@@ -1509,7 +1511,8 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be,
+        Bool elevate, UInt#(1) maxLevel
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1973,7 +1976,8 @@ module mkSplitLSQ(SplitLSQ);
 `ifdef INCLUDE_TANDEM_VERIF
             instTag: ld_instTag [t],    // For recording Ld data in ROB
 `endif
-            data: ?
+            data: ?,
+            elevate: False
         };
         if(ld_waitWPResp_resp[t]) begin
             ld_waitWPResp_resp[t] <= False;
@@ -1998,9 +2002,11 @@ module mkSplitLSQ(SplitLSQ);
             // the register files as the Toooba FPR is 64-bit
             let bEn = ld_byteOrTagEn[t];
             let allowCap = ld_allowCap[t];
+            let elevate = ld_elevate[t];
             let dst = ld_dst[t];
             let is32BitLd = bEn matches tagged DataMemAccess .bEnData &&& (bEnData[3] && !bEnData[7]) ? True : False;
             res.allowCap = allowCap;
+            res.elevate = elevate;
             res.dst = ld_dst[t];
             if (dst.Valid.isFpuReg && is32BitLd)
                res.data = fv_nanbox_MemTaggedData(

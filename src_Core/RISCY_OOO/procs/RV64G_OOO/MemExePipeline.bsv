@@ -562,6 +562,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // update LSQ data now
         if(x.ldstq_tag matches tagged St .stTag) begin
             MemTaggedData d = x.mem_func == Amo ? toMemData : shiftData; // XXX don't shift for AMO
+            // do cap level check
+            if(getHardPerms(vaddr).capabilityLevel < getHardPerms(data).permissionStoreLevel) d.tag = False;
             lsq.updateData(stTag, d);
 `ifdef PERFORMANCE_MONITORING
             EventsCore events = unpack(0);
@@ -765,7 +767,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, getHardPerms(x.vaddr).permitElevateLevel, getHardPerms(x.vaddr).permissionStoreLevel
         );
 
         // issue non-MMIO Ld which has no exception and is not waiting for
@@ -897,6 +899,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(verbose) $display("%t : ", $time, rule_name, " ", fshow(tag), "; ", fshow(data), "; ", fshow(res));
         if(res.dst matches tagged Valid .dst) begin
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
+            if(!res.elevate) begin
+                let hp = getHardPerms(dataUnpacked);
+                hp.capabilityLevel = 0;
+                if(getKind(dataUnpacked) == SENTRY) hp.permitElevateLevel = False;
+                dataUnpacked = setHardPerms(dataUnpacked, hp);
+            end
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
             inIfc.writeRegFile(dst.indx, dataUnpacked);
 
