@@ -903,7 +903,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             if(!res.elevate) begin
                 let hp = getHardPerms(dataUnpacked);
                 hp.capabilityLevel = res.maxLevel;
-                if(getKind(dataUnpacked) == SENTRY) hp.permitElevateLevel = False;
+                if(getKind(dataUnpacked) == UNSEALED) hp.permitElevateLevel = False;
                 dataUnpacked = setHardPerms(dataUnpacked, hp);
             end
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
