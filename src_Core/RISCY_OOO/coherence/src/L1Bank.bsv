@@ -63,6 +63,8 @@ import Performance::*;
 import LatencyTimer::*;
 import RandomReplace::*;
 import Prefetcher::*;
+import CHERICap::*;
+import CHERICC_Fat::*;
 `ifdef PERFORMANCE_MONITORING
 import PerformanceMonitor::*;
 import StatCounters::*;
@@ -638,12 +640,21 @@ endfunction
                     // calculate new data to write
                 MemTaggedData curData = getTaggedDataAt(curLine, dataSel);
                 //if(curData.tag == True && curData.data[1][46] == 1'b1 && !permitPoison) begin 
-                if(curData.tag == True && curData.data[1][46] == 1'b1 ) begin
-                    newLine = curLine;
-                    $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
-                        $time,
-                        fshow(curData)
-                    );
+                CapPipe loaded_dataUnpacked = fromMem(unpack(pack(curData)));
+                Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
+                if(isValidCap(loaded_dataUnpacked) && curData.data[1][46] == 1'b1 ) begin
+                    if(poison_pver == pver) begin 
+                        $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
+                            $time,
+                            fshow(curData), fshow(pver), fshow(poison_pver), isValidCap(loaded_dataUnpacked)
+                        );
+                    end else begin 
+                        $display("%t L1 %m pipelineResp: found mismatch poison on store access, return 0",
+                            $time,
+                            fshow(curData)
+                        );
+                        newLine = getUpdatedLine(curLine, be, unpack(0));
+                    end 
                 end else begin 
                     if(req.alloc_policy == 3'b001) begin //zeroing
                         newLine = getUpdatedLine(curLine, be, unpack(0));
