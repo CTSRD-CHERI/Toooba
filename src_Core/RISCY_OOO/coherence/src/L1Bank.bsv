@@ -617,13 +617,21 @@ endfunction
                 // calculate new data to write
                 if(succeed) begin
                     let taggedData = getTaggedDataAt(curLine, dataSel);
+                    CapPipe loaded_dataUnpacked = fromMem(unpack(pack(taggedData)));
+                    Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
                     //if(taggedData.tag == True && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
-                    if(taggedData.tag == True && taggedData.data[1][46] == 1'b1 ) begin 
-                        newLine = curLine;
-                        $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
-                            $time,
-                            fshow(taggedData)
-                        );
+                    if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
+                        if (poison_pver == req.pver) begin 
+                            newLine = curLine;
+                            $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
+                                $time,
+                                fshow(taggedData)
+                            );
+                        end else begin 
+                            let newTaggedData =
+                                mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
+                            newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
+                        end 
                     end else begin 
                         let newTaggedData =
                             mergeMemTaggedDataBE(taggedData, req.data, zeroExtend(pack(req.byteEn)));
