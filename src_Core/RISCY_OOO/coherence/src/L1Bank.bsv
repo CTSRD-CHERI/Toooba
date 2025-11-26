@@ -380,7 +380,8 @@ endfunction
             loadTags: ?,
             pcHash: ?,
             alloc_policy: 3'b000,
-            permitPoison: False
+            permitPoison: False, 
+            pver: 8'h0
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
         // send to pipeline
@@ -633,7 +634,7 @@ endfunction
             St: begin
                 // resp processor, get write data & BE
                 
-                let {be, wrLine, permitPoison} <- procResp.respSt(req.id);
+                let {be, wrLine, permitPoison, pver} <- procResp.respSt(req.id);
                     // calculate new data to write
                 MemTaggedData curData = getTaggedDataAt(curLine, dataSel);
                 //if(curData.tag == True && curData.data[1][46] == 1'b1 && !permitPoison) begin 

@@ -209,6 +209,7 @@ typedef struct {
     Bool loadTags; // valid when op == Ld
     Bit#(16) pcHash; // hash of instruction pc sending the request
     Bool permitPoison;
+    Bit#(8) pver;
 } ProcRq#(type idT) deriving(Bits, Eq, FShow);
 
 interface L1ProcReq#(type idT);
@@ -218,7 +219,7 @@ endinterface
 interface L1ProcResp#(type idT);
     method Action respLd(idT id, MemTaggedData resp);
     method Action respLrScAmo(idT id, MemTaggedData resp);
-    method ActionValue#(Tuple3#(LineByteEn, Line, Bool)) respSt(idT id);
+    method ActionValue#(Tuple4#(LineByteEn, Line, Bool, Bit#(8))) respSt(idT id);
     method Action evict(LineAddr a); // called when cache line is evicted
 endinterface
 // General replacement interface
