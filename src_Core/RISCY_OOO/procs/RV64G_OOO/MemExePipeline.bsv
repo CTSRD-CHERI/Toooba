@@ -673,12 +673,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let ccpt = inIfc.csrf_rd(csrAddrCCPT)[20:0];
 
         // calculate bitmap offset and send to TLB here
-        Maybe#(Addr) objIdVAddr = Invalid; // default invalid
+        Maybe#(Addr) objIdVAddr = Invalid;
         Bit#(7) objIdOffset = 'h0 ;
         let kind = getColorAwareKind(x.rVal1, ccpt);
         case(kind)
             matches tagged COLORED .color:
-                if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && (ccp != '0) && isValidCap(x.rVal1) ) begin
+                if ( (x.mem_func == Ld || x.mem_func == St) && (ccp != '0) && isValidCap(x.rVal1) ) begin
                     Bit#(64) byteIndex = zeroExtend(getCCType(x.rVal1) >> 3);   
                     Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
                     objIdVAddr = Valid(blockAddr + ccp);
@@ -699,7 +699,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
         $fflush;
 `endif
-        
         // go to next stage by sending to TLB
         if (isValid(objIdVAddr)) begin
             objIdTlb.procReq(DTlbReq {
@@ -917,8 +916,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 x.capException = Valid(CSR_XCapCause{cheri_exc_reg: check.authority_idx, cheri_exc_code: cheriExcLengthViolation});
         end
         if (x.capException matches tagged Valid .c) cause = Valid(CapException(c));
-        let needsObjIdCheck = (x.mem_func == St || x.mem_func == Sc || x.mem_func == Amo) &&
-                              !isMMIO && isValid(x.objIdAddr);
+        let needsObjIdCheck = (x.mem_func == St) && !isMMIO && isValid(x.objIdAddr);
         Bool access_at_commit = !isValid(cause) && (isMMIO || isLrScAmo);
         Bool non_mmio_st_done = !isValid(cause) && !isMMIO && (x.mem_func == St) && !needsObjIdCheck;
         inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
@@ -959,7 +957,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE,
-            (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? x.objIdAddr : Invalid), x.objIdOffset
+            (((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid), x.objIdOffset
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 
@@ -983,7 +981,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 pcHash: hash(getAddr(pc))
             });
         end
-        else if ((x.mem_func == St || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO &&
+        else if (x.mem_func == St && !isMMIO &&
                  !isValid(cause) && isValid(x.objIdAddr)) begin
             StQTag stTag = ?;
             if(x.ldstq_tag matches tagged St .t) begin
@@ -993,17 +991,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 doAssert(False, "must be in StQ");
             end
             reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, x.objIdAddr)));
-        end
-        else if (x.mem_func == Lr && !isMMIO &&
-                 !isValid(cause) && isValid(x.objIdAddr)) begin
-            LdQTag ldTag = ?;
-            if(x.ldstq_tag matches tagged Ld .t) begin
-                ldTag = t;
-            end
-            else begin
-                doAssert(False, "must be in LdQ");
-            end
-            reqObjIdSealLdQ.enq(tuple2(ldTag, fromMaybe(?, x.objIdAddr)));
         end
 
 `ifdef PERF_COUNT
@@ -1198,13 +1185,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doObjIdRespStMem;
         memObjIdRespStQ.deq;
         let {t, d} = memObjIdRespStQ.first;
-        let mInstInfo <- lsq.updateStObjIdSeal(t, d);
-        if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(d), "; instTagReady=", fshow(isValid(mInstInfo)));
+        let mInstTag <- lsq.updateStObjIdSeal(t, d);
+        if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(d), "; instTagReady=", fshow(isValid(mInstTag)));
 
         // If this ObjID response made a non-MMIO store become “done”,
-        // tell the ROB now (non_mmio_st_done = True). Only pulse for real
-        // stores (not Sc/Amo) to avoid ROB assertions.
-        if (mInstInfo matches tagged Valid { .instTag, .memFunc } &&& memFunc == St) begin
+        // tell the ROB now (non_mmio_st_done = True).
+        if (mInstTag matches tagged Valid .instTag) begin
             inIfc.rob_setExecuted_doFinishMem(
                 instTag,
                 0, // vaddr not needed for this bookkeeping pulse
@@ -1635,7 +1621,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         && !lsqDeqSt.isMMIO
         && (lsqDeqSt.memFunc == Sc || lsqDeqSt.memFunc == Amo)
         && waitLrScAmoMMIOResp == Invalid
-        && lsqDeqSt.objIdSealOk
 `ifndef TSO_MM
         && stb.noMatchStQ(lsqDeqSt.paddr, DataMemAccess(lsqDeqSt.shiftedBE))
         && (!lsqDeqSt.rel || stb.isEmpty)
