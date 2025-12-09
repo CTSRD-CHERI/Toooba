@@ -1827,15 +1827,16 @@ module mkSplitLSQ(SplitLSQ);
 
             // Compute seal state and corresponding fault.
             Bool isSealed = extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
-            // Maybe#(Trap) fault = isSealed
-            //     ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcColorViolation}))
-            //     : Invalid;
+             Maybe#(Trap) fault = isSealed
+                 ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}))
+                : Invalid;
+
 
             Bit#(7) offset = st_objIdOffset_updObjIdSeal[tag];
             if(verbose) $display("[LSQ - updateStObjIdSeal] isSealed:", fshow(isSealed), ", offset:", fshow(offset));
 
             // Record results into the store entry.
-            // st_fault_updObjIdSeal[tag]       <= fault;
+            st_fault_updObjIdSeal[tag]       <= fault;
             st_objIdSealOk_updObjIdSeal[tag] <= Valid(!isSealed);
 
             // If this is a non-MMIO *store* and the seal check passed (no
