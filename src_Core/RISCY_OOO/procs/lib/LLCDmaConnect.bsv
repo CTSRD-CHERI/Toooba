@@ -164,9 +164,9 @@ module mkLLCDmaConnect #(
       Bit #(64) mask = fn_expand_strb_to_mask (wr_data.wstrb);
 
       // Read rg_cacheline_cache_data as 64-bit words
-      Vector #(8, Bit #(64)) line_dwords = unpack (pack (rg_cacheline_cache_data));
+      Line line_dwords = unpack (pack (rg_cacheline_cache_data));
       // Modify relevant bytes of relevant dword
-      Bit #(3)  dword_in_line     = addr [5:3];
+      Bit #(TLog#(LineSzData))  dword_in_line     = truncate(addr [6:3]);
       Bit #(64) old_dword         = line_dwords [dword_in_line];
       Bit #(64) new_dword         = ((old_dword & (~ mask)) | (data & mask));
       line_dwords [dword_in_line] = new_dword;
@@ -202,8 +202,8 @@ module mkLLCDmaConnect #(
       Addr addr = rd_addr.araddr;
 
       // Read rg_cacheline_cache as 64-bit words
-      Vector #(8, Bit #(64)) line_dwords = unpack (pack (rg_cacheline_cache_data));
-      Bit #(3)  dword_in_line = addr [5:3];
+      Line line_dwords = unpack (pack (rg_cacheline_cache_data));
+      Bit #(3)  dword_in_line = truncate(addr [6:3]);
       Bit #(64) dword         = line_dwords [dword_in_line];
 
       // Send response to external client

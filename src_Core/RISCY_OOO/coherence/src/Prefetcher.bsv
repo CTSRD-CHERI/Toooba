@@ -406,9 +406,9 @@ module mkTargetTable(TargetTable#(narrowTableSize, wideTableSize)) provisos
     Alias#(narrowTargetEntryT, NarrowTargetEntry#(narrowTableTagBits, narrowDistanceBits)),
     Alias#(wideTargetEntryT, WideTargetEntry#(wideTableTagBits)),
     Add#(a__, TLog#(narrowTableSize), 32),
-    Add#(b__, TLog#(narrowTableSize), 58),
+    Add#(b__, TLog#(narrowTableSize), TSub#(61,TLog#(LineSzData))),
     Add#(c__, TLog#(wideTableSize), 32),
-    Add#(d__, TLog#(wideTableSize), 58)
+    Add#(d__, TLog#(wideTableSize), TSub#(61,TLog#(LineSzData)))
 );
     Vector#(narrowTableSize, Ehr#(2, Maybe#(narrowTargetEntryT))) narrowTable <- replicateM(mkEhr(Invalid));
     Vector#(wideTableSize, Ehr#(2, Maybe#(wideTargetEntryT))) wideTable <- replicateM(mkEhr(Invalid));
@@ -469,9 +469,9 @@ module mkTargetTableBRAM(TargetTableBRAM#(narrowTableSize, wideTableSize)) provi
     Alias#(narrowTargetEntryT, NarrowTargetEntry#(narrowTableTagBits, narrowDistanceBits)),
     Alias#(wideTargetEntryT, WideTargetEntry#(wideTableTagBits)),
     Add#(a__, TLog#(narrowTableSize), 32),
-    Add#(b__, TLog#(narrowTableSize), 58),
+    Add#(b__, TLog#(narrowTableSize), TSub#(61,TLog#(LineSzData))),
     Add#(c__, TLog#(wideTableSize), 32),
-    Add#(d__, TLog#(wideTableSize), 58)
+    Add#(d__, TLog#(wideTableSize), TSub#(61,TLog#(LineSzData)))
 );
     RWBramCore#(Bit#(narrowTableIdxBits), Maybe#(narrowTargetEntryT)) narrowTable <- mkRWBramCore;
     RWBramCore#(Bit#(wideTableIdxBits), Maybe#(wideTargetEntryT)) wideTable <- mkRWBramCore;
@@ -555,9 +555,9 @@ module mkTargetTableDouble(TargetTableDouble#(narrowTableSize, wideTableSize)) p
     Alias#(narrowTargetEntryT, NarrowTargetEntry#(narrowTableTagBits, narrowDistanceBits)),
     Alias#(wideTargetEntryT, WideTargetEntry#(wideTableTagBits)),
     Add#(a__, TLog#(narrowTableSize), 32),
-    Add#(b__, TLog#(narrowTableSize), 58),
+    Add#(b__, TLog#(narrowTableSize), TSub#(61,TLog#(LineSzData))),
     Add#(c__, TLog#(wideTableSize), 32),
-    Add#(d__, TLog#(wideTableSize), 58)
+    Add#(d__, TLog#(wideTableSize), TSub#(61,TLog#(LineSzData)))
 );
 
     //on any request, read all 4 tables. get prefetches. if it's a miss save both MRU entries.

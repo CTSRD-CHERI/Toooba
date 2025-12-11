@@ -37,7 +37,8 @@ import Performance::*;
 import FShow::*;
 import MsgFifo::*;
 
-// 64B cache line
+// XXX Parameterisable cache line size in number of 64-bit words.
+// Default: 64B cache line
 typedef 8 CLineNumData;
 typedef TLog#(CLineNumData) LogCLineNumData;
 typedef Bit#(LogCLineNumData) CLineDataSel;

@@ -48,8 +48,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
    provisos(Bits#(idT, a__),
 	    Bits#(childT, b__),
 	    FShow#(ToMemMsg#(idT, childT)),
-	    FShow#(MemRsMsg#(idT, childT)),
-	    Add#(SizeOf#(Line), 0, 512)); // assert Line sz = 512
+	    FShow#(MemRsMsg#(idT, childT)));
 
    // Verbosity: 0: quiet; 1: LLC transactions; 2: loop detail
    Integer verbosity = 0;
@@ -72,7 +71,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          AXI4_Size  size = axsize_8;
          let mem_req_rd_addr = AXI4_Rd_Addr {arid:     fabric_default_id,
                                              araddr:   addr,
-                                             arlen:    7,           // burst len = arlen+1
+                                             arlen:    fromInteger(valueOf(LineSzData))-1,           // burst len = arlen+1
                                              arsize:   size,
                                              arburst:  axburst_incr,
                                              arlock:   fabric_default_lock,
@@ -96,11 +95,10 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
    // Don't do reads while writes are outstanding.
 
    // Each 512b cache line takes 8 beats, each handling 64 bits
-   Reg #(Bit #(3)) rg_rd_req_beat <- mkReg (0);
-   Reg #(Bit #(3)) rg_rd_rsp_beat <- mkReg (0);
+   Reg #(Bit #(TLog#(LineSzData))) rg_rd_rsp_beat <- mkReg (0);
 
    FIFOF #(LdMemRq #(idT, childT)) f_pending_reads <- mkFIFOF;
-   Reg #(Bit #(512)) rg_cline <- mkRegU;
+   Reg #(Line) rg_cline <- mkRegU;
 
    rule rl_handle_read_req (llc.toM.first matches tagged Ld .ld
                             &&& (ctr_wr_rsps_pending.value == 0));
@@ -132,11 +130,11 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       end
 
       // Shift next 64 bits from fabric into the cache line being assembled
-      let new_cline = { mem_rsp.rdata, rg_cline [511:64] };
+      let new_cline = shiftOutFrom0(mem_rsp.rdata, rg_cline, 1);
 
       if (mem_rsp.rlast) begin
          let ldreq <- pop (f_pending_reads);
-         MemRsMsg #(idT, childT) resp = MemRsMsg {data:  unpack (new_cline),
+         MemRsMsg #(idT, childT) resp = MemRsMsg {data:   new_cline,
                                                   child: ldreq.child,
                                                   id:    ldreq.id};
 
@@ -146,7 +144,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
             $display ("    Response to LLC: ", fshow (resp));
 
          rg_rd_rsp_beat <= 0;
-         rg_cline <= unpack(0);
+         rg_cline <= replicate(0);
       end else begin
          rg_rd_rsp_beat <= rg_rd_rsp_beat + 1;
          rg_cline <= new_cline;
@@ -157,7 +155,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
    // Handle write requests and responses
 
    // Each 512b cache line takes 8 beats, each handling 64 bits
-   Reg #(Bit #(3)) rg_wr_req_beat <- mkReg (0);
+   Reg #(Bit #(TLog#(LineSzData))) rg_wr_req_beat <- mkReg (0);
 
    rule rl_handle_write_req (llc.toM.first matches tagged Wb .wb);
       if ((cfg_verbosity > 0) && (rg_wr_req_beat == 0)) begin
@@ -187,7 +185,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
 
       // on last flit...
       // ===============
-      if (rg_wr_req_beat == 7) begin
+      if (rg_wr_req_beat == -1) begin
          llc.toM.deq;
          rg_wr_req_beat <= 0;
       end else // increment flit counter
@@ -195,13 +193,13 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
 
       // on each flit ...
       // ================
-      Vector #(8, Bit #(8)) line_strb = unpack(pack(wb.byteEn));
-      Vector #(8, Data) line_data = unpack(pack(wb.data));
+      Vector #(LineSzData, Bit #(8)) line_strb = unpack(pack(wb.byteEn));
+      Line line_data = wb.data;
       // send AXI4 W flit
       master_xactor.i_wr_data.enq(AXI4_Wr_Data {
         wdata:  line_data[rg_wr_req_beat],
         wstrb:  line_strb[rg_wr_req_beat],
-        wlast:  rg_wr_req_beat == 7,
+        wlast:  rg_wr_req_beat == -1,
         wuser:  fabric_default_user});
    endrule
 
