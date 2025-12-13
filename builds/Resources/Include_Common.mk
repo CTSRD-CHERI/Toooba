@@ -103,9 +103,9 @@ isa_tests:
 .PHONY: benchmarks
 benchmarks:
 	@echo "Running benchmarks; saving logs in Logs/"
-	$(REPO)/Tests/Run_benchmarks.py  ./exe_HW_sim  $(REPO)  ./Logs
+	$(TESTS_DIR)/Run_benchmarks.py $(BENCHMARK_ARGS) ./exe_HW_sim  $(REPO)  ./Logs benchmark_results_$(TIMESTAMP).csv
 	@echo "Finished running benchmarks"
-	$(REPO)/Tests/benchmarks/report_log.sh Logs/*.bin.log
+	@column -s, -t < benchmark_results_$(TIMESTAMP).csv
 
 # ================================================================
 # Generate Bluespec CHERI tag controller source file
