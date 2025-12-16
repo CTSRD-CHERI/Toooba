@@ -20,7 +20,7 @@ REPO ?= $(CURDIR)/..
 ARCH ?= RV64ACDFIMSUxCHERI
 
 # Set number of cores for RISCY config
-CORE_NUM = 1
+CORE_NUM = 2
 
 # Set X and Y
 include $(REPO)/builds/Resources/Include_RISCY_Config.mk
