@@ -384,7 +384,7 @@ interface SplitLSQ;
     );
     // update objSeal. Called when ld resp is received for objId bitmap read
     method Action updateLdObjIdSeal(LdQTag tag, MemTaggedData d);
-    method ActionValue#(Maybe#(InstTag))  updateStObjIdSeal(StQTag t, MemTaggedData d);
+    method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc)))  updateStObjIdSeal(StQTag t, MemTaggedData d);
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, ByteOrTagEn shiftedBE, SBSearchRes sbRes
@@ -1401,7 +1401,9 @@ module mkSplitLSQ(SplitLSQ);
                     // Lr or MMIO: done, at commit, no older st
                     return ld_computed_deqLd[deqP] &&
                            ld_atCommit_deqLd[deqP] &&
-                           no_older_st;
+                           no_older_st &&
+                           // If we carried an objId address, wait for the seal result.
+                           (!isValid(ld_objIdPAddr_deqLd[deqP]) || isValid(ld_objIdSealOk_deqLd[deqP]));
                 end
             end
         end
@@ -1816,7 +1818,7 @@ module mkSplitLSQ(SplitLSQ);
         end
     endmethod
 
-    method ActionValue#(Maybe#(InstTag)) updateStObjIdSeal(StQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
+    method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc))) updateStObjIdSeal(StQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
         if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp:", fshow(tag), ", MemTaggedData:", fshow(d),
                              ", d[0]:", fshow(d.data[0]), ", d[1]:", fshow(d.data[1]));
         if(!st_waitWPRespObjId_updObjIdSeal[tag]) begin
@@ -1837,13 +1839,16 @@ module mkSplitLSQ(SplitLSQ);
             st_fault_updObjIdSeal[tag]       <= fault;
             st_objIdSealOk_updObjIdSeal[tag] <= Valid(!isSealed);
 
-            // If this is a non-MMIO store and the seal check passed (no fault),
-            // we can now mark it "done" at the ROB by returning its InstTag.
+            // If this is a non-MMIO *store* and the seal check passed (no
+            // fault), we can now mark it "done" at the ROB by returning its
+            // InstTag. Atomics share the store queue but should not pulse
+            // non-mmio-st-done here.
             let isNonMMIO  = !st_isMMIO_deqSt[tag];
             doAssert(isNonMMIO, "must be nonMMIO");
-            let becameDone = isNonMMIO && !isSealed;
+            let isStore    = (st_memFunc[tag] == St);
+            let becameDone = isStore && isNonMMIO && !isSealed;
             if (becameDone) begin
-                return Valid(st_instTag[tag]);
+                return Valid(tuple2(st_instTag[tag], st_memFunc[tag]));
             end
             else begin
                 return Invalid;
