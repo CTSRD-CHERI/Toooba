@@ -563,7 +563,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(x.ldstq_tag matches tagged St .stTag) begin
             MemTaggedData d = x.mem_func == Amo ? toMemData : shiftData; // XXX don't shift for AMO
             // do cap level check
-            if(getHardPerms(vaddr).capabilityLevel < getHardPerms(data).permissionStoreLevel) d.tag = False;
+            if(getHardPerms(data).capabilityLevel < (~getHardPerms(vaddr).permissionStoreLevel)) begin
+		        d.tag = False;
+	        end
             lsq.updateData(stTag, d);
 `ifdef PERFORMANCE_MONITORING
             EventsCore events = unpack(0);
