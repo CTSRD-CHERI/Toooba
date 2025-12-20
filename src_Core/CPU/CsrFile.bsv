@@ -879,8 +879,6 @@ module mkCsrFile #(Data hartid)(CsrFile);
             csrAddrCYCLE:      cycle_csr;
             csrAddrTIME:       time_csr;
             csrAddrINSTRET:    instret_csr;
-            csrAddrTERMINATE:  terminate_csr;
-            csrAddrSTATS:      stats_csr;
             // Supervisor CSRs
             csrAddrSSTATUS:    sstatus_csr;
             csrAddrSIE:        sie_csr;

@@ -5,9 +5,6 @@
 `CSR(CYCLE,      12'hc00)
 `CSR(TIME,       12'hc01)
 `CSR(INSTRET,    12'hc02)
-// user non-standard CSRs (TODO)
-`CSR(TERMINATE,  12'h800) // terminate (used to exit Linux)
-`CSR(STATS,      12'h801) // turn on/off perf counters
 // supervisor standard CSRs
 `CSR(SSTATUS,    12'h100)
 // no user trap handler, so no se/ideleg
