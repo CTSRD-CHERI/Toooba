@@ -675,25 +675,29 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // calculate bitmap offset and send to TLB here
         Maybe#(Addr) objIdVAddr = Invalid; // default invalid
         Bit#(7) objIdOffset = 'h0 ;
-        let kind = getColorAwareKind(x.rVal1, ccpt);
-        case(kind)
-            matches tagged COLORED .color:
-                if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && (ccp != '0) && isValidCap(x.rVal1) ) begin
-                    Bit#(64) byteIndex = zeroExtend(getCCType(x.rVal1) >> 3);   
-                    Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
-                    objIdVAddr = Valid(blockAddr + ccp);
-                    objIdOffset = truncate(getCCType(x.rVal1));
-                    $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
-                                        " objIdVAddr ", fshow(objIdVAddr), 
-                                        " objIdOffset:", fshow(objIdOffset),
-                                        " ccType:", fshow(getCCType(x.rVal1)),
-                                        " ccp:", fshow(ccp),
-                                        " ccpt:", fshow(ccpt)
-                    );
-                end
-            default:
-                if(verbose) $display("%0d",cur_cycle," [Color][MemExePipeline][rule:doExeMem]: not colored cap");
-        endcase
+
+        
+        if ((ccp != '0) && isValidCap(x.rVal1)) begin 
+          let kind = getColorAwareKind(x.rVal1, ccpt);
+          case(kind)
+              matches tagged COLORED .color:
+                  if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
+                      Bit#(64) byteIndex = zeroExtend(getCCType(x.rVal1) >> 3);   
+                      Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
+                      objIdVAddr = Valid(blockAddr + ccp);
+                      objIdOffset = truncate(getCCType(x.rVal1));
+                      $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
+                                          " objIdVAddr ", fshow(objIdVAddr), 
+                                          " objIdOffset:", fshow(objIdOffset),
+                                          " ccType:", fshow(getCCType(x.rVal1)),
+                                          " ccp:", fshow(ccp),
+                                          " ccpt:", fshow(ccpt)
+                      );
+                  end
+              default:
+                  if(verbose) $display("%0d",cur_cycle," [Color][MemExePipeline][rule:doExeMem]: not colored cap");
+          endcase
+       end
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
@@ -993,17 +997,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 doAssert(False, "must be in StQ");
             end
             reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, x.objIdAddr)));
-        end
-        else if (x.mem_func == Lr && !isMMIO &&
-                 !isValid(cause) && isValid(x.objIdAddr)) begin
-            LdQTag ldTag = ?;
-            if(x.ldstq_tag matches tagged Ld .t) begin
-                ldTag = t;
-            end
-            else begin
-                doAssert(False, "must be in LdQ");
-            end
-            reqObjIdSealLdQ.enq(tuple2(ldTag, fromMaybe(?, x.objIdAddr)));
         end
 
 `ifdef PERF_COUNT
@@ -1316,6 +1309,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             objSealRdType: None,
             pcHash: ?
         };
+        if (lsqDeqLd.objIdPAddr matches tagged Valid .a) begin
+            if(verbose) $display("%t : [doDeqLdQ_Lr_issue] Issuing objIdSeal for LR tag: %d", $time, lsqDeqLd.tag);
+            reqObjIdSealLdQ.enq(tuple2(zeroExtend(lsqDeqLd.tag), a));
+        end
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqLdQ_Lr_issue] ", fshow(lsqDeqLd), "; ", fshow(req));
         // check
@@ -1635,7 +1632,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         && !lsqDeqSt.isMMIO
         && (lsqDeqSt.memFunc == Sc || lsqDeqSt.memFunc == Amo)
         && waitLrScAmoMMIOResp == Invalid
-        && lsqDeqSt.objIdSealOk
 `ifndef TSO_MM
         && stb.noMatchStQ(lsqDeqSt.paddr, DataMemAccess(lsqDeqSt.shiftedBE))
         && (!lsqDeqSt.rel || stb.isEmpty)
@@ -1666,6 +1662,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             objSealRdType: None,
             pcHash: ?
         };
+        
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqStQ_ScAmo_issue] ", fshow(lsqDeqSt), "; ", fshow(req));
 `ifdef PERF_COUNT

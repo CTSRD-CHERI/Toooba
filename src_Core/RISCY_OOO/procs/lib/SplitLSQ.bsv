@@ -330,6 +330,7 @@ typedef struct {
     Maybe#(Trap)       fault;
     Bool               allowCap;
     Maybe#(LdKilledBy) killed;
+    Maybe#(Addr)      objIdPAddr;
 } LdQDeqEntry deriving (Bits, Eq, FShow);
 
 typedef struct {
@@ -571,7 +572,7 @@ endfunction
 function Bool extractObjIdSeal(MemTaggedData d, Bit#(7) offset);
     if(offset <64)
          return (d.data[0][offset] == 1'b1);
-     else 
+    else 
         return (d.data[1][offset-64] == 1'b1);
 endfunction
 
@@ -1398,12 +1399,12 @@ module mkSplitLSQ(SplitLSQ);
                            (!isValid(ld_objIdPAddr_deqLd[deqP]) || isValid(ld_objIdSealOk_deqLd[deqP]));
                 end
                 else begin
-                    // Lr or MMIO: done, at commit, no older st
-                    return ld_computed_deqLd[deqP] &&
-                           ld_atCommit_deqLd[deqP] &&
-                           no_older_st &&
-                           // If we carried an objId address, wait for the seal result.
-                           (!isValid(ld_objIdPAddr_deqLd[deqP]) || isValid(ld_objIdSealOk_deqLd[deqP]));
+                       
+                        // MMIO: done, at commit, no older st, do NOT wait for seal
+                        return ld_computed_deqLd[deqP] &&
+                               ld_atCommit_deqLd[deqP] &&
+                               no_older_st;
+                    
                 end
             end
         end
@@ -2251,7 +2252,8 @@ module mkSplitLSQ(SplitLSQ);
             shiftedBE: ld_shiftedBE_deqLd[deqP],
             fault: fault, //ld_fault_deqLd[deqP],
             allowCap: ld_allowCap[deqP],
-            killed: ld_killed_deqLd[deqP]
+            killed: ld_killed_deqLd[deqP],
+            objIdPAddr: ld_objIdPAddr_deqLd[deqP]
         };
     endmethod
 
