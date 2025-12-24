@@ -608,7 +608,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end 
         else if(x.origBE == CacheLine_NWZ) begin
             shiftBE = CacheLine_NWZ;
-        end
+        end else begin 
+            shiftBE = DataMemAccess(x.shiftBEData);
+	end
 
         CapPipe ddc = cast(inIfc.scaprf_rd(scrAddrDDC));
 
