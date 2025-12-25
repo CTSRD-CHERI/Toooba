@@ -649,7 +649,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                 allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                 capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
-                permitPoison: True, //getHardPerms(x.rVal1).permitPoison,
+                permitPoison: False, //getHardPerms(x.rVal1).permitPoison,
                 check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
                                           ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
 `ifdef KONATA
