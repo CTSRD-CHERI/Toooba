@@ -1231,7 +1231,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // send to mem
         Addr addr = lsqDeqSt.paddr;
         Bit#(2) alloc_policy = 2'b00;
-        if(lsqDeqSt.shiftedBE == CacheLine_NWZ) alloc_policy = 2'b01;
+        if(lsqDeqSt.shiftedBE == CacheLine_NWZ) alloc_policy = 2'b00;
 	else alloc_policy = 2'b00; 
         reqStQ.enq(tuple3(addr, alloc_policy,lsqDeqSt.pcHash));
         // record waiting for store resp
@@ -1268,7 +1268,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doIssueSB;
         let {sbIdx, en} <- stb.issue;
         Bit#(2) alloc_policy = 2'b00;
-        if( en.shiftedBE == CacheLine_NWZ) alloc_policy = 2'b01;
+        if( en.shiftedBE == CacheLine_NWZ) alloc_policy = 2'b00;
         else alloc_policy = 2'b00;
 	reqStQ.enq(tuple4(sbIdx, {en.addr, 0}, alloc_policy, en.pcHash));
         // perf: store mem latency

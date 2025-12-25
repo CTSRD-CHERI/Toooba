@@ -508,7 +508,8 @@ endfunction
 // check whether mem op addr is aligned w.r.t data size
 function Bool checkAddrAlign(Addr addr, ByteOrTagEn byteOrTagEn);
     let byteEn = byteOrTagEn.DataMemAccess;
-    if (byteOrTagEn == TagMemAccess || byteOrTagEn == CacheLine_NWZ) begin
+    //if (byteOrTagEn == TagMemAccess || byteOrTagEn == CacheLine_NWZ) begin
+    if (byteOrTagEn == TagMemAccess) begin 
         return isCLineAlignAddr(addr);
     end
     else if(byteEn[15]) begin
