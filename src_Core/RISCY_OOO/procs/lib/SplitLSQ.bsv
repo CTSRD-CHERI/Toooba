@@ -240,6 +240,7 @@ typedef struct {
     // byte enable after shift to align with dword boudary. This is valid
     // for all types of memory accesses.
     MemDataByteEn     shiftedBE;
+    Bit#(2)           alloc_policy;
     // St/Sc/Amo data
     // for St/Sc: store data after shift to align with dword boudary
     // for Amo: data is **NOT** shifted, this doesn't affect forwarding to Ld,
@@ -340,6 +341,7 @@ typedef struct {
     Addr              paddr;
     Bool              isMMIO;
     MemDataByteEn     shiftedBE;
+    Bit#(2)           alloc_policy;
     MemTaggedData     stData;
     Bool              allowCapAmoLd;
     Maybe#(Trap)      fault;
@@ -376,7 +378,7 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(2) alloc_policy
     );
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
@@ -855,6 +857,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, Bit#(2)))               st_alloc_policy <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Trap)))         st_fault     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_allowCapAmoLd <- replicateM(mkEhr(?));
@@ -889,6 +892,11 @@ module mkSplitLSQ(SplitLSQ);
     let st_shiftedBE_issue   = getVEhrPort(st_shiftedBE, 1);
     let st_shiftedBE_deqSt   = getVEhrPort(st_shiftedBE, 1);
 
+    let st_alloc_policy_updAddr = getVEhrPort(st_alloc_policy, 0); // write
+    let st_alloc_policy_issue   = getVEhrPort(st_alloc_policy, 1);
+    let st_alloc_policy_deqSt   = getVEhrPort(st_alloc_policy, 1);
+
+   
     let st_stData_issue   = getVEhrPort(st_stData, 0);
     let st_stData_deqSt   = getVEhrPort(st_stData, 0);
     let st_stData_updData = getVEhrPort(st_stData, 0); // write
@@ -1509,7 +1517,7 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bit#(2) alloc_policy
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1585,7 +1593,7 @@ module mkSplitLSQ(SplitLSQ);
             st_paddr_updAddr[tag] <= pa;
             st_isMMIO_updAddr[tag] <= mmio;
             st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
-
+	    st_alloc_policy_updAddr[tag] <= alloc_policy;
             // A store always try to kill younger loads
             doKill = True;
             StQVirTag virTag = stVirTags[tag];
@@ -2091,6 +2099,7 @@ module mkSplitLSQ(SplitLSQ);
             paddr: st_paddr_deqSt[deqP],
             isMMIO: st_isMMIO_deqSt[deqP],
             shiftedBE: st_shiftedBE_deqSt[deqP],
+            alloc_policy: st_alloc_policy_deqSt[deqP],
             stData: st_stData_deqSt[deqP],
             allowCapAmoLd: st_allowCapAmoLd_deqSt[deqP],
             fault: st_fault_deqSt[deqP],

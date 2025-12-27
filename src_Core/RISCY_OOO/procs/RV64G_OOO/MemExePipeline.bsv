@@ -123,6 +123,7 @@ typedef struct {
     LdStQTag ldstq_tag;
     // result
     ByteOrTagEn shiftedBE;
+    Bit#(2)     alloc_policy;
     CapPipe vaddr;         // virtual addr
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
@@ -627,6 +628,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: x.tag,
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: shiftBE,
+                alloc_policy: shiftBE == CacheLine_NWZ ? 2'b01 : 2'b00,
                 vaddr: x.vaddr,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.rVal2,
@@ -756,7 +758,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.alloc_policy
         );
 
         // issue non-MMIO Ld which has no exception and is not waiting for
@@ -1004,6 +1006,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif // SELF_INV_CACHE
             op: Lr,
             byteEn: ?,
+            alloc_policy: ?, 
             data: ?,
             amoInst: ?,
             loadTags: False,
@@ -1343,6 +1346,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             // data for Amo). AMO doesn't use BE. Sc uses **shifted** BE and
             // data (firstSt.stData is shifted for Sc).
             byteEn: lsqDeqSt.shiftedBE,
+            alloc_policy: lsqDeqSt.alloc_policy,
             data: lsqDeqSt.stData,
             amoInst: AmoInst {
                 func: lsqDeqSt.amoFunc,
@@ -1574,6 +1578,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             toState: loadTags ? T : (multicore ? S : E), // in case of single core, just fetch to E
             op: Ld,
             byteEn: ?,
+            alloc_policy: ?,
             data: ?,
             amoInst: ?,
             loadTags: loadTags,
@@ -1595,6 +1600,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             toState: M,
             op: St,
             byteEn: ?,
+            alloc_policy: ?,  
             data: ?,
             amoInst: ?,
             loadTags: False,
