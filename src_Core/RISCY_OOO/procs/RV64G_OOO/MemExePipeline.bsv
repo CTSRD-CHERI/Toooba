@@ -1580,7 +1580,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             toState: loadTags ? T : (multicore ? S : E), // in case of single core, just fetch to E
             op: Ld,
             byteEn: ?,
-            alloc_policy: ?,
+            alloc_policy: 2'b00,
             data: ?,
             amoInst: ?,
             loadTags: loadTags,
@@ -1602,7 +1602,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             toState: M,
             op: St,
             byteEn: ?,
-            alloc_policy: ?,  
+            alloc_policy: 2'b00,  
             data: ?,
             amoInst: ?,
             loadTags: False,
