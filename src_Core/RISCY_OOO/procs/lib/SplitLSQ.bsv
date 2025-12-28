@@ -365,6 +365,7 @@ interface SplitLSQ;
                         SpecBits spec_bits,
                         Bit#(16) pcHash);
     // A mem inst needs orignal BE (not shifted) at addr translation
+    method Bit#(2) getAllocPolicy(LdStQTag t);
     method ByteOrTagEn getOrigBE(LdStQTag t);
     // Retrieve information when we want to wakeup RS early in case
     // Ld/Lr/Sc/Amo hits in cache
@@ -850,6 +851,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(StQMemFunc))              st_memFunc   <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(AmoFunc))                 st_amoFunc   <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(MemDataByteEn))           st_byteEn    <- replicateM(mkRegU);
+    Vector#(StQSize, Reg#(Bit#(2)))                 st_alloc_policy    <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Bool))                    st_acq       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Bool))                    st_rel       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Maybe#(PhyDst)))          st_dst       <- replicateM(mkRegU);
@@ -857,7 +859,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
-    Vector#(StQSize, Ehr#(2, Bit#(2)))               st_alloc_policy <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, Bit#(2)))              st_alloc_policy_ehr <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Trap)))         st_fault     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_allowCapAmoLd <- replicateM(mkEhr(?));
@@ -892,9 +894,9 @@ module mkSplitLSQ(SplitLSQ);
     let st_shiftedBE_issue   = getVEhrPort(st_shiftedBE, 1);
     let st_shiftedBE_deqSt   = getVEhrPort(st_shiftedBE, 1);
 
-    let st_alloc_policy_updAddr = getVEhrPort(st_alloc_policy, 0); // write
-    let st_alloc_policy_issue   = getVEhrPort(st_alloc_policy, 1);
-    let st_alloc_policy_deqSt   = getVEhrPort(st_alloc_policy, 1);
+    let st_alloc_policy_updAddr = getVEhrPort(st_alloc_policy_ehr, 0); // write
+    let st_alloc_policy_issue   = getVEhrPort(st_alloc_policy_ehr, 1);
+    let st_alloc_policy_deqSt   = getVEhrPort(st_alloc_policy_ehr, 1);
 
    
     let st_stData_issue   = getVEhrPort(st_stData, 0);
@@ -1382,7 +1384,13 @@ module mkSplitLSQ(SplitLSQ);
             endmethod
             method upd = ?;
     endinterface);
-
+    method Bit#(2) getAllocPolicy(LdStQTag t);
+        return (case(t) matches 
+            tagged Ld .tag: ( 2'b00); 
+            tagged St .tag: (st_alloc_policy[tag]);
+            default: ?; 
+	endcase);
+    endmethod 
     method ByteOrTagEn getOrigBE(LdStQTag t);
         return (case(t) matches
             tagged Ld .tag: (ld_byteOrTagEn[tag]);

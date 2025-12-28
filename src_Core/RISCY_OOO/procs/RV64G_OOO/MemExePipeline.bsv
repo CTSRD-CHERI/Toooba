@@ -108,6 +108,7 @@ typedef struct {
     CapPipe rVal1;
     CapPipe rVal2;
     CapPipe vaddr;
+    Bit#(2) alloc_policy;
     CapChecks cap_checks;
     ByteOrTagEn origBE;
     MemDataByteEn shiftBEData;
@@ -584,6 +585,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: x.tag,
                 ldstq_tag: x.ldstq_tag,
                 rVal1: rVal1,
+                alloc_policy: lsq.getAllocPolicy(x.ldstq_tag),
                 rVal2: rVal2,
                 vaddr: vaddr,
                 cap_checks: x.cap_checks,
@@ -628,7 +630,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: x.tag,
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: shiftBE,
-                alloc_policy: shiftBE == CacheLine_NWZ ? 2'b01 : 2'b00,
+                alloc_policy: x.alloc_policy,
                 vaddr: x.vaddr,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.rVal2,

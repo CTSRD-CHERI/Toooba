@@ -172,6 +172,7 @@ typedef struct {
     MemFunc        mem_func; // Ld, St, Lr, Sc, Amo
     AmoFunc        amo_func;
     Bool           unsignedLd;
+    Bit#(2)        alloc_policy;
     ByteOrTagEn    byteOrTagEn; // takes place of double word
     Bool           aq;
     Bool           rl;
