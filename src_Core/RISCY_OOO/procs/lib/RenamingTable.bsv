@@ -148,6 +148,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(SupSize, PulseWire) commitEn <- replicateM(mkPulseWire);
     RWire#(RTWrongSpec) wrongSpecEn <- mkRWire;
 
+    // :)
+    Vector(NumPhyReg, Reg#(TLog#(MaxPhyRegRefs))) refCounts <- replicateM(mkReg(0));
+
     // ordering regs
     Vector#(SupSize, Reg#(Bool)) commit_SB_rename <- replicateM(mkRevertingVirtualReg(True));
     Reg#(Bool) commit_SB_wrongSpec <- mkRevertingVirtualReg(True);
@@ -242,6 +245,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     // free phy reg being overwritten in the renaming_table (arch reg is don't care)
                     PhyRIndx freed_phy_reg = renaming_table[rtIdx][rt_commit_port(i)];
                     new_renamings_phy[curDeqP] <= freed_phy_reg;
+                    refCounts[freed_phy_reg] <= refCounts[freed_phy_reg] - 1;
                     valid[curDeqP][valid_commit_port] <= False;
                     // update renaming_table
                     renaming_table[rtIdx][rt_commit_port(i)] <= commit_phy_reg;

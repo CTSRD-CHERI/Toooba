@@ -859,6 +859,50 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         return rdy[idx] ? Valid (idx) : Invalid;
     endfunction
 
+    // :)
+    function Maybe#(MoveType) getMoveType(DecodedInst dInst, ArchRegs arch_regs);
+        Bool has_imm = isValid(dInst.imm);
+        Bool imm_0 = (dInst.imm == tagged Valid 0);
+        Bool src1_x0 = (arch_regs.src1 == tagged Valid (tagged Gpr 0));
+        Bool src2_x0 = (arch_regs.src2 == tagged Valid (tagged Gpr 0));
+        
+        Maybe#(ArchRIndx) move_src = tagged Invalid;
+
+        case (dInst.execFunc) matches
+            tagged Alu Add: begin
+                if (has_imm && imm_0) begin
+                    // addi rd rs 0
+                    move_src = arch_regs.src1;
+                end else if (!has_imm && src1_x0) begin
+                    // add rd x0 rs
+                    move_src = arch_regs.src2;
+                end else if (!has_imm && src2_x0) begin
+                    // add rd rs x0
+                    move_src = arch_regs.src1;
+                end
+            end
+            default: begin end
+        endcase
+
+        Maybe#(MoveType) result = tagged Invalid;
+
+        // if no move found then move_src invalid
+        if (move_src matches tagged Valid .rs 
+            &&& arch_regs.dst matches tagged Valid .rd) begin
+            if (rs == rd || rd == tagged Gpr 0) begin
+                //
+                result = tagged Valid (tagged EffectiveNop);
+            end else begin
+                result = tagged Valid (tagged Move {
+                    src: rs,
+                    dst: rd
+                });
+            end
+        end
+
+        return result;
+    endfunction
+
     // rename correct path inst
     rule doRenaming(
         !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
@@ -933,6 +977,18 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                 let cause = x.cause;
 
                 CapMem fallthrough_pc = addPc(pc, ((orig_inst[1:0] == 2'b11) ? 4 : 2));
+
+                $display("hihihihi hello");
+
+                Maybe#(MoveType) moveType = getMoveType(dInst, arch_regs);
+
+                if(moveType matches tagged Valid (tagged Move .*)) begin
+                    $display("effective move :)", fshow(dInst), fshow(arch_regs));
+                end
+
+                if (moveType matches tagged Valid (tagged EffectiveNop)) begin
+                    $display("effective move nop :)");
+                end
 
                 // check for wrong path, if wrong path, don't process it, leave to the other rule in next cycle
                 if(!epochManager.checkEpoch[i].check(main_epoch)) begin
@@ -1024,7 +1080,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                         tagged CapModify  .cm:  to_exec = True;
                     endcase
                     case (dInst.execFunc) matches
-                        tagged Alu .alu:        to_exec = True;
+                        tagged Alu .alu:        to_exec = True; // TODO You dont want this for effective move :)
                         tagged Br .br:          to_exec = True;
                         tagged MulDiv .muldiv:  to_FpuMulDiv = True;
                         tagged Fpu .fpu:        to_FpuMulDiv = True;

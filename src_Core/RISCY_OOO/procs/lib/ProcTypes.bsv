@@ -169,7 +169,9 @@ typedef union tagged {
 typedef TExp#(SizeOf#(ArchRIndx)) NumArchReg;
 
 typedef TAdd#(NumArchReg, `ROB_SIZE) NumPhyReg;
+typedef TAdd#(NumArchReg, `ROB_SIZE) MaxPhyRegRefs;
 typedef Bit#(TLog#(NumPhyReg)) PhyRIndx;
+
 
 typedef struct {
     PhyRIndx indx;
@@ -593,6 +595,14 @@ typedef struct {
     ArchRegs    regs;
     Bool        illegalInst;
 } DecodeResult deriving(Bits, Eq, FShow);
+
+typedef union tagged {
+    void EffectiveNop;
+    struct {
+        ArchRIndx src;
+        ArchRIndx dst;
+    } Move;
+} MoveType deriving(Bits, Eq, FShow);
 
 typedef enum {
     Src1,
