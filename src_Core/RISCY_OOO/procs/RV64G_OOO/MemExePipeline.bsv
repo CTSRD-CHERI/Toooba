@@ -160,7 +160,7 @@ typedef enum {
 typedef struct {
     LineMemDataOffset offset;
     MemDataByteEn shiftedBE;
-    MemTaggedData shiftedData;
+    MemTaggedData shiftedData; 
 } WaitStResp deriving(Bits, Eq, FShow);
 
 //SpecFifo#(2,IncorrectSpec,1,1) incorrectSpec_ff <- mkSpecFifoCF(True);
@@ -273,7 +273,7 @@ interface MemExePipeline;
 endinterface
 
 module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
-    Bool verbose = False;
+    Bool verbose = True;
 
     // we change cache request in case of single core, becaues our MSI protocol
     // is not good with single core
@@ -352,9 +352,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, Tuple4#(LdQTag, Addr, Bool, Bit#(16))) reqLdQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
-    Fifo#(1, Tuple2#(Addr, Bit#(16))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple3#(Addr, Bit#(2), Bit#(16))) reqStQ <- mkBypassFifo;
 `else
-    Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(16))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(2), Bit#(16))) reqStQ <- mkBypassFifo;
 `endif
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
@@ -1229,7 +1229,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
         // send to mem
         Addr addr = lsqDeqSt.paddr;
-        reqStQ.enq(tuple2(addr, lsqDeqSt.pcHash));
+        reqStQ.enq(tuple3(addr, lsqDeqSt.alloc_policy, lsqDeqSt.pcHash));
         // record waiting for store resp
         waitStRespQ.enq(WaitStResp {
             offset: getLineMemDataOffset(addr),
@@ -1590,7 +1590,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     (* descending_urgency = "sendLdToMem, sendStToMem" *) // prioritize Ld over St
     rule sendStToMem;
 `ifdef TSO_MM
-        let {addr, pcHash} <- toGet(reqStQ).get;
+        let {addr, alloc_policy, pcHash} <- toGet(reqStQ).get;
         DProcReqId id = 0;
 `else
         let {sbIdx, addr, pcHash} <- toGet(reqStQ).get;
@@ -1602,7 +1602,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             toState: M,
             op: St,
             byteEn: ?,
-            alloc_policy: 2'b00,  
+            alloc_policy: alloc_policy,  
             data: ?,
             amoInst: ?,
             loadTags: False,

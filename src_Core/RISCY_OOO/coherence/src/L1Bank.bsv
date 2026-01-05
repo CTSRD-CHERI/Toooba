@@ -620,8 +620,12 @@ endfunction
             St: begin
                 // resp processor, get write data & BE
                 let {be, wrLine} <- procResp.respSt(req.id);
-                // calculate new data to write
-                newLine = getUpdatedLine(curLine, be, wrLine);
+                    // calculate new data to write
+                if(req.alloc_policy != 2'b01) begin
+                    newLine = getUpdatedLine(curLine, be, wrLine);
+                end else begin 
+                    newLine = getUpdatedLine(curLine, be, unpack(0));
+                end
             end
             default: begin
                 doAssert(False, "unknown mem op");

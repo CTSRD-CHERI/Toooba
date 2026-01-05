@@ -634,11 +634,6 @@ endfunction
             fshow(cRq), " ; ",
             fshow(cSlot), " ; "
         );
-        // performance counter: normal miss lat and cnt
-        // Check lowest bit of child ID to determine if this was an ICache access
-        if (!cRqIsPrefetch[n]) begin
-            incrMissCnt(n, False, cRq.child[0] == 1);
-        end
     endrule 
     
     rule mRsTransfer(rsFromMQ.first.id.refill);
@@ -705,7 +700,19 @@ endfunction
         // take actions according to type
         if(t == Ld) begin
             // only load mem: can be child or dma req
-            if(cRq.alloc_policy == 2'b00) begin 
+            if(cRq.alloc_policy == 2'b01) begin 
+                memRsT nwz_msg = MemRsMsg {
+                  data: unpack(0),
+                  child: ?,
+                  id:  LdMemRqId {
+                       // child rq needs refill cache line, dma rq does not
+                       refill: True,
+                       mshrIdx: n
+                   }
+               };
+               nwz_rsFromMQ.enq(nwz_msg);
+               $display("%t LL %m sendToM: non-write allocate: ", $time, fshow(nwz_msg));
+            end else begin 
                 toMemT msg = Ld (LdMemRq {
                    addr: cRq.addr,
                    child: ?,
@@ -717,20 +724,7 @@ endfunction
                    tag_req: cRq.toState == T
                });
                $display("%t LL %m sendToM: load only: ", $time, fshow(msg));
-               
                toMQ.enq(msg);
-            end else begin 
-                memRsT nwz_msg = MemRsMsg {
-                  data: ?,
-                  child: ?,
-                  id:  LdMemRqId {
-                       // child rq needs refill cache line, dma rq does not
-                       refill: True,
-                       mshrIdx: n
-                   }
-               };
-               nwz_rsFromMQ.enq(nwz_msg);
-               $display("%t LL %m sendToM: non-write allocate: ", $time, fshow(nwz_msg));
             end 
             toMInfoQ.deq; // deq info
            if (verbose)
