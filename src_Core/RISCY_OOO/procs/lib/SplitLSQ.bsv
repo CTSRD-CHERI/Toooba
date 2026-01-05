@@ -493,12 +493,12 @@ function Bool sameCachelineAlignedAddr(Addr a, Addr b);
 endfunction
 
 // whether two memory accesses overlap
-function Bool overlapAddr(Addr addr_1, ByteOrTagEn shift_be_1,
-                          Addr addr_2, ByteOrTagEn shift_be_2);
+function Bool overlapAddr(Addr addr_1, ByteOrTagEn shift_be_1, Bit#(2) alloc_policy_1,
+                          Addr addr_2, ByteOrTagEn shift_be_2, Bit#(2) alloc_policy_2);
     Bool be_overlap = (pack(shift_be_1.DataMemAccess) & pack(shift_be_2.DataMemAccess)) != 0;
     Bool dataOverlap = be_overlap && sameDataAlignedAddr(addr_1, addr_2);
     Bool tagOverlap = sameCachelineAlignedAddr(addr_1, addr_2);
-    return (shift_be_1 == TagMemAccess || shift_be_2 == TagMemAccess) ? tagOverlap : dataOverlap;
+    return (shift_be_1 == TagMemAccess || shift_be_2 == TagMemAccess || alloc_policy_1 == 2'b01 || alloc_policy_2 == 2'b01) ? tagOverlap : dataOverlap;
 endfunction
 
 // check shiftBE1 covers shiftBE2
@@ -509,9 +509,9 @@ function Bool be1CoverBe2(ByteOrTagEn shift_be_1, ByteOrTagEn shift_be_2);
 endfunction
 
 // check whether mem op addr is aligned w.r.t data size
-function Bool checkAddrAlign(Addr addr, ByteOrTagEn byteOrTagEn);
+function Bool checkAddrAlign(Addr addr, ByteOrTagEn byteOrTagEn, Bit#(2) alloc_policy);
     let byteEn = byteOrTagEn.DataMemAccess;
-    if (byteOrTagEn == TagMemAccess) begin
+    if (byteOrTagEn == TagMemAccess || alloc_policy == 2'b01 ) begin
         return isCLineAlignAddr(addr);
     end
     else if(byteEn[15]) begin
@@ -1644,9 +1644,10 @@ module mkSplitLSQ(SplitLSQ);
             function Bool needKill(LdQTag i);
                 Bool valid = ld_valid_updAddr[i];
                 Bool younger = youngerLds[i];
-                Bool overlap = overlapAddr(pa, shift_be,
+                Bool overlap = overlapAddr(pa, shift_be, 2'b00,
                                            ld_paddr_updAddr[i],
-                                           ld_shiftedBE_updAddr[i]);
+                                           ld_shiftedBE_updAddr[i],
+					   2'b00);
                 // figure out if the load reads a stale value. Note that
                 // checking executing bit is enough: every done load must also
                 // have executing bit set.
@@ -1769,9 +1770,10 @@ module mkSplitLSQ(SplitLSQ);
         function Bool isOverlapSt(StQTag i);
             Bool valid_older = validOlderSts[i];
             Bool computed = st_computed_issue[i];
-            Bool overlap = overlapAddr(pa, shift_be,
+            Bool overlap = overlapAddr(pa, shift_be, 2'b00,
                                        st_paddr_issue[i],
-                                       DataMemAccess(st_shiftedBE_issue[i]));
+                                       DataMemAccess(st_shiftedBE_issue[i]),
+				       st_alloc_policy_issue[i]);
             return valid_older && computed && overlap;
         endfunction
         Vector#(StQSize, Bool) overlapSts = map(isOverlapSt,
@@ -1840,9 +1842,10 @@ module mkSplitLSQ(SplitLSQ);
             Bool acquire = ld_acq[i];
             Bool computed = ld_computed_issue[i];
             Bool unissued = !ld_executing_issue[i];
-            Bool overlap = overlapAddr(pa, shift_be,
+            Bool overlap = overlapAddr(pa, shift_be, 2'b00,
                                        ld_paddr_issue[i],
-                                       ld_shiftedBE_issue[i]);
+                                       ld_shiftedBE_issue[i],
+				       2'b00);
             return valid && older &&
                    (acquire || multicore && computed && unissued && overlap);
         endfunction
@@ -1857,9 +1860,10 @@ module mkSplitLSQ(SplitLSQ);
             Bool valid_older = validOlderSts[i];
             Bool acquire = st_acq[i];
             Bool computed = st_computed_issue[i];
-            Bool overlap = overlapAddr(pa, shift_be,
+            Bool overlap = overlapAddr(pa, shift_be, alloc_policy,
                                        st_paddr_issue[i],
-                                       DataMemAccess(st_shiftedBE_issue[i]));
+                                       DataMemAccess(st_shiftedBE_issue[i]),
+				       st_alloc_policy_issue[i]);
             return valid_older && (acquire || computed && overlap);
         endfunction
         Vector#(StQSize, Bool) checkSts = map(isStNeedCheck,
@@ -2123,7 +2127,7 @@ module mkSplitLSQ(SplitLSQ);
 
         // sanity check
         if(!isValid(st_fault_deqSt[deqP])) begin
-            doAssert(checkAddrAlign(st_paddr_deqSt[deqP], DataMemAccess(st_byteEn[deqP])),
+            doAssert(checkAddrAlign(st_paddr_deqSt[deqP], DataMemAccess(st_byteEn[deqP]), st_alloc_policy_deqSt[deqP]),
                      "addr BE should be naturally aligned");
             doAssert(st_specBits_deqSt[deqP] == 0,
                      "must have zero spec bits");

@@ -636,7 +636,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 store_data: x.rVal2,
                 store_data_BE: origBE,
 `endif
-                misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
+                misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE, x.alloc_policy),
                 capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                 allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                 capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
