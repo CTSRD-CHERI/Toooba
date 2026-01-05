@@ -299,7 +299,7 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func, Bit# (21) c
             tagged AndPerm                :
                 setPerms(a_mut, pack(getPerms(a)) & truncate(getAddr(b)));
             tagged CCSetType   :
-                setColor(a_mut, truncate(getAddr(b))); 
+                setCCType(a_mut, truncate(getAddr(b))); 
             tagged SetFlags               : 
                 setFlags(a_mut, truncate(getAddr(b)));
             tagged FromPtr                :
