@@ -90,6 +90,7 @@ typedef struct {
 module mkRegRenamingTable(RegRenamingTable) provisos (
     NumAlias#(size, TSub#(NumPhyReg, NumArchReg)),
     Alias#(indexT, Bit#(TLog#(size))),
+    Alias#(countT, Bit#(TLog#(TAdd#(size, 1)))),
     Alias#(vTagT, Bit#(TLog#(TMul#(2, size)))) // virtual tag: 0 -- size*2-1
 );
     // ordering: commit < rename < correctSpec
@@ -128,20 +129,24 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(NumArchReg, Ehr#(SupSize, PhyRIndx)) renaming_table <- genWithM(compose(mkEhr, fromInteger));
 
     // A FIFO of
-    // - in-flight renaming: when valid = True i.e. within [enqP, deqP)
-    // - free phy reg: when valid = False i.e. outside [enqP, deqP)
+    // - in-flight renaming: when valid = True i.e. within [renamings_enqP, renamings_deqP)
     // We store the arch reg and phy reg separately to reduce EHR ports
     // XXX A valid in-flight renaming may have arch reg being invalid
     // This happens in case we claim a phy reg while the dst arch reg is invalid
     Vector#(size, Reg#(Maybe#(ArchRIndx))) new_renamings_arch <- replicateM(mkRegU);
-    function m#(Reg#(PhyRIndx)) genNewRenamingsPhy(Integer i) provisos (IsModule#(m, a__));
-        return mkReg(fromInteger(i + valueOf(NumArchReg))); // free phy regs initially
-    endfunction
-    Vector#(size, Reg#(PhyRIndx)) new_renamings_phy <- genWithM(genNewRenamingsPhy);
+    Vector#(size, Reg#(PhyRIndx)) new_renamings_phy <- replicateM(mkRegU);
     Vector#(size, Ehr#(2, Bool)) valid <- replicateM(mkEhr(False));
     Vector#(size, Ehr#(2, SpecBits)) spec_bits <- replicateM(mkEhr(0));
-    Reg#(indexT) enqP <- mkReg(0); // point to claim free phy reg
-    Reg#(indexT) deqP <- mkReg(0); // point to commit renaming and make phy reg free
+    Reg#(indexT) renamings_enqP <- mkReg(0); // point to claim free phy reg
+    Reg#(indexT) renamings_deqP <- mkReg(0); // point to commit renaming and make phy reg free
+
+    // A FIFO of free physical registers
+    function m#(Reg#(PhyRIndx)) genFreePhyRegs(Integer i) provisos (IsModule#(m, a__));
+        return mkReg(fromInteger(i + valueOf(NumArchReg))); // free phy regs initially
+    endfunction
+    Vector#(size, Reg#(PhyRIndx)) free_phy_regs <- genWithM(genFreePhyRegs);
+    Reg#(indexT) free_phy_enqP <- mkReg(0); // point to release new free phy reg
+    Reg#(indexT) free_phy_deqP <- mkReg(0); // point to claim free phy reg
 
     // wires/EHRs to record actions
     Vector#(SupSize, RWire#(RenameClaim)) claimEn <- replicateM(mkUnsafeRWire);
@@ -167,26 +172,48 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         return truncate(newIdx);
     endfunction
 
+    function indexT decrIndex(indexT idx, countT decr);
+        Bit#(TLog#(TAdd#(size, 1))) i = zeroExtend(idx);
+        Bit#(TLog#(TAdd#(size, 1))) d = zeroExtend(decr);
+        Bit#(TLog#(TAdd#(size, 1))) newIdx = i-d;
+        if(d > i) begin
+            newIdx = fromInteger(valueof(size)) - (d - i);
+        end
+        return truncate(newIdx);
+    endfunction
+
     // get the index to query renaming_table
     function Bit#(TLog#(NumArchReg)) getRTIndex(ArchRIndx arch) = pack(arch);
 
-    // vector of index to claim free phy regs for each rename port
-    Vector#(SupSize, indexT) claimIndex;
+    // vector of index to claim new in flight renaming for each rename port
+    Vector#(SupSize, indexT) renamingsClaimIndex;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-        claimIndex[i] = incrIndex(enqP, fromInteger(i));
+        renamingsClaimIndex[i] = incrIndex(renamings_enqP, fromInteger(i));
+    end
+
+    // vector of index to claim free phy regs for each rename port
+    Vector#(SupSize, indexT) freeClaimIndex;
+    for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+        freeClaimIndex[i] = incrIndex(free_phy_deqP, fromInteger(i));
     end
 
     // vector of index to commit phy regs for each commit port
-    Vector#(SupSize, indexT) commitIndex;
+    Vector#(SupSize, indexT) renamingsCommitIndex;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-        commitIndex[i] = incrIndex(deqP, fromInteger(i));
+        renamingsCommitIndex[i] = incrIndex(renamings_deqP, fromInteger(i));
     end
 
-    // similar to LSQ, get virtual tag by using enqP as pivot (enqP is changed at end of cycle)
-    // valid entry i --> i < enqP ? i + size : i
+    // vector of index to release new free phy regs for each commit port
+    Vector#(SupSize, indexT) freeReleaseIndex;
+    for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+        freeReleaseIndex[i] = incrIndex(free_phy_enqP, fromInteger(i));
+    end
+
+    // similar to LSQ, get virtual tag by using renamings_enqP as pivot (renamings_enqP is changed at end of cycle)
+    // valid entry i --> i < renamings_enqP ? i + size : i
     // NOTE that virtual tag only works for **valid** entry
     function vTagT getVTag(indexT i);
-        return i < enqP ? zeroExtend(i) + fromInteger(valueof(size)) : zeroExtend(i);
+        return i < renamings_enqP ? zeroExtend(i) + fromInteger(valueof(size)) : zeroExtend(i);
     endfunction
     Vector#(size, vTagT) vTags = map(getVTag, genWith(fromInteger));
 
@@ -234,40 +261,48 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         // apply commit actions
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
             if(commitEn[i]) begin
-                indexT curDeqP = commitIndex[i]; // deqP for new renamings
+                indexT curDeqP = renamingsCommitIndex[i];
+                indexT curFreeEnqP = freeReleaseIndex[i];
                 PhyRIndx commit_phy_reg = new_renamings_phy[curDeqP];
                 Maybe#(ArchRIndx) commit_arch_reg = new_renamings_arch[curDeqP];
+                // Since no move elimination yet, all commits will add to free list
                 if(commit_arch_reg matches tagged Valid .arch) begin
                     let rtIdx = getRTIndex(arch);
                     // free phy reg being overwritten in the renaming_table (arch reg is don't care)
                     PhyRIndx freed_phy_reg = renaming_table[rtIdx][rt_commit_port(i)];
-                    new_renamings_phy[curDeqP] <= freed_phy_reg;
+                    free_phy_regs[curFreeEnqP] <= freed_phy_reg;
                     valid[curDeqP][valid_commit_port] <= False;
                     // update renaming_table
                     renaming_table[rtIdx][rt_commit_port(i)] <= commit_phy_reg;
                 end
                 else begin
                     // free the phy reg claimed by this renaming (arch reg is don't care)
+                    free_phy_regs[curFreeEnqP] <= commit_phy_reg;
                     valid[curDeqP][valid_commit_port] <= False;
+
                 end
                 // sanity check
                 doAssert(valid[curDeqP][valid_commit_port], "committing entry must be valid");
             end
         end
-        // move deqP: find the first non-commit port
+        // move renamings_deqP and free_phy_enqP: find the first non-commit port
         function Bool notCommit(SupWaySel i) = !commitEn[i];
         indexT nextDeqP;
+        indexT nextFreeEnqP;
         if(find(notCommit, supIdxVec) matches tagged Valid .idx) begin
-            nextDeqP = commitIndex[idx];
+            nextDeqP = renamingsCommitIndex[idx];
+            nextFreeEnqP = freeReleaseIndex[idx];
             // sanity check: commit is done consecutively
             for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
                 doAssert((fromInteger(i) < idx) == commitEn[i], "commit must be consecutive");
             end
         end
         else begin
-            nextDeqP = incrIndex(deqP, fromInteger(valueof(SupSize)));
+            nextDeqP = incrIndex(renamings_deqP, fromInteger(valueof(SupSize)));
+            nextFreeEnqP = incrIndex(free_phy_enqP, fromInteger(valueof(SupSize)));
         end
-        deqP <= nextDeqP;
+        renamings_deqP <= nextDeqP;
+        free_phy_enqP <= nextFreeEnqP;
 
         // do wrongSpec OR claim free phy reg
         if(wrongSpecEn.wget matches tagged Valid .x) begin
@@ -287,71 +322,89 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
             endaction
             endfunction
             joinActions(map(kill, idxVec));
-            // move enqP: find the oldest **valid** entry being killed
+
+            // find **valid** entries being killed
             Vector#(size, Bool) killValid = zipWith( \&& , isKill , readVEhr(valid_wrongSpec_port, valid) );
-            indexT nextEnqP = enqP;
+
+            // re-free the most recently dequeued free physical registers (1 for each killed valid renaming)
+            countT numKilled = 0;
+            for(Integer i = 0; i < valueof(size); i = i+1) begin
+                if(killValid[i]) begin 
+                    numKilled = numKilled+1;
+                end
+            end
+            free_phy_deqP <= decrIndex(free_phy_deqP, numKilled);
+
+            // move renamings_enqP: find the oldest **valid** entry being killed
+            indexT nextEnqP = renamings_enqP;
             if(findOldest(killValid) matches tagged Valid .idx) begin
                 nextEnqP = idx;
             end
-            enqP <= nextEnqP;
+            renamings_enqP <= nextEnqP;
         end
         else begin
             // claim phy reg
             for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
                 if(claimEn[i].wget matches tagged Valid .claim) begin
-                    indexT curEnqP = claimIndex[i];
-                    new_renamings_arch[curEnqP] <= claim.arch; // keep phy reg unchanged
+                    indexT curEnqP = renamingsClaimIndex[i];
+                    indexT curFreeDeqP = freeClaimIndex[i];
+                    new_renamings_arch[curEnqP] <= claim.arch;
+                    new_renamings_phy[curEnqP] <= free_phy_regs[curFreeDeqP];
                     valid[curEnqP][valid_claim_port] <= True;
                     spec_bits[curEnqP][sb_claim_port] <= claim.specBits;
                     // sanity check
                     doAssert(!valid[curEnqP][valid_get_port], "claiming entry must be invalid");
-                    doAssert(claim.phy == new_renamings_phy[curEnqP], "phy reg should match");
+                    doAssert(claim.phy == free_phy_regs[curFreeDeqP], "phy reg should match");
                 end
             end
-            // move enqP: find the first non-claim port
+            // move renamings_enqP and free_phy_deqP: find the first non-claim port
             function Bool notClaim(SupWaySel i) = !isValid(claimEn[i].wget);
             indexT nextEnqP;
+            indexT nextFreeDeqP;
             if(find(notClaim, supIdxVec) matches tagged Valid .idx) begin
-                nextEnqP = claimIndex[idx];
+                nextEnqP = renamingsClaimIndex[idx];
+                nextFreeDeqP = freeClaimIndex[idx];
                 // sanity check: rename is consecutive
                 for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
                     doAssert((fromInteger(i) < idx) == isValid(claimEn[i].wget), "claim is consecutive");
                 end
             end
             else begin
-                nextEnqP = incrIndex(enqP, fromInteger(valueof(SupSize)));
+                nextEnqP = incrIndex(renamings_enqP, fromInteger(valueof(SupSize)));
+                nextFreeDeqP = incrIndex(free_phy_deqP, fromInteger(valueof(SupSize)));
             end
-            enqP <= nextEnqP;
+            renamings_enqP <= nextEnqP;
+            free_phy_deqP <= nextFreeDeqP;
         end
     endrule
 
 `ifdef BSIM
     // sanity check in simulation
-    // all valid entry are within [deqP, enqP), outsiders are invalid entries
+    // all valid entry are within [renamings_deqP, renamings_enqP), outsiders are invalid entries
     (* fire_when_enabled, no_implicit_conditions *)
     rule sanityCheck;
         Bool empty = all( \== (False), readVEhr(0, valid) );
         function Bool in_range(indexT i);
-            // i is within [deqP, enqP)
+            // i is within [renamings_deqP, renamings_enqP)
             if(empty) begin
                 return False;
             end
             else begin
-                if(deqP < enqP) begin
-                    return deqP <= i && i < enqP;
+                if(renamings_deqP < renamings_enqP) begin
+                    return renamings_deqP <= i && i < renamings_enqP;
                 end
                 else begin
-                    return deqP <= i || i < enqP;
+                    return renamings_deqP <= i || i < renamings_enqP;
                 end
             end
         endfunction
         for(Integer i = 0; i < valueof(size); i = i+1) begin
             doAssert(in_range(fromInteger(i)) == valid[i][0],
-                "entries inside [deqP, enqP) should be valid, otherwise invalid"
+                "entries inside [renamings_deqP, renamings_enqP) should be valid, otherwise invalid"
             );
         end
-        doAssert(enqP <= fromInteger(valueof(size) - 1), "enqP < size");
-        doAssert(deqP <= fromInteger(valueof(size) - 1), "deqP < size");
+        doAssert(renamings_enqP <= fromInteger(valueof(size) - 1), "renamings_enqP < size");
+        doAssert(renamings_deqP <= fromInteger(valueof(size) - 1), "renamings_deqP < size");
     endrule
 `endif
 
@@ -401,7 +454,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
 
     // function to find a free phy reg to claim (at port claimPort) for a dst arch reg
     function PhyRIndx get_dst_renaming(Integer claimPort);
-        return new_renamings_phy[claimIndex[claimPort]];
+        return free_phy_regs[freeClaimIndex[claimPort]];
     endfunction
 
     function Bool isFpuReg(ArchRIndx arch_reg);
@@ -411,7 +464,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(SupSize, RTRename) renameIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
         // XXX we always claim a free phy reg, but only return it if arch dst reg is valid
-        Bool guard = !valid[claimIndex[i]][valid_get_port];
+        Bool guard = !valid[renamingsClaimIndex[i]][valid_get_port];
         PhyRIndx claim_phy_reg = get_dst_renaming(i);
         renameIfc[i] = (interface RTRename;
             method RenameResult getRename(ArchRegs r) if(guard);
@@ -462,7 +515,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
 
     Vector#(SupSize, RTCommit) commitIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-        Bool guard = valid[commitIndex[i]][valid_commit_port] &&
+        Bool guard = valid[renamingsCommitIndex[i]][valid_commit_port] &&
                      all(id, readVReg(commit_SB_rename)) && // ordering: commit < rename
                      commit_SB_wrongSpec; // ordering: commit < wrongSpec
         commitIfc[i] = (interface RTCommit;
