@@ -434,7 +434,7 @@ module mkIBank#(
             id: 0,
             child: ?,
             isPrefetchRq: True,
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         rqToPQ.enq(cRqToP);
         if (verbose)
@@ -456,7 +456,7 @@ module mkIBank#(
             id: slot.way,
             child: ?,
             isPrefetchRq: False,
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         rqToPQ.enq(cRqToP);
        if (verbose)
@@ -532,7 +532,8 @@ module mkIBank#(
                 cs: ram.info.cs, // use cs in ram
                 dir: ?,
                 owner: succ,
-                other: ?
+                other: ?,
+                poisoned: False
             },
             line: ram.line
         }, Invalid, True); // hit, so update rep info
@@ -595,7 +596,8 @@ module mkIBank#(
                     cs: ram.info.cs,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
-                    other: ?
+                    other: ?,
+                    poisoned: False
                 },
                 line: ram.line
             }, Invalid, False);
@@ -617,7 +619,8 @@ module mkIBank#(
                     cs: I,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
-                    other: ?
+                    other: ?,
+                    poisoned: False
                 },
                 line: ? // data is no longer used
             }, Invalid, False);
@@ -759,7 +762,8 @@ module mkIBank#(
                     cs: I, // I$ is always downgraded by pRq to I
                     dir: ?,
                     owner: Invalid, // no successor
-                    other: ?
+                    other: ?,
+                    poisoned: False
                 },
                 line: ? // line is not useful
             }, Invalid, False);
@@ -820,7 +824,8 @@ module mkIBank#(
                 cs: I, // downgraded to I
                 dir: ?,
                 owner: Invalid, // no successor
-                other: ?
+                other: ?,
+                poisoned: False
             },
             line: ?
         }, Invalid, False);

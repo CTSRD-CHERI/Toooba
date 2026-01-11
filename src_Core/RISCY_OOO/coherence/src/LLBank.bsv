@@ -435,7 +435,7 @@ endfunction
             child: child,
             byteEn: ?,
             id: Child (?),
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         // setup new MSHR entry
         cRqIndexT n <- cRqMshr.transfer.getEmptyEntryInit(cRq, Invalid);
@@ -469,7 +469,7 @@ endfunction
             child: child,
             byteEn: ?,
             id: Child (?),
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         // setup new MSHR entry
         cRqIndexT n <- cRqMshr.transfer.getEmptyEntryInit(cRq, Invalid);
@@ -522,7 +522,7 @@ endfunction
             child: ?,
             byteEn: r.byteEn,
             id: Dma (r.id),
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         // setup new MSHR entry and data
         cRqIndexT n <- cRqMshr.transfer.getEmptyEntryInit(cRq, write ? Valid (r.data) : Invalid);
@@ -700,7 +700,7 @@ endfunction
         // take actions according to type
         if(t == Ld) begin
             // only load mem: can be child or dma req
-            if(cRq.alloc_policy == 2'b01) begin 
+            if(cRq.alloc_policy == 3'b001) begin 
                 memRsT nwz_msg = MemRsMsg {
                   data: unpack(0),
                   child: ?,
@@ -744,7 +744,8 @@ endfunction
             toMemT msg = Wb (WbMemRs {
                 addr: cRq.addr,
                 byteEn: cRq.byteEn,
-                data: validValue(data)
+                data: validValue(data),
+		poison_operation: 3'b00
             });
             toMQ.enq(msg);
             toMInfoQ.deq; // deq info
@@ -781,10 +782,23 @@ endfunction
                 latTimer.start(n);
             end
             else begin // do write back part
+                Bit#(4) poison_ratio = 4'h0;
+                for(Integer i =0; i < 4 ; i=i+1) begin 
+                    //MemTaggedData curData = validValue(data).data[i];
+                    poison_ratio[i] = (validValue(data).data[i][1][46]==1'b1 && isValid(data)) ? 1'b1 : 1'b0;
+                end 
+                Bit#(3) poison_operation = 3'b0;
+                if (poison_ratio ==4'b1111) begin 
+                    $display("write back poisoned cache line");
+                    poison_operation = 3'b001;
+                end else begin 
+                    poison_operation = 3'b000;
+                end 
                 toMemT msg = Wb (WbMemRs {
                     addr: {cSlot.repTag, truncate(cRq.addr)},
                     byteEn: replicate(replicate(True)),
-                    data: validValue(data)
+                    data: validValue(data),
+	  	            poison_operation: poison_operation
                 });
                 toMQ.enq(msg);
                 // don't deq info, do ld next time
@@ -1054,7 +1068,8 @@ endfunction
                     });
                     default: return Invalid;
                 endcase),
-                other: ?
+                other: ?,
+                poisoned: False
             },
             line: ram.line // use line in ram
         }, True); // hit, so update rep info
@@ -1110,7 +1125,8 @@ endfunction
                     });
                     default: return Invalid;
                 endcase),
-                other: ?
+                other: ?,
+                poisoned: False
             },
             line: newLine // use new line
         }, True); // hit, so update rep info
@@ -1172,7 +1188,8 @@ endfunction
                     mshrIdx: n, // owner is current cRq
                     replacing: False // replacement is done right now
                 }),
-                other: ?
+                other: ?,
+                poisoned: False
             },
             line: ? // data is no longer used
         }, False);
@@ -1259,7 +1276,8 @@ endfunction
                     cs: ram.info.cs,
                     dir: ram.info.dir,
                     owner: Valid (CRqOwner {mshrIdx: n, replacing: False}), // owner is req itself
-                    other: ?
+                    other: ?,
+                    poisoned: ram.info.poisoned
                 },
                 line: ram.line
             }, False);
@@ -1301,7 +1319,8 @@ endfunction
                     cs: ram.info.cs,
                     dir: ram.info.dir,
                     owner: Valid (CRqOwner {mshrIdx: n, replacing: False}), // owner is req itself
-                    other: ?
+                    other: ?,
+                    poisoned: False
                 },
                 line: ram.line
             }, False);
@@ -1330,7 +1349,8 @@ endfunction
                             mshrIdx: n,
                             replacing: True // replacement is ongoing
                         }),
-                        other: ?
+                        other: ?,
+                        poisoned: ram.info.poisoned
                     },
                     line: ram.line // keep data the same
                 }, False);

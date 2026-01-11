@@ -185,7 +185,7 @@ module mkL1Pipe(
     Add#(tagSz, b__, AddrSz)
 );
 
-   Bool verbose = False;
+   Bool verbose = True;
 
     // RAMs
     Vector#(wayNum, RWBramCore#(indexT, infoT)) infoRam <- replicateM(mkRWBramCoreForwarded);
@@ -204,7 +204,8 @@ module mkL1Pipe(
                 cs: I,
                 dir: ?,
                 owner: Invalid,
-                other: ?
+                other: ?,
+                poisoned: False
             });
         end
         repRam.wrReq(initIndex, randRepInitInfo); // useless for random replace

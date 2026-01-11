@@ -173,6 +173,7 @@ typedef struct {
     dirT dir;
     ownerT owner;
     otherT other;
+    Bool poisoned;
 } CacheInfo#(
     type tagT,
     type msiT,
@@ -201,13 +202,14 @@ typedef struct {
     Msi toState;
     // below are detailed mem op
     MemOp op; // Ld, St, Lr, Sc, Amo
-    Bit#(2) alloc_policy; //allocation policy. 00: normal write allocate; 01: non-write allocate for store miss; 10: non-temporal store
+    Bit#(3) alloc_policy; //allocation policy. 00: normal write allocate; 01: non-write allocate for store miss; 10: non-temporal store
     MemDataByteEn byteEn; // valid when op == Sc
     MemTaggedData data; // valid when op == Sc/Amo
     AmoInst amoInst; // valid when op == Amo
     Bool loadTags; // valid when op == Ld
     Bit#(16) pcHash; // hash of instruction pc sending the request
     Bool permitPoison;
+    Bit#(8) pver;
 } ProcRq#(type idT) deriving(Bits, Eq, FShow);
 
 interface L1ProcReq#(type idT);
@@ -217,7 +219,7 @@ endinterface
 interface L1ProcResp#(type idT);
     method Action respLd(idT id, MemTaggedData resp);
     method Action respLrScAmo(idT id, MemTaggedData resp);
-    method ActionValue#(Tuple3#(LineByteEn, Line, Bool)) respSt(idT id);
+    method ActionValue#(Tuple4#(LineByteEn, Line, Bool, Bit#(8))) respSt(idT id);
     method Action evict(LineAddr a); // called when cache line is evicted
 endinterface
 // General replacement interface
@@ -267,7 +269,7 @@ typedef struct {
     idT id; // slot id in child cache
     childT child; // from which child
     Bool isPrefetchRq;
-    Bit#(2) alloc_policy;
+    Bit#(3) alloc_policy;
 } CRqMsg#(type idT, type childT) deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -326,7 +328,7 @@ typedef struct {
     LineByteEn byteEn;
     // req id: distinguish between child and dma
     LLRqId#(cRqIdT, dmaRqIdT) id;
-    Bit#(2) alloc_policy;
+    Bit#(3) alloc_policy;
 } LLRq#(type cRqIdT, type dmaRqIdT, type childT) deriving(Bits, Eq, FShow);
 
 // memory msg
@@ -347,6 +349,7 @@ typedef struct {
     Addr addr;
     LineByteEn byteEn;
     Line data;
+    Bit#(3) poison_operation;
 } WbMemRs deriving(Bits, Eq, FShow);
 
 typedef union tagged {

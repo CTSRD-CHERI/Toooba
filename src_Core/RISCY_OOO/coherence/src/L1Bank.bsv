@@ -63,6 +63,8 @@ import Performance::*;
 import LatencyTimer::*;
 import RandomReplace::*;
 import Prefetcher::*;
+import CHERICap::*;
+import CHERICC_Fat::*;
 `ifdef PERFORMANCE_MONITORING
 import PerformanceMonitor::*;
 import StatCounters::*;
@@ -379,8 +381,9 @@ endfunction
             amoInst: ?,
             loadTags: ?,
             pcHash: ?,
-            alloc_policy: 2'b00,
-            permitPoison: False
+            alloc_policy: 3'b000,
+            permitPoison: False, 
+            pver: 8'h0
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
         // send to pipeline
@@ -507,7 +510,7 @@ endfunction
             id: 0,
             child: ?,
             isPrefetchRq: True,
-            alloc_policy: 2'b00
+            alloc_policy: 3'b000
         };
         rqToPQ.enq(cRqToP);
         if (verbose)
@@ -583,13 +586,14 @@ endfunction
         // TODO when we have MESI, cache state may also need update
         Line curLine = ram.line;
         Line newLine = curLine;
+        Bool line_poisoned = False;
         LineMemDataOffset dataSel = getLineMemDataOffset(req.addr);
         case(req.op) matches
             Ld: begin
                 if (!cRqIsPrefetch[n]) begin
                     if (req.loadTags) begin
                         procResp.respLd(req.id, getTagsAt(curLine));
-                    end else if (req.alloc_policy == 2'b11) begin 
+                    end else if (req.alloc_policy == 3'b011) begin 
                         procResp.respLd(req.id, getPoisonAt(curLine, dataSel));
                     end else begin
                         procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel));
@@ -613,12 +617,21 @@ endfunction
                 // calculate new data to write
                 if(succeed) begin
                     let taggedData = getTaggedDataAt(curLine, dataSel);
-                    if(taggedData.tag == True && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
-                        newLine = curLine;
-                        $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
-                            $time,
-                            fshow(taggedData)
-                        );
+                    CapPipe loaded_dataUnpacked = fromMem(unpack(pack(taggedData)));
+                    Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
+                    //if(taggedData.tag == True && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
+                    if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
+                        if (poison_pver == req.pver) begin 
+                            newLine = curLine;
+                            $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
+                                $time,
+                                fshow(taggedData)
+                            );
+                        end else begin 
+                            let newTaggedData =
+                                mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
+                            newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
+                        end 
                     end else begin 
                         let newTaggedData =
                             mergeMemTaggedDataBE(taggedData, req.data, zeroExtend(pack(req.byteEn)));
@@ -630,20 +643,39 @@ endfunction
             end
             St: begin
                 // resp processor, get write data & BE
-                let {be, wrLine, permitPoison} <- procResp.respSt(req.id);
+                
+                let {be, wrLine, permitPoison, pver} <- procResp.respSt(req.id);
                     // calculate new data to write
                 MemTaggedData curData = getTaggedDataAt(curLine, dataSel);
-                if(curData.tag == True && curData.data[1][46] == 1'b1 && !permitPoison) begin 
-                    newLine = curLine;
-                    $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
-                        $time,
-                        fshow(curData)
-                    );
+                //if(curData.tag == True && curData.data[1][46] == 1'b1 && !permitPoison) begin 
+                CapPipe loaded_dataUnpacked = fromMem(unpack(pack(curData)));
+                Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
+                if(isValidCap(loaded_dataUnpacked) && curData.data[1][46] == 1'b1 ) begin
+                    if(poison_pver == pver) begin 
+                        $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
+                            $time,
+                            fshow(curData), fshow(pver), fshow(poison_pver), isValidCap(loaded_dataUnpacked)
+                        );
+                    end else begin 
+                        $display("%t L1 %m pipelineResp: found mismatch poison on store access, return 0",
+                            $time,
+                            fshow(curData)
+                        );
+                        newLine = getUpdatedLine(curLine, be, unpack(0));
+                    end 
                 end else begin 
-                    if(req.alloc_policy == 2'b01) begin //zeroing
+                    if(req.alloc_policy == 3'b001) begin //zeroing
                         newLine = getUpdatedLine(curLine, be, unpack(0));
                     end else begin 
                         newLine = getUpdatedLine(curLine, be, wrLine);
+                        if(req.alloc_policy == 3'b010) begin 
+
+                        end 
+                        else if (req.alloc_policy == 3'b011) begin 
+                            line_poisoned = True;
+                        end else begin 
+                            line_poisoned = False;
+                        end 
                     end
                 end 
             end
@@ -665,7 +697,8 @@ endfunction
                     cs: max(ram.info.cs, req.toState),
                     dir: ?,
                     owner: succ,
-                    other: ?
+                    other: ?,
+                    poisoned : line_poisoned
                 },
                 line: newLine // write new data into cache
             }, isValid(succ) ? pipeOutNextInQueue : pipeOutSecondInQueue, True); // hit, so update rep info
@@ -741,7 +774,8 @@ endfunction
                 cs: M, // AMO always gets to M
                 dir: ?,
                 owner: succ,
-                other: ?
+                other: ?,
+                poisoned : False
             },
             line: newLine // write new data into cache
         }, amoHit.nextInQueue, True); // hit, so update rep info
@@ -784,7 +818,8 @@ endfunction
                     cs: ram.info.cs,
                     dir: ram.info.dir,
                     owner: resetOwner ? Invalid : ram.info.owner,
-                    other: ram.info.other
+                    other: ram.info.other,
+                    poisoned: ram.info.poisoned
                 },
                 line: ram.line
             }, pipeOutNextInQueue, False);
@@ -831,7 +866,8 @@ endfunction
                     cs: ram.info.cs,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
-                    other: ?
+                    other: ?,
+                    poisoned: False
                 },
                 line: ram.line
             }, pipeOutNextInQueue, False);
@@ -852,7 +888,8 @@ endfunction
                     cs: I,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
-                    other: ?
+                    other: ?,
+                    poisoned: ?
                 },
                 line: ? // data is no longer used
             }, pipeOutNextInQueue, False);
@@ -1088,7 +1125,8 @@ endfunction
                     cs: I, // downgraded to I
                     dir: ?,
                     owner: ram.info.owner, // keep owner to cRq
-                    other: ?
+                    other: ?,
+                    poisoned: ram.info.poisoned
                 },
                 line: ram.line
             }, pipeOutNextInQueue, False);
@@ -1119,7 +1157,8 @@ endfunction
                     cs: pRq.toState,
                     dir: ?,
                     owner: Invalid, // no successor
-                    other: ?
+                    other: ?,
+                    poisoned: ram.info.poisoned
                 },
                 line: ram.line
             }, pipeOutSecondInQueue, False);
@@ -1183,7 +1222,8 @@ endfunction
                 cs: I, // downgraded to I
                 dir: ?,
                 owner: Invalid, // no successor
-                other: ?
+                other: ?,
+                poisoned: False
             },
             line: ?
         }, Invalid, False);

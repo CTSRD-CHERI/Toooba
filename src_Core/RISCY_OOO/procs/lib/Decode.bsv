@@ -172,6 +172,7 @@ function Maybe#(MemInst) decodeMemInst(Instruction inst, Bool cap_mode, RiscVISA
                                 amo_func: amo_func,
                                 unsignedLd: unsignedLd,
                                 byteOrTagEn: DataMemAccess(byteEn),
+				alloc_policy: 2'b00,
                                 aq: aq,
                                 rl: rl,
                                 reg_bounds: cap_mode } );
@@ -248,10 +249,6 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
                   end
         endcase
     end
-    ByteOrTagEn byteOrTagEn =  DataMemAccess(byteEn);
-    if(alloc_policy ==2'b01) byteOrTagEn = CacheLine_NWZ;
-    else if (alloc_policy == 2'b10) byteOrTagEn = CapWord_POISON;
-    else byteOrTagEn =  DataMemAccess(byteEn);
 
     if (illegalInst) begin
         return tagged Invalid;
@@ -260,7 +257,8 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
                                 mem_func: mem_func,
                                 amo_func: amo_func,
                                 unsignedLd: unsignedLd,
-                                byteOrTagEn: byteOrTagEn,
+				alloc_policy: alloc_policy,
+                                byteOrTagEn: DataMemAccess(byteEn),
                                 aq: amo,
                                 rl: amo,
                                 reg_bounds: bounds_from_register} );
@@ -846,6 +844,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             mem_func: Fence,
                             amo_func: None,
                             unsignedLd: False,
+			    alloc_policy: 2'b00,
                             byteOrTagEn: DataMemAccess(replicate(False)),
                             aq: reconcile,
                             rl: commit,
@@ -1175,6 +1174,15 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             regs.src2 = Valid(tagged Gpr rs2);
                             dInst.capFunc = CapModify (SetHigh);
                         end
+			/*
+                        f7_cap_CSetCapPver: begin 
+                            legalInst = True;
+                            dInst.iType = Cap;
+                            regs.dst = Valid(tagged Gpr rd);
+                            regs.src1 = Valid(tagged Gpr rs1);
+                            regs.src2 = Valid(tagged Gpr rs2);
+                            dInst.capFunc = CapModify (SetPVer);
+                        end*/ 
                         f7_cap_CBuildCap: begin
                             legalInst = True;
                             // Swap arguments so SCR possibly goes in RS2
@@ -1361,6 +1369,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                         mem_func: Ld,
                                         amo_func: None,
                                         unsignedLd: False,
+					alloc_policy: 2'b00,
                                         byteOrTagEn: PoisonMemAccess,
                                         aq: False,
                                         rl: False,
@@ -1368,7 +1377,14 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.dst  = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capChecks = memCapChecks(True);
-                                end
+                                end/*
+                                f5rs2_cap_CGetCapVersion: begin 
+                                    legalInst = True;
+                                    dInst.iType = Cap;
+                                    regs.dst = Valid(tagged Gpr rd);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    dInst.capFunc = CapInspect (GetPVer);
+                                end */
                                 f5rs2_cap_CLoadTags: begin
                                     legalInst = True;
                                     dInst.iType = Ld;
@@ -1377,6 +1393,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                         mem_func: Ld,
                                         amo_func: None,
                                         unsignedLd: False,
+					alloc_policy: 2'b00,
                                         byteOrTagEn: TagMemAccess,
                                         aq: False,
                                         rl: False,
