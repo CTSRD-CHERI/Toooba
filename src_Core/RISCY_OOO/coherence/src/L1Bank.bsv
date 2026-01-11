@@ -622,7 +622,7 @@ endfunction
                     //if(taggedData.tag == True && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
                     if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
                         //if (poison_pver == req.pver) begin 
-                        if (req.pver)== req.pver) begin 
+                        if (req.pver == req.pver) begin 
                             newLine = curLine;
                             $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
                                 $time,
