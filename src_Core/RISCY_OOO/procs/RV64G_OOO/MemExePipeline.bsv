@@ -642,7 +642,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: shiftBE,
                 vaddr: x.vaddr,
-                pver: getPVer(x.rVal1),
+                pver: 8'h0,//getPVer(x.rVal1),
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.rVal2,
                 store_data_BE: origBE,
@@ -651,7 +651,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                 allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                 capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
-                permitPoison: getHardPerms(x.rVal1).permitPoison,
+                permitPoison: True,//getHardPerms(x.rVal1).permitPoison,
                 alloc_policy: x.alloc_policy,
                 check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
                                           ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
@@ -909,7 +909,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(res.dst matches tagged Valid .dst) begin
             CapPipe loaded_dataUnpacked = fromMem(unpack(pack(data)));
             loaded_dataUnpacked = setValidCap(loaded_dataUnpacked, res.allowCap && isValidCap(loaded_dataUnpacked));
-            Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
+            //Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
             $display("%t poison check: ", $time, rule_name, " ", fshow(data), " ", fshow(res), " ", fshow(data.data[1][46]));
 
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
