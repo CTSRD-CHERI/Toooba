@@ -172,7 +172,7 @@ function Maybe#(MemInst) decodeMemInst(Instruction inst, Bool cap_mode, RiscVISA
                                 amo_func: amo_func,
                                 unsignedLd: unsignedLd,
                                 byteOrTagEn: DataMemAccess(byteEn),
-				alloc_policy: 2'b00,
+				                alloc_policy: 2'b00,
                                 aq: aq,
                                 rl: rl,
                                 reg_bounds: cap_mode } );
@@ -1369,8 +1369,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                         mem_func: Ld,
                                         amo_func: None,
                                         unsignedLd: False,
-					alloc_policy: 2'b00,
-                                        byteOrTagEn: PoisonMemAccess,
+					                    alloc_policy: 2'b00,
+                                        byteOrTagEn: DataMemAccess(unpack(16'hffff)),
                                         aq: False,
                                         rl: False,
                                         reg_bounds: True };
@@ -1393,7 +1393,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                         mem_func: Ld,
                                         amo_func: None,
                                         unsignedLd: False,
-					alloc_policy: 2'b00,
+					                    alloc_policy: 2'b00,
                                         byteOrTagEn: TagMemAccess,
                                         aq: False,
                                         rl: False,

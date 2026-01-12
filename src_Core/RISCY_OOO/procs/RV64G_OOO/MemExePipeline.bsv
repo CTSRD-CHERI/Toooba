@@ -849,8 +849,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
         else if(issRes == ToCache) begin
             Bit#(3) alloc_policy = 3'b000;
-            if(info.shiftedBE == PoisonMemAccess) alloc_policy = 3'b011; 
-            else alloc_policy = 3'b000; 
+            //if(info.shiftedBE == PoisonMemAccess) alloc_policy = 3'b011; 
+            //else alloc_policy = 3'b000; 
             reqLdQ.enq(tuple5(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash, alloc_policy));
             // perf: load mem latency
             ldMemLatTimer.start(info.tag);
@@ -1318,10 +1318,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doIssueSB;
         let {sbIdx, en} <- stb.issue;
         Bit#(3) alloc_policy = 3'b000;
-        if( en.shiftedBE == CacheLine_NWZ) alloc_policy = 3'b001;
-        else if(en.shiftedBE == CapWord_POISON) alloc_policy = 3'b010;
-        else if (en.shiftBE = CapWord_POISONLine) alloc_policy = 3'b100;
-        else alloc_policy = 3'b000;
         reqStQ.enq(tuple4(sbIdx, {en.addr, 0}, alloc_policy, en.pcHash));
         // perf: store mem latency
         stMemLatTimer.start(sbIdx);
