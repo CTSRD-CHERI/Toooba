@@ -1645,7 +1645,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             amoInst: ?,
             loadTags: loadTags,
             pcHash: pcHash,
-            alloc_policy: alloc_policy,
+            alloc_policy: 3'b000,
             permitPoison: False,
             pver: 8'h0
         });
