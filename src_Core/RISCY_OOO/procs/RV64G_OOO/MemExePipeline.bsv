@@ -916,7 +916,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
 
             //if (data.data[1][46] ==1'b1 && data.tag==True && !res.permitPoison) begin 
-
+/*
             if (data.data[1][46] == 1'b1 && data.tag ==True ) begin 
                 //if(res.pver != poison_pver ) begin  
                 //    inIfc.writeRegFile(dst.indx, unpack(0));
@@ -933,9 +933,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         );  
                 //end 
-            end else begin 
-                inIfc.writeRegFile(dst.indx, dataUnpacked);
-            end 
+            end else begin */
+            inIfc.writeRegFile(dst.indx, dataUnpacked);
+            //end 
 `ifdef INCLUDE_TANDEM_VERIF
             inIfc.rob_setExecuted_doFinishMem_RegData (res.instTag, res.data);
 `endif
@@ -1277,6 +1277,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data.data[1][46] = 1'b1; //set poison bit
         end else if(lsqDeqSt.alloc_policy == 2'b11) begin
             data.data[1][46] = 1'b1; //set poison bit
+        end else begin 
+             data.data[1][46] = 1'b0;
         end 
         reqStQ.enq(tuple3(addr, lsqDeqSt.alloc_policy, lsqDeqSt.pcHash));
         // record waiting for store resp
