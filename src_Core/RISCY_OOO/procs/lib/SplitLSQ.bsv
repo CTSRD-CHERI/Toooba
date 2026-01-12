@@ -303,9 +303,9 @@ typedef struct {
     Bool wrongPath;
     Maybe#(PhyDst) dst;
     Bool allowCap;
-`ifdef INCLUDE_TANDEM_VERIF
+//`ifdef INCLUDE_TANDEM_VERIF
     InstTag instTag;    // For recording Ld data in ROB
-`endif
+//`endif
     MemTaggedData data;
 } LSQRespLdResult deriving(Bits, Eq, FShow);
 
@@ -1991,9 +1991,9 @@ module mkSplitLSQ(SplitLSQ);
             wrongPath: False,
             dst: Invalid,
             allowCap: False,
-`ifdef INCLUDE_TANDEM_VERIF
+//`ifdef INCLUDE_TANDEM_VERIF
             instTag: ld_instTag [t],    // For recording Ld data in ROB
-`endif
+//`endif
             data: ?
         };
         if(ld_waitWPResp_resp[t]) begin

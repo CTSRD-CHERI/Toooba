@@ -562,9 +562,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         endfunction
         let {shiftBEData, shiftData} = getShiftedBEData(getAddr(vaddr), origBE.DataMemAccess, toMemData);
 
+        let poisoned_shiftdata = shiftData;
+        if(lsq.getAllocPolicy(x.ldstq_tag) == 2'b10 || lsq.getAllocPolicy(x.ldstq_tag) == 2'b11) poisoned_shiftdata.data[1][46] = 1'b1;
         // update LSQ data now
         if(x.ldstq_tag matches tagged St .stTag) begin
-            MemTaggedData d = x.mem_func == Amo ? toMemData : shiftData; // XXX don't shift for AMO
+            MemTaggedData d = x.mem_func == Amo ? toMemData : poisoned_shiftdata; // XXX don't shift for AMO
             lsq.updateData(stTag, d);
 `ifdef PERFORMANCE_MONITORING
             EventsCore events = unpack(0);
@@ -892,9 +894,35 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         LSQRespLdResult res <- lsq.respLd(tag, data);
         if(verbose) $display("%t : ", $time, rule_name, " ", fshow(tag), "; ", fshow(data), "; ", fshow(res));
         if(res.dst matches tagged Valid .dst) begin
+            CapPipe loaded_dataUnpacked = fromMem(unpack(pack(data)));
+            loaded_dataUnpacked = setValidCap(loaded_dataUnpacked, res.allowCap && isValidCap(loaded_dataUnpacked));
+            //Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
+            $display("%t poison check: ", $time, rule_name, " ", fshow(data), " ", fshow(res), " ", fshow(data.data[1][46] ));
+
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
-            inIfc.writeRegFile(dst.indx, dataUnpacked);
+
+            //if (data.data[1][46] ==1'b1 && data.tag==True && !res.permitPoison) begin 
+
+            if (data.data[1][46] ==1'b1 && data.tag==True ) begin 
+                //if(res.pver != poison_pver ) begin  
+                //    inIfc.writeRegFile(dst.indx, unpack(0));
+                //    $display("%t poison load mismatch return 0: ", $time, rule_name, " ", fshow(data));
+                //end else begin 
+                    $display("%t poison load exception: ", $time, rule_name, " ", fshow(data));
+                    inIfc.rob_setExecuted_deqLSQ(res.instTag, Valid(Exception(excLoadAccessFault)), Invalid
+                    
+`ifdef RVFI
+            , ExtraTraceBundle{
+                regWriteData: pack(res.data.data[0]),
+                memByteEn: replicate(False)
+            }
+`endif
+        );  
+                //end 
+            end else begin 
+                inIfc.writeRegFile(dst.indx, dataUnpacked);
+            end 
 
 `ifdef INCLUDE_TANDEM_VERIF
             inIfc.rob_setExecuted_doFinishMem_RegData (res.instTag, res.data);
