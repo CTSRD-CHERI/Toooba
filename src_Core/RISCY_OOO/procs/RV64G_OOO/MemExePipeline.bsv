@@ -124,6 +124,7 @@ typedef struct {
     LdStQTag ldstq_tag;
     // result
     ByteOrTagEn shiftedBE;
+    Bit#(2)     alloc_policy;
     CapPipe vaddr;         // virtual addr
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
@@ -159,7 +160,7 @@ typedef enum {
 typedef struct {
     LineMemDataOffset offset;
     MemDataByteEn shiftedBE;
-    MemTaggedData shiftedData;
+    MemTaggedData shiftedData; 
 } WaitStResp deriving(Bits, Eq, FShow);
 
 //SpecFifo#(2,IncorrectSpec,1,1) incorrectSpec_ff <- mkSpecFifoCF(True);
@@ -272,7 +273,7 @@ interface MemExePipeline;
 endinterface
 
 module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
-    Bool verbose = False;
+    Bool verbose = True;
 
     // we change cache request in case of single core, becaues our MSI protocol
     // is not good with single core
@@ -351,9 +352,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, Tuple4#(LdQTag, Addr, Bool, Bit#(16))) reqLdQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
-    Fifo#(1, Tuple2#(Addr, Bit#(16))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple3#(Addr, Bit#(2), Bit#(16))) reqStQ <- mkBypassFifo;
 `else
-    Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(16))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(2), Bit#(16))) reqStQ <- mkBypassFifo;
 `endif
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
@@ -421,6 +422,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             be[waitSt.offset] = waitSt.shiftedBE;
             data.data[waitSt.offset] = waitSt.shiftedData.data;
             data.tag[waitSt.offset] = waitSt.shiftedData.tag;
+            //return tuple4(unpack(pack(be)), data, waitSt.permitPoison, waitSt.pver);
             return tuple4(unpack(pack(be)), data, True, 8'h0);
         endmethod
 `else
@@ -442,7 +444,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             events.evt_STORE_WAIT = saturating_truncate(lat);
             events_reg[2] <= events;
 `endif
-            return tuple4(unpack(pack(e.byteEn)), e.line, True, 8'h0); // return SB entry
+            return tuple4(unpack(pack(e.byteEn)), e.line, e.permitPoison, e.pver); // return SB entry
         endmethod
 `endif
         method Action evict(LineAddr lineAddr);
@@ -584,10 +586,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: x.tag,
                 ldstq_tag: x.ldstq_tag,
                 rVal1: rVal1,
+                alloc_policy: lsq.getAllocPolicy(x.ldstq_tag),
                 rVal2: rVal2,
                 vaddr: vaddr,
                 cap_checks: x.cap_checks,
-                alloc_policy: 2'h0,
                 origBE: origBE,
                 shiftBEData: shiftBEData
 `ifdef KONATA
@@ -629,6 +631,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: x.tag,
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: shiftBE,
+                alloc_policy: x.alloc_policy,
                 vaddr: x.vaddr,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.rVal2,
@@ -758,7 +761,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.alloc_policy
         );
 
         // issue non-MMIO Ld which has no exception and is not waiting for
@@ -1006,13 +1009,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif // SELF_INV_CACHE
             op: Lr,
             byteEn: ?,
+            alloc_policy: ?, 
             data: ?,
-            alloc_policy: 3'h0,
-            pver: 8'h0,
-            permitPoison: True,
             amoInst: ?,
             loadTags: False,
-            pcHash: ?
+            pcHash: ?,
+            pver: 8'h0,
+            permitPoison: True
         };
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqLdQ_Lr_issue] ", fshow(lsqDeqLd), "; ", fshow(req));
@@ -1229,7 +1232,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
         // send to mem
         Addr addr = lsqDeqSt.paddr;
-        reqStQ.enq(tuple2(addr, lsqDeqSt.pcHash));
+        reqStQ.enq(tuple3(addr, lsqDeqSt.alloc_policy, lsqDeqSt.pcHash));
         // record waiting for store resp
         waitStRespQ.enq(WaitStResp {
             offset: getLineMemDataOffset(addr),
@@ -1348,10 +1351,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             // data for Amo). AMO doesn't use BE. Sc uses **shifted** BE and
             // data (firstSt.stData is shifted for Sc).
             byteEn: lsqDeqSt.shiftedBE,
+            alloc_policy: zeroExtend(lsqDeqSt.alloc_policy),
             data: lsqDeqSt.stData,
-            alloc_policy: 3'h0,
-            pver: 8'h0,
-            permitPoison: True,
             amoInst: AmoInst {
                 func: lsqDeqSt.amoFunc,
                 width: (pack(lsqDeqSt.shiftedBE) == ~0) ? QWord :
@@ -1361,7 +1362,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 rl: lsqDeqSt.rel
             },
             loadTags: False,
-            pcHash: ?
+            pcHash: ?,
+            pver: 8'h0,
+            permitPoison: True
         };
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqStQ_ScAmo_issue] ", fshow(lsqDeqSt), "; ", fshow(req));
@@ -1582,19 +1585,19 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             toState: loadTags ? T : (multicore ? S : E), // in case of single core, just fetch to E
             op: Ld,
             byteEn: ?,
+            alloc_policy: 3'b000,
             data: ?,
-            alloc_policy: 3'h0,
-            pver: 8'h0,
-            permitPoison: True,
             amoInst: ?,
             loadTags: loadTags,
-            pcHash: pcHash
+            pcHash: pcHash,
+            pver: 8'h0,
+            permitPoison: True
         });
     endrule
     (* descending_urgency = "sendLdToMem, sendStToMem" *) // prioritize Ld over St
     rule sendStToMem;
 `ifdef TSO_MM
-        let {addr, pcHash} <- toGet(reqStQ).get;
+        let {addr, alloc_policy, pcHash} <- toGet(reqStQ).get;
         DProcReqId id = 0;
 `else
         let {sbIdx, addr, pcHash} <- toGet(reqStQ).get;
@@ -1606,13 +1609,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             toState: M,
             op: St,
             byteEn: ?,
-            alloc_policy: 3'h0,
-            pver: 8'h0,
-            permitPoison: True,
+            alloc_policy: zeroExtend(alloc_policy),  
             data: ?,
             amoInst: ?,
             loadTags: False,
-            pcHash: pcHash
+            pcHash: pcHash,
+            pver: 8'h0,
+            permitPoison: True
         });
     endrule
     (* descending_urgency = "sendLrScAmoToMem, sendStToMem" *) // prioritize Lr/Sc/Amo over St
