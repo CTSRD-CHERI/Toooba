@@ -307,6 +307,7 @@ typedef struct {
     InstTag instTag;    // For recording Ld data in ROB
 //`endif
     MemTaggedData data;
+    Bool permitPoison;
 } LSQRespLdResult deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -346,6 +347,7 @@ typedef struct {
     Bool              allowCapAmoLd;
     Maybe#(Trap)      fault;
     Bit#(16)          pcHash;
+    Bool              permitPoison;
 } StQDeqEntry deriving (Bits, Eq, FShow);
 
 interface SplitLSQ;
@@ -379,7 +381,7 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(2) alloc_policy
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bool permitPoison, Bit#(2) alloc_policy
     );
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
@@ -664,6 +666,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(LdQMemFunc))              ld_memFunc         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_unsigned        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(ByteOrTagEn))             ld_byteOrTagEn     <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Reg#(Bool))                    ld_permitPoison    <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_allowCap        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_acq             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_rel             <- replicateM(mkConfigRegU);
@@ -859,6 +862,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, Bool))                 st_permitPoison <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bit#(2)))              st_alloc_policy_ehr <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Trap)))         st_fault     <- replicateM(mkEhr(?));
@@ -910,6 +914,10 @@ module mkSplitLSQ(SplitLSQ);
     let st_allowCapAmoLd_updAddr = getVEhrPort(st_allowCapAmoLd, 0); // write
     let st_allowCapAmoLd_deqSt   = getVEhrPort(st_allowCapAmoLd, 1);
     let st_allowCapAmoLd_enq     = getVEhrPort(st_allowCapAmoLd, 1); // write
+
+    let st_permitPoison_updAddr  = getVEhrPort(st_permitPoison, 0); // write
+    let st_permitPoison_deqSt   = getVEhrPort(st_permitPoison, 1);
+    let st_permitPoison_enq     = getVEhrPort(st_permitPoison, 1); // write
 
     let st_computed_verify  = getVEhrPort(st_computed, 0);
     let st_computed_updAddr = getVEhrPort(st_computed, 0); // write
@@ -1509,6 +1517,7 @@ module mkSplitLSQ(SplitLSQ);
         st_fault_enq[st_enqP] <= Invalid;
         st_pcHash[st_enqP] <= pcHash;
         st_allowCapAmoLd_enq[st_enqP] <= False;
+        st_permitPoison_enq[st_enqP] <= False;
         st_computed_enq[st_enqP] <= False;
         st_verified_enq[st_enqP] <= False;
         st_specBits_enq[st_enqP] <= spec_bits;
@@ -1526,7 +1535,7 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bit#(2) alloc_policy
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bool permitPoison, Bit#(2) alloc_policy
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1571,7 +1580,7 @@ module mkSplitLSQ(SplitLSQ);
             ld_allowCap[tag] <= allowCap;
             ld_isMMIO_updAddr[tag] <= mmio;
             ld_shiftedBE_updAddr[tag] <= shift_be;
-
+            ld_permitPoison[tag]  <= permitPoison;
             delayIssue = isValid(ld_olderSt_updAddr[tag]) && ld_waitForOlderSt[tag];
 
 `ifndef TSO_MM
@@ -1602,6 +1611,7 @@ module mkSplitLSQ(SplitLSQ);
             st_paddr_updAddr[tag] <= pa;
             st_isMMIO_updAddr[tag] <= mmio;
             st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
+            st_permitPoison_updAddr[tag] <= permitPoison;
 	    st_alloc_policy_updAddr[tag] <= alloc_policy;
             // A store always try to kill younger loads
             doKill = True;
@@ -1994,7 +2004,8 @@ module mkSplitLSQ(SplitLSQ);
 //`ifdef INCLUDE_TANDEM_VERIF
             instTag: ld_instTag [t],    // For recording Ld data in ROB
 //`endif
-            data: ?
+            data: ?,
+            permitPoison: False
         };
         if(ld_waitWPResp_resp[t]) begin
             ld_waitWPResp_resp[t] <= False;
@@ -2019,9 +2030,11 @@ module mkSplitLSQ(SplitLSQ);
             // the register files as the Toooba FPR is 64-bit
             let bEn = ld_byteOrTagEn[t];
             let allowCap = ld_allowCap[t];
+            let permitPoison = ld_permitPoison[t];
             let dst = ld_dst[t];
             let is32BitLd = bEn matches tagged DataMemAccess .bEnData &&& (bEnData[3] && !bEnData[7]) ? True : False;
             res.allowCap = allowCap;
+            res.permitPoison = permitPoison;
             res.dst = ld_dst[t];
             if (dst.Valid.isFpuReg && is32BitLd)
                res.data = fv_nanbox_MemTaggedData(
@@ -2115,6 +2128,7 @@ module mkSplitLSQ(SplitLSQ);
             alloc_policy: st_alloc_policy_deqSt[deqP],
             stData: st_stData_deqSt[deqP],
             allowCapAmoLd: st_allowCapAmoLd_deqSt[deqP],
+            permitPoison : st_permitPoison_deqSt[deqP],
             fault: st_fault_deqSt[deqP],
             pcHash: st_pcHash[deqP]
         };

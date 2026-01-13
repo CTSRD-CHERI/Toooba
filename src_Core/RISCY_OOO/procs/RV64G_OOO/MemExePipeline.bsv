@@ -136,6 +136,7 @@ typedef struct {
     Bool allowCapLoad;
     Maybe#(CSR_XCapCause) capException;
     Maybe#(BoundsCheck) check;
+    Bool permitPoison;
 `ifdef KONATA
     Bit#(64) u_id;
 `endif
@@ -161,6 +162,7 @@ typedef struct {
     LineMemDataOffset offset;
     MemDataByteEn shiftedBE;
     MemTaggedData shiftedData; 
+    Bool permitPoison;
 } WaitStResp deriving(Bits, Eq, FShow);
 
 //SpecFifo#(2,IncorrectSpec,1,1) incorrectSpec_ff <- mkSpecFifoCF(True);
@@ -423,7 +425,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             data.data[waitSt.offset] = waitSt.shiftedData.data;
             data.tag[waitSt.offset] = waitSt.shiftedData.tag;
             //return tuple4(unpack(pack(be)), data, waitSt.permitPoison, waitSt.pver);
-            return tuple4(unpack(pack(be)), data, True, 8'h0);
+            return tuple4(unpack(pack(be)), data, waitSt.permitPoison, 8'h0);
         endmethod
 `else
         method ActionValue#(Tuple4#(LineByteEn, Line, Bool, Bit#(8))) respSt(DProcReqId id);
@@ -643,6 +645,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                 allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                 capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
+                permitPoison:  getHardPerms(x.rVal1).permitPoison,
                 check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
                                           ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
 `ifdef KONATA
@@ -763,7 +766,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.alloc_policy
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.permitPoison, x.alloc_policy
         );
 
         // issue non-MMIO Ld which has no exception and is not waiting for
@@ -902,9 +905,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
 
-            //if (data.data[1][46] ==1'b1 && data.tag==True && !res.permitPoison) begin 
+            if (data.data[1][46] ==1'b1 && data.tag==True && !res.permitPoison) begin 
 
-            if (data.data[1][46] ==1'b1 && data.tag==True ) begin 
+            //if (data.data[1][46] ==1'b1 && data.tag==True ) begin 
                 //if(res.pver != poison_pver ) begin  
                 //    inIfc.writeRegFile(dst.indx, unpack(0));
                 //    $display("%t poison load mismatch return 0: ", $time, rule_name, " ", fshow(data));
@@ -1043,7 +1046,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             loadTags: False,
             pcHash: ?,
             pver: 8'h0,
-            permitPoison: True
+            permitPoison: False
         };
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqLdQ_Lr_issue] ", fshow(lsqDeqLd), "; ", fshow(req));
@@ -1265,7 +1268,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         waitStRespQ.enq(WaitStResp {
             offset: getLineMemDataOffset(addr),
             shiftedBE: lsqDeqSt.shiftedBE,
-            shiftedData: lsqDeqSt.stData
+            shiftedData: lsqDeqSt.stData,
+            permitPoison: lsqDeqSt.permitPoison
         });
         // we leave deq to resp time
         // ROB should have already been set to executed
@@ -1284,7 +1288,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
         lsq.deqSt;
         // send to SB
-        stb.enq(sbIdx, lsqDeqSt.paddr, lsqDeqSt.shiftedBE, lsqDeqSt.stData, lsqDeqSt.pcHash);
+        stb.enq(sbIdx, lsqDeqSt.paddr, lsqDeqSt.shiftedBE, lsqDeqSt.stData, lsqDeqSt.pcHash, permitPoison: lsqDeqSt.permitPoison);
         // ROB should have already been set to executed
         if(verbose) $display("[doDeqStQ_St] ", fshow(lsqDeqSt));
         // normal store should not have .rl, so no need to check SB empty
@@ -1392,7 +1396,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             loadTags: False,
             pcHash: ?,
             pver: 8'h0,
-            permitPoison: True
+            permitPoison: lsqDeqSt.permitPoison
         };
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqStQ_ScAmo_issue] ", fshow(lsqDeqSt), "; ", fshow(req));
@@ -1619,7 +1623,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             loadTags: loadTags,
             pcHash: pcHash,
             pver: 8'h0,
-            permitPoison: True
+            permitPoison: False
         });
     endrule
     (* descending_urgency = "sendLdToMem, sendStToMem" *) // prioritize Ld over St
@@ -1643,7 +1647,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             loadTags: False,
             pcHash: pcHash,
             pver: 8'h0,
-            permitPoison: True
+            permitPoison: False
         });
     endrule
     (* descending_urgency = "sendLrScAmoToMem, sendStToMem" *) // prioritize Lr/Sc/Amo over St
