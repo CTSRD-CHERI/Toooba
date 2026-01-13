@@ -351,12 +351,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, WaitStResp) waitStRespQ <- mkCFFifo;
 `endif
     // fifo for req mem
-    Fifo#(1, Tuple4#(LdQTag, Addr, Bool, Bit#(16))) reqLdQ <- mkBypassFifo;
+    Fifo#(1, Tuple5#(LdQTag, Addr, Bool, Bit#(16), Bool )) reqLdQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
-    Fifo#(1, Tuple3#(Addr, Bit#(2), Bit#(16))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple4#(Addr, Bit#(2), Bit#(16), Bool )) reqStQ <- mkBypassFifo;
 `else
-    Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(2), Bit#(16))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple5#(SBIndex, Addr, Bit#(2), Bit#(16), Bool )) reqStQ <- mkBypassFifo;
 `endif
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
@@ -785,7 +785,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
-                pcHash: hash(getAddr(pc))
+                pcHash: hash(getAddr(pc)),
+                permitPoison: x.permitPoison
             });
         end
 
@@ -841,7 +842,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         end
         else if(issRes == ToCache) begin
-            reqLdQ.enq(tuple4(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash));
+            reqLdQ.enq(tuple5(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash, info.permitPoison));
             // perf: load mem latency
             ldMemLatTimer.start(info.tag);
         end
@@ -1263,7 +1264,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
         // send to mem
         Addr addr = lsqDeqSt.paddr;
-        reqStQ.enq(tuple3(addr, lsqDeqSt.alloc_policy, lsqDeqSt.pcHash));
+        reqStQ.enq(tuple4(addr, lsqDeqSt.alloc_policy, lsqDeqSt.pcHash, lsqDeqSt.permitPoison));
         // record waiting for store resp
         waitStRespQ.enq(WaitStResp {
             offset: getLineMemDataOffset(addr),
@@ -1298,7 +1299,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // send store to mem
     rule doIssueSB;
         let {sbIdx, en} <- stb.issue;
-        reqStQ.enq(tuple3(sbIdx, {en.addr, 0}, en.pcHash));
+        reqStQ.enq(tuple3(sbIdx, {en.addr, 0}, en.pcHash, en.permitPoison));
         // perf: store mem latency
         stMemLatTimer.start(sbIdx);
     endrule
@@ -1610,7 +1611,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     // send req to D$
     rule sendLdToMem;
-        let {lsqTag, addr, loadTags, pcHash} <- toGet(reqLdQ).get;
+        let {lsqTag, addr, loadTags, pcHash, permitPoison} <- toGet(reqLdQ).get;
         dMem.procReq.req(ProcRq {
             id: zeroExtend(lsqTag),
             addr: addr,
@@ -1623,16 +1624,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             loadTags: loadTags,
             pcHash: pcHash,
             pver: 8'h0,
-            permitPoison: False
+            permitPoison: permitPoison
         });
     endrule
     (* descending_urgency = "sendLdToMem, sendStToMem" *) // prioritize Ld over St
     rule sendStToMem;
 `ifdef TSO_MM
-        let {addr, alloc_policy, pcHash} <- toGet(reqStQ).get;
+        let {addr, alloc_policy, pcHash, permitPoison} <- toGet(reqStQ).get;
         DProcReqId id = 0;
 `else
-        let {sbIdx, addr, pcHash} <- toGet(reqStQ).get;
+        let {sbIdx, addr, pcHash, permitPoison} <- toGet(reqStQ).get;
         DProcReqId id = zeroExtend(sbIdx);
 `endif
         dMem.procReq.req(ProcRq {
@@ -1647,7 +1648,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             loadTags: False,
             pcHash: pcHash,
             pver: 8'h0,
-            permitPoison: False
+            permitPoison: permitPoison
         });
     endrule
     (* descending_urgency = "sendLrScAmoToMem, sendStToMem" *) // prioritize Lr/Sc/Amo over St

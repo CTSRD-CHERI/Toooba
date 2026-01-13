@@ -297,6 +297,7 @@ typedef struct {
     Addr paddr;
     ByteOrTagEn shiftedBE;
     Bit#(16) pcHash;
+    Bool permitPoison;
 } LSQIssueLdInfo deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -1138,7 +1139,8 @@ module mkSplitLSQ(SplitLSQ);
                 tag: tag,
                 paddr: ld_paddr_findIss[tag],
                 shiftedBE: ld_shiftedBE_findIss[tag],
-                pcHash: ld_pcHash[tag]
+                pcHash: ld_pcHash[tag],
+                permitPoison: ld_permitPoison[tag]
             };
             issueLdInfo.wset(info);
             if(verbose) begin
