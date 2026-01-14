@@ -619,8 +619,8 @@ endfunction
                     let taggedData = getTaggedDataAt(curLine, dataSel);
                     CapPipe loaded_dataUnpacked = fromMem(unpack(pack(taggedData)));
                     //Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
-                    //if(taggedData.tag == True && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
-                    if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
+                    if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
+                    //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
                         //if (poison_pver == req.pver) begin 
                         if (req.pver == req.pver) begin 
                             newLine = curLine;
