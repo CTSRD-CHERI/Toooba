@@ -395,8 +395,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
-    Vector#(TExp#(SizeOf#(LdQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
-    Map#(Addr, Bit#(4), MemTaggedData, 4) objIdBuf <- mkMapLossy(unpack(0));
+    Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
+    Map#(Addr, Bit#(16), MemTaggedData, 4) objIdBuf <- mkMapLossy(unpack(0));
 
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
@@ -413,11 +413,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     LdQTag tag = truncate(id);
                     memObjIdRespLdQ.enq(tuple2(tag, d));
                     // Save read in buffer.  Should do for both load and store responses, but I haven't figured out a store ID.
-                    Addr addr = objIdVAddrs[tag];
+                    LdStQTag ldstq_tag = tagged Ld tag;
+                    Addr addr = objIdVAddrs[pack(ldstq_tag)];
                     objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, d);
                 end
                 else if (objSealRdType == St) begin
-                    memObjIdRespStQ.enq(tuple2(truncate(id), d));
+                    StQTag tag = truncate(id);
+                    memObjIdRespStQ.enq(tuple2(tag, d));
+                    LdStQTag ldstq_tag = tagged St tag;
+                    Addr addr = objIdVAddrs[pack(ldstq_tag)];
+                    objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, d);
                 end
                 else begin
                     doAssert(False, "unknown objSealRdType");
