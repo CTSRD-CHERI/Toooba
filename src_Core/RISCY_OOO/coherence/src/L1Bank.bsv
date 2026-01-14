@@ -650,7 +650,7 @@ endfunction
                 //if(curData.tag == True && curData.data[1][46] == 1'b1 && !permitPoison) begin 
                 CapPipe loaded_dataUnpacked = fromMem(unpack(pack(curData)));
                 Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
-                if(isValidCap(loaded_dataUnpacked) && curData.data[1][46] == 1'b1 ) begin
+                if(isValidCap(loaded_dataUnpacked) && curData.data[1][46] == 1'b1 && !permitPoison ) begin
                     if (req.pver < poison_pver ) begin  
                     //if(pver == pver) begin
                         $display("%t L1 %m pipelineResp: found poison on store access, cancel store",

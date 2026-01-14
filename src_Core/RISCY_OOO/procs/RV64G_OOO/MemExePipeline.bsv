@@ -1049,7 +1049,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             loadTags: False,
             pcHash: ?,
             pver: 8'h0,
-            permitPoison: False
+            permitPoison: lsqDeqLd.permitPoison
         };
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqLdQ_Lr_issue] ", fshow(lsqDeqLd), "; ", fshow(req));

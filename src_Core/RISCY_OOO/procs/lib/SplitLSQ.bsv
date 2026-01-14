@@ -333,6 +333,7 @@ typedef struct {
     Maybe#(Trap)       fault;
     Bool               allowCap;
     Maybe#(LdKilledBy) killed;
+    Bool               permitPoison;
     Bit#(8)            pver;
 } LdQDeqEntry deriving (Bits, Eq, FShow);
 
@@ -2089,7 +2090,8 @@ module mkSplitLSQ(SplitLSQ);
             shiftedBE: ld_shiftedBE_deqLd[deqP],
             fault: ld_fault_deqLd[deqP],
             allowCap: ld_allowCap[deqP],
-            killed: ld_killed_deqLd[deqP]
+            killed: ld_killed_deqLd[deqP],
+            permitPoison: ld_permitPoison[deqP]
         };
     endmethod
 
