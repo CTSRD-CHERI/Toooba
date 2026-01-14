@@ -358,7 +358,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // TLBs
     DTlbSynth dTlb <- mkDTlbSynth;
     DTlbSynth objIdTlb <- mkObjIdTlbSynth;
-    Map#(Vpn, Bit#(0), Ppn, 4) objIdTlbBuf <- mkMapLossy(unpack(0));
 
     let dTlbReqQ <- mkDTlbReqFifo;
 
@@ -396,6 +395,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
+    Vector#(TExp#(SizeOf#(LdQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
+    Map#(Addr, Bit#(4), MemTaggedData, 4) objIdBuf <- mkMapLossy(unpack(0));
+
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
     // resp ifc to D$
@@ -408,7 +410,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 end
                 // TODO: figure out if obj ID seal is ok here
                 if (objSealRdType == Ld) begin
-                    memObjIdRespLdQ.enq(tuple2(truncate(id), d));
+                    LdQTag tag = truncate(id);
+                    memObjIdRespLdQ.enq(tuple2(tag, d));
+                    // Save read in buffer.  Should do for both load and store responses, but I haven't figured out a store ID.
+                    Addr addr = objIdVAddrs[tag];
+                    objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, d);
                 end
                 else if (objSealRdType == St) begin
                     memObjIdRespStQ.enq(tuple2(truncate(id), d));
@@ -676,10 +682,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let ccpt = inIfc.csrf_rd(csrAddrCCPT)[20:0];
 
         // calculate bitmap offset and send to TLB here
-        Addr objIdVAddrValid = getAddr(x.vaddr) & (-1<<4);
-        Maybe#(Addr) objIdVAddr = Valid(objIdVAddrValid); // default invalid
+        Maybe#(Addr) objIdVAddr = Valid(getAddr(x.vaddr) & (-1<<4)); // default invalid
         Bit#(7) objIdOffset = 'h0 ;
-
         
         if ((ccp != '0) && isValidCap(x.rVal1)) begin 
           let kind = getColorAwareKind(x.rVal1, ccpt);
@@ -707,10 +711,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
         $fflush;
 `endif
-        Maybe#(Ppn) objIdPpn = objIdTlbBuf.lookup(unpack(pack(getVpn(objIdVAddrValid))));
-        Maybe#(Addr) objIdPAddr = Invalid;
-        if (objIdPpn matches tagged Valid .ppn) objIdPAddr = Valid(translate(objIdVAddrValid, ppn, 0)); 
-        if (isValid(objIdVAddr) && !isValid(objIdPAddr)) begin // go to next stage by sending to TLB
+        Addr objIdVAddrValid = fromMaybe(?,objIdVAddr);
+        objIdVAddrs[pack(x.ldstq_tag)] <= objIdVAddrValid;
+        Maybe#(MemTaggedData) mObjIdTableEnt = objIdBuf.lookup(MapKeyIndex{key: objIdVAddrValid, index: hash(objIdVAddrValid)});
+        if (mObjIdTableEnt matches tagged Valid .objTableEntry) begin
+            Bool isSealed = extractObjIdSeal(objTableEntry, objIdOffset);
+            if (!isSealed) objIdVAddr = tagged Invalid;
+        end
+
+        if (isValid(objIdVAddr)) begin // go to next stage by sending to TLB
             objIdTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
                     mem_func: x.mem_func,
@@ -747,7 +756,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     ldstq_tag: x.ldstq_tag,
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
-                    objIdAddr: objIdPAddr,
+                    objIdAddr: Invalid,
                     objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
@@ -782,8 +791,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Addr a = 0;
             {a, expCause, allowCapPTE} = rsp;
             objIdPAddr = Valid(a);
-            if (x.objIdAddr matches tagged Valid .objIdAddr)
-                objIdTlbBuf.update(unpack(pack(getVpn((a)))), truncate(objIdAddr >> 12));
             if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
         end
 
@@ -818,18 +825,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             specBits: objIdTlbResp.specBits
         });
     endrule
-/*
-    rule doDTlb;
-        dTlbReqQ.deq;
-        let memExeFin = dTlbReqQ.first;
-        let x = memExeFin.data;
-        dTlb.procReq(DTlbReq {
-            inst: x,
-            specBits: memExeFin.spec_bits
-        });
-        if (verbose) $display("%t : [doDTlb] ", $time, fshow(memExeFin));
-    endrule
-*/
+
     rule doFinishMem;
         dTlb.deqProcResp;
         let dTlbResp = dTlb.procResp;

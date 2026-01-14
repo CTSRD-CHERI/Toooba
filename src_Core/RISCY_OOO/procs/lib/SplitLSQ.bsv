@@ -71,6 +71,7 @@ export SplitLSQ(..);
 export mkSplitLSQ;
 export isLdQMemFunc;
 export isStQMemFunc;
+export extractObjIdSeal;
 
 // state transition
 // Ld: enq and Idle -> set computed |-> issue and Executing |-> resp and Done |-> Deq
