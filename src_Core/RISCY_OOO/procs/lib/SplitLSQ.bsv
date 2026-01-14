@@ -951,8 +951,8 @@ module mkSplitLSQ(SplitLSQ);
     let st_objIdOffset_updObjIdSeal = getVEhrPort(st_objIdOffset, 1);
 
     let st_waitWPRespObjId_wrongSpec    = getVEhrPort(st_waitWPRespObjId, 0); // write
+    let st_waitWPRespObjId_updObjIdSeal = getVEhrPort(st_waitWPRespObjId, 0); // write, C with wrongSpec
     let st_waitWPRespObjId_enq          = getVEhrPort(st_waitWPRespObjId, 1); // C with wrongSpec
-    let st_waitWPRespObjId_updObjIdSeal = getVEhrPort(st_waitWPRespObjId, 1); // write, C with wrongSpec
 
     let st_isMMIO_verify  = getVEhrPort(st_isMMIO, 0);
     let st_isMMIO_updAddr = getVEhrPort(st_isMMIO, 0); // write
