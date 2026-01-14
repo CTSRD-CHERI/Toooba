@@ -50,6 +50,7 @@ import ClientServer::*;
 import Cntrs::*;
 import Fifos::*;
 import Ehr::*;
+import Map::*;
 import Types::*;
 import ProcTypes::*;
 import MemoryTypes::*;
@@ -356,6 +357,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // TLBs
     DTlbSynth dTlb <- mkDTlbSynth;
     DTlbSynth objIdTlb <- mkObjIdTlbSynth;
+    Map#(Vpn, Bit#(0), Ppn, 4) objIdTlbBuf <- mkMapLossy(unpack(0));
 
     let dTlbReqQ <- mkDTlbReqFifo;
 
@@ -673,7 +675,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let ccpt = inIfc.csrf_rd(csrAddrCCPT)[20:0];
 
         // calculate bitmap offset and send to TLB here
-        Maybe#(Addr) objIdVAddr = Invalid; // default invalid
+        Addr objIdVAddrValid = getAddr(x.vaddr) & (-1<<4);
+        Maybe#(Addr) objIdVAddr = Valid(objIdVAddrValid); // default invalid
         Bit#(7) objIdOffset = 'h0 ;
 
         
@@ -703,9 +706,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
         $fflush;
 `endif
-        
-        // go to next stage by sending to TLB
-        if (isValid(objIdVAddr)) begin
+        Maybe#(Ppn) objIdPpn = objIdTlbBuf.lookup(unpack(pack(getVpn(objIdVAddrValid))));
+        Maybe#(Addr) objIdPAddr = Invalid;
+        if (objIdPpn matches tagged Valid .ppn) objIdPAddr = Valid(translate(objIdVAddrValid, ppn, 0)); 
+        if (isValid(objIdVAddr) && !isValid(objIdPAddr)) begin // go to next stage by sending to TLB
             objIdTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
                     mem_func: x.mem_func,
@@ -733,15 +737,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             });
         end
         else begin
-            // dTlb.procReq(
-            dTlbReqQ.enq(ToSpecFifo {
-                data: MemExeToFinish {
+            dTlb.procReq(DTlbReq {
+            //dTlbReqQ.enq(ToSpecFifo {
+                inst: MemExeToFinish {
                     mem_func: x.mem_func,
                     tag: x.tag,
                     ldstq_tag: x.ldstq_tag,
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
-                    objIdAddr: Invalid,
+                    objIdAddr: objIdPAddr,
                     objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
@@ -757,7 +761,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     , u_id: x.u_id
 `endif
                 },
-                spec_bits: regToExe.spec_bits
+                specBits: regToExe.spec_bits
             });
         end
     endrule
@@ -775,6 +779,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Addr a = 0;
             {a, expCause, allowCapPTE} = rsp;
             objIdPAddr = Valid(a);
+            if (x.objIdAddr matches tagged Valid .objIdAddr)
+                objIdTlbBuf.update(unpack(pack(getVpn((a)))), truncate(objIdAddr >> 12));
             if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
         end
 
@@ -802,9 +808,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         );
         end
         else begin
-            // dTlb.procReq(
-            dTlbReqQ.enq(ToSpecFifo {
-                data: MemExeToFinish {
+            dTlb.procReq(DTlbReq {
+            //dTlbReqQ.enq(ToSpecFifo {
+                inst: MemExeToFinish {
                     mem_func: x.mem_func,
                     tag: x.tag,
                     ldstq_tag: x.ldstq_tag,
@@ -826,11 +832,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     , u_id: x.u_id
 `endif
                 },
-                spec_bits: objIdTlbResp.specBits
+                specBits: objIdTlbResp.specBits
             });
         end
     endrule
-
+/*
     rule doDTlb;
         dTlbReqQ.deq;
         let memExeFin = dTlbReqQ.first;
@@ -841,7 +847,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         });
         if (verbose) $display("%t : [doDTlb] ", $time, fshow(memExeFin));
     endrule
-
+*/
     rule doFinishMem;
         dTlb.deqProcResp;
         let dTlbResp = dTlb.procResp;

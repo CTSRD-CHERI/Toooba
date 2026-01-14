@@ -684,7 +684,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_waitForOlderSt  <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Ehr#(2, Addr))                 ld_paddr           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))         ld_objIdPAddr      <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(2, Bit#(7)))             ld_objIdOffset     <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Bit#(7)))              ld_objIdOffset     <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(Trap)))         ld_fault           <- replicateM(mkEhr(?));
@@ -1814,7 +1814,7 @@ module mkSplitLSQ(SplitLSQ);
             ld_objIdSealOk_updObjIdSeal[tag] <= Valid(!isSealed);
         end
         else begin
-            if(verbose) if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp for WP ", fshow(tag));
+            if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp for WP ", fshow(tag));
             ld_waitWPRespObjId_updObjIdSeal[tag] <= False;
         end
     endmethod
