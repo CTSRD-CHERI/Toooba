@@ -133,6 +133,7 @@ typedef struct {
     ByteEn  store_data_BE;
 `endif
     Bool misaligned;
+    Maybe#(Trap) cause;
     Bool capStore;
     Bool allowCapLoad;
     Maybe#(CSR_XCapCause) capException;
@@ -724,6 +725,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     store_data_BE: origBE,
 `endif
                     misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
+                    cause: Invalid,
                     capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                     allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                     capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, ccpt),
@@ -752,6 +754,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     store_data_BE: origBE,
 `endif
                     misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
+                    cause: Invalid,
                     capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                     allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                     capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, ccpt),
@@ -787,54 +790,33 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(verbose) $display("%t : [doObjIdTlb] ", $time, fshow(objIdTlbResp));
         if(isValid(cause) && verbose) $display("  [doObjIdTlb - objIdTlb response] PAGEFAULT!");
 
-        if(isValid(cause)) begin
-            // update LSQ with fault
-            doAssert(isValid(x.objIdAddr), "fault must have come from translation of valid objId VAddr");
-            inIfc.rob_setExecuted_doFinishMem(x.tag, fromMaybe(0, x.objIdAddr),
+        dTlb.procReq(DTlbReq {
+        //dTlbReqQ.enq(ToSpecFifo {
+            inst: MemExeToFinish {
+                mem_func: x.mem_func,
+                tag: x.tag,
+                ldstq_tag: x.ldstq_tag,
+                shiftedBE: x.shiftedBE,
+                vaddr: x.vaddr,
+                // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
+                objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
+                objIdOffset: x.objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
-                                             x.store_data, x.store_data_BE,
+                store_data: x.store_data,
+                store_data_BE: x.store_data_BE,
 `endif
-                                             False, False
-`ifdef RVFI
-                                             , ExtraTraceBundle{
-                                                 regWriteData: memData[pack(x.ldstq_tag)],
-                                                 memByteEn: unpack(truncate(pack(x.shiftedBE.DataMemAccess) >> getAddr(x.vaddr)[3:0]))
-                                             }
-`endif
-                                            );
-            LSQUpdateAddrResult updRes <- lsq.updateAddr(
-                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE,
-                /*(((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)*/ Invalid, x.objIdOffset
-        );
-        end
-        else begin
-            dTlb.procReq(DTlbReq {
-            //dTlbReqQ.enq(ToSpecFifo {
-                inst: MemExeToFinish {
-                    mem_func: x.mem_func,
-                    tag: x.tag,
-                    ldstq_tag: x.ldstq_tag,
-                    shiftedBE: x.shiftedBE,
-                    vaddr: x.vaddr,
-                    // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
-                    objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
-                    objIdOffset: x.objIdOffset,
-`ifdef INCLUDE_TANDEM_VERIF
-                    store_data: x.store_data,
-                    store_data_BE: x.store_data_BE,
-`endif
-                    misaligned: x.misaligned,
-                    capStore: x.capStore,
-                    allowCapLoad: x.allowCapLoad,
-                    capException: x.capException,
-                    check: x.check
+                misaligned: x.misaligned,
+                cause: cause,
+                capStore: x.capStore,
+                allowCapLoad: x.allowCapLoad,
+                capException: x.capException,
+                check: x.check
 `ifdef KONATA
-                    , u_id: x.u_id
+                , u_id: x.u_id
 `endif
-                },
-                specBits: objIdTlbResp.specBits
-            });
-        end
+            },
+            specBits: objIdTlbResp.specBits
+        });
     endrule
 /*
     rule doDTlb;
@@ -854,7 +836,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let x = dTlbResp.inst;
         Addr paddr = 0;
         Bool allowCapPTE = False;
-        Maybe#(Trap) cause = Invalid;
+        Maybe#(Trap) cause = x.cause;
         if (dTlbResp.resp matches tagged Valid .rsp) begin
             Maybe#(Exception) expCause = Invalid;
             {paddr, expCause, allowCapPTE} = rsp;
