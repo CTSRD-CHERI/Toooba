@@ -345,6 +345,7 @@ typedef union tagged {
     void AndPerm;
     void SetFlags;
     void SetHigh;
+    void SetPVer;
     void BuildCap;
     void Move;
     void ClearTag;
@@ -365,6 +366,7 @@ typedef union tagged {
     void GetPerm;
     void GetType;
     void GetHigh;
+    void GetPVer;
     void ToPtr;
 } CapInspectFunc deriving(Bits, Eq, FShow);
 

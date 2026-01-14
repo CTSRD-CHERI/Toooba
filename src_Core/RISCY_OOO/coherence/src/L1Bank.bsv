@@ -618,11 +618,10 @@ endfunction
                 if(succeed) begin
                     let taggedData = getTaggedDataAt(curLine, dataSel);
                     CapPipe loaded_dataUnpacked = fromMem(unpack(pack(taggedData)));
-                    //Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
+                    Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
                     if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
                     //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
-                        //if (poison_pver == req.pver) begin 
-                        if (req.pver == req.pver) begin 
+                        if (req.pver < poison_pver ) begin  
                             newLine = curLine;
                             $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
                                 $time,
@@ -650,10 +649,10 @@ endfunction
                 MemTaggedData curData = getTaggedDataAt(curLine, dataSel);
                 //if(curData.tag == True && curData.data[1][46] == 1'b1 && !permitPoison) begin 
                 CapPipe loaded_dataUnpacked = fromMem(unpack(pack(curData)));
-                //Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
+                Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
                 if(isValidCap(loaded_dataUnpacked) && curData.data[1][46] == 1'b1 ) begin
-                    //if(poison_pver == pver) begin 
-                    if(pver == pver) begin
+                    if (req.pver < poison_pver ) begin  
+                    //if(pver == pver) begin
                         $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
                             $time,
                             fshow(curData), fshow(pver), isValidCap(loaded_dataUnpacked)
