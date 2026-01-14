@@ -2,7 +2,6 @@
 //
 //-
 // RVFI_DII + CHERI modifications:
-//     Copyright (c) 2024 Samuel Stark
 //     Copyright (c) 2020-2022 Alexandre Joannou
 //     Copyright (c) 2020 Peter Rugg
 //     Copyright (c) 2020 Jonathan Woodruff

@@ -7,7 +7,6 @@ package Proc;
 //
 //-
 // RVFI_DII + CHERI modifications:
-//     Copyright (c) 2024 Samuel Stark
 //     Copyright (c) 2020 Jessica Clarke
 //     Copyright (c) 2020 Alexandre Joannou
 //     Copyright (c) 2020 Peter Rugg
