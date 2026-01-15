@@ -163,8 +163,9 @@ typedef struct {
     LineMemDataOffset offset;
     MemDataByteEn shiftedBE;
     MemTaggedData shiftedData; 
-    Bool permitPoison;
+    Bool          permitPoison;
     Bit#(8)       pver;
+    Bool          cacheLineWr;
 } WaitStResp deriving(Bits, Eq, FShow);
 
 //SpecFifo#(2,IncorrectSpec,1,1) incorrectSpec_ff <- mkSpecFifoCF(True);
@@ -423,9 +424,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             // now figure out the data to be written
             CLineMemDataByteEn be = replicate(replicate(False));
             Line data = unpack(0);
-            be[waitSt.offset] = waitSt.shiftedBE;
-            data.data[waitSt.offset] = waitSt.shiftedData.data;
-            data.tag[waitSt.offset] = waitSt.shiftedData.tag;
+            if (waitSt.cacheLineWr) begin 
+                be = replicate(replicate(True));
+                data.data = replicate(waitSt.shiftedData.data);
+                data.tag  = replicate(waitSt.shiftedData.tag);
+            end else begin 
+                be[waitSt.offset] = waitSt.shiftedBE;
+                data.data[waitSt.offset] = waitSt.shiftedData.data;
+                data.tag[waitSt.offset] = waitSt.shiftedData.tag;
+            end 
             //return tuple4(unpack(pack(be)), data, waitSt.permitPoison, waitSt.pver);
             return tuple4(unpack(pack(be)), data, waitSt.permitPoison, waitSt.pver);
         endmethod
@@ -1273,7 +1280,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             shiftedBE: lsqDeqSt.shiftedBE,
             shiftedData: lsqDeqSt.stData,
             permitPoison: lsqDeqSt.permitPoison,
-            pver: lsqDeqSt.pver
+            pver: lsqDeqSt.pver,
+            cacheLineWr: lsqDeqSt.alloc_policy == 2'b01 || lsqDeqSt.alloc_policy == 2'b11
         });
         // we leave deq to resp time
         // ROB should have already been set to executed
