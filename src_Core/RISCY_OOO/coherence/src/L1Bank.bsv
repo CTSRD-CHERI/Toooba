@@ -621,16 +621,15 @@ endfunction
                     Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
                     if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
                     //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
-                        if (req.pver < poison_pver ) begin  
-                            newLine = curLine;
+                        if (req.pver >  poison_pver || req.alloc_policy == 3'b001 ) begin  
+                            let newTaggedData =
+                                mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
+                            newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
+                        end else begin 
                             $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
                                 $time,
                                 fshow(taggedData)
                             );
-                        end else begin 
-                            let newTaggedData =
-                                mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
-                            newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
                         end 
                     end else begin 
                         let newTaggedData =
@@ -651,28 +650,25 @@ endfunction
                 CapPipe loaded_dataUnpacked = fromMem(unpack(pack(curData)));
                 Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
                 if(isValidCap(loaded_dataUnpacked) && curData.data[1][46] == 1'b1 && !permitPoison ) begin
-                    if (req.pver < poison_pver ) begin  
+                    if (req.pver > poison_pver || req.alloc_policy == 3'b001 ) begin  
                     //if(pver == pver) begin
-                        $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
-                            $time,
-                            fshow(curData), fshow(pver), isValidCap(loaded_dataUnpacked)
-                        );
-                    end else begin 
                         $display("%t L1 %m pipelineResp: found mismatch poison on store access, return 0",
                             $time,
                             fshow(curData)
                         );
                         newLine = getUpdatedLine(curLine, be, unpack(0));
+                    end else begin 
+                        $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
+                            $time,
+                            fshow(curData), fshow(pver), isValidCap(loaded_dataUnpacked), fshow(permitPoison)
+                        );
                     end 
                 end else begin 
                     if(req.alloc_policy == 3'b001) begin //zeroing
                         newLine = getUpdatedLine(curLine, be, unpack(0));
                     end else begin 
                         newLine = getUpdatedLine(curLine, be, wrLine);
-                        if(req.alloc_policy == 3'b010) begin 
-
-                        end 
-                        else if (req.alloc_policy == 3'b011) begin 
+                        if (req.alloc_policy == 3'b011) begin 
                             line_poisoned = True;
                         end else begin 
                             line_poisoned = False;

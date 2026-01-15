@@ -257,7 +257,7 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
                                 mem_func: mem_func,
                                 amo_func: amo_func,
                                 unsignedLd: unsignedLd,
-				alloc_policy: alloc_policy,
+				                alloc_policy: alloc_policy,
                                 byteOrTagEn: DataMemAccess(byteEn),
                                 aq: amo,
                                 rl: amo,
