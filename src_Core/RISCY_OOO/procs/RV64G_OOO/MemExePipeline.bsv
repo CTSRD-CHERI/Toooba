@@ -1048,7 +1048,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             amoInst: ?,
             loadTags: False,
             pcHash: ?,
-            pver: 8'h0,
+            pver: lsqDeqLd.pver,
             permitPoison: lsqDeqLd.permitPoison
         };
         reqLrScAmoQ.enq(req);
