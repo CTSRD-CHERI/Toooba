@@ -917,7 +917,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
 
-            if (data.data[1][46] ==1'b1 && data.tag==True && !res.permitPoison) begin 
+            //if (data.data[1][46] ==1'b1 && data.tag==True && !res.permitPoison) begin 
+            if (data.data[1][46] ==1'b1 && data.tag==True && res.pver != 0) begin 
                 if(res.pver >  poison_pver ) begin  
                    inIfc.writeRegFile(dst.indx, unpack(0));
                    $display("%t poison load mismatch return 0: ", $time, rule_name, " ", fshow(data));
