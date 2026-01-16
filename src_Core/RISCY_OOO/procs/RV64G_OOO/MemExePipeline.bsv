@@ -396,7 +396,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
-    Map#(Addr, Bit#(16), MemTaggedData, 4) objIdBuf <- mkMapLossy(unpack(0));
+    // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
+    // 4-bit index == 16 entries per set.
+    // Each record is a MemTaggedData; essentially a 128-bit word.
+    // 4-way associative, so 64 entries total
+    // Default value of 0.
+    Map#(Addr, Bit#(4), Maybe#(MemTaggedData), 4) objIdBuf <- mkMapLossy(Invalid);
 
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
@@ -415,14 +420,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     // Save read in buffer.  Should do for both load and store responses, but I haven't figured out a store ID.
                     LdStQTag ldstq_tag = tagged Ld tag;
                     Addr addr = objIdVAddrs[pack(ldstq_tag)];
-                    objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, d);
+                    objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
                 end
                 else if (objSealRdType == St) begin
                     StQTag tag = truncate(id);
                     memObjIdRespStQ.enq(tuple2(tag, d));
                     LdStQTag ldstq_tag = tagged St tag;
                     Addr addr = objIdVAddrs[pack(ldstq_tag)];
-                    objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, d);
+                    objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
                 end
                 else begin
                     doAssert(False, "unknown objSealRdType");
@@ -687,7 +692,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let ccpt = inIfc.csrf_rd(csrAddrCCPT)[20:0];
 
         // calculate bitmap offset and send to TLB here
-        Maybe#(Addr) objIdVAddr = Valid(getAddr(x.vaddr) & (-1<<4)); // default invalid
+`ifdef OBJID_DEBUG
+        Maybe#(Addr) objIdVAddr = Valid((getAddr(x.vaddr)>>7) & (-1<<4)); // derive default from VAddr
+`else
+        Maybe#(Addr) objIdVAddr = Invalid; // default invalid
+`endif
         Bit#(7) objIdOffset = 'h0 ;
         
         if ((ccp != '0) && isValidCap(x.rVal1)) begin 
@@ -718,10 +727,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         Addr objIdVAddrValid = fromMaybe(?,objIdVAddr);
         objIdVAddrs[pack(x.ldstq_tag)] <= objIdVAddrValid;
-        Maybe#(MemTaggedData) mObjIdTableEnt = objIdBuf.lookup(MapKeyIndex{key: objIdVAddrValid, index: hash(objIdVAddrValid)});
-        if (mObjIdTableEnt matches tagged Valid .objTableEntry) begin
-            Bool isSealed = extractObjIdSeal(objTableEntry, objIdOffset);
-            if (!isSealed) objIdVAddr = tagged Invalid;
+        Maybe#(Maybe#(MemTaggedData)) mmObjIdTableEnt = objIdBuf.lookup(MapKeyIndex{key: objIdVAddrValid, index: hash(objIdVAddrValid)});
+        if (mmObjIdTableEnt matches tagged Valid .mObjIdTableEnt) begin
+            if (mObjIdTableEnt matches tagged Valid .objIdTableEnt) begin
+                Bool isSealed = extractObjIdSeal(objIdTableEnt, objIdOffset);
+                if (!isSealed) objIdVAddr = tagged Invalid;
+            end
         end
 
         if (isValid(objIdVAddr)) begin // go to next stage by sending to TLB
@@ -1598,6 +1609,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             }
 `endif
         );
+        objIdBuf.clear;
         if(verbose) $display("[doDeqStQ_Fence] ", fshow(lsqDeqSt));
 `ifdef PERF_COUNT
         if(inIfc.doStats) begin

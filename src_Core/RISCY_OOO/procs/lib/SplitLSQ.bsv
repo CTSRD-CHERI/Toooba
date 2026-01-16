@@ -571,14 +571,15 @@ function Bool isStQMemFunc(MemFunc f);
 endfunction
 
 function Bool extractObjIdSeal(MemTaggedData d, Bit#(7) offset);
-    //Nerf!!!
+`ifdef OBJID_DEBUG
     return False;
-    /*
+`else
     if(offset <64)
          return (d.data[0][offset] == 1'b1);
     else 
         return (d.data[1][offset-64] == 1'b1);
-    */
+    // Would "pack(d.data)[offset] == 1'b1" be faster?  Not sure if it will generate an actual subtract...
+`endif
 endfunction
 
 // issueQ of LSQ tags for issue
