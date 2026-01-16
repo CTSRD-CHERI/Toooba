@@ -398,9 +398,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
     // 4-bit index == 16 entries per set.
-    // Each record is a MemTaggedData; essentially a 128-bit word.
+    // Each record is a Maybe#(MemTaggedData); essentially a 128-bit word with a validity bit.
     // 4-way associative, so 64 entries total
-    // Default value of 0.
+    // Default value of Invalid
     Map#(Addr, Bit#(4), Maybe#(MemTaggedData), 4) objIdBuf <- mkMapLossy(Invalid);
 
     // fifo for Lr/Sc/Amo resp
@@ -728,8 +728,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Addr objIdVAddrValid = fromMaybe(?,objIdVAddr);
         objIdVAddrs[pack(x.ldstq_tag)] <= objIdVAddrValid;
         Maybe#(Maybe#(MemTaggedData)) mmObjIdTableEnt = objIdBuf.lookup(MapKeyIndex{key: objIdVAddrValid, index: hash(objIdVAddrValid)});
-        if (mmObjIdTableEnt matches tagged Valid .mObjIdTableEnt) begin
-            if (mObjIdTableEnt matches tagged Valid .objIdTableEnt) begin
+        if (mmObjIdTableEnt matches tagged Valid .mObjIdTableEnt) begin // First maybe to see if the key matched
+            if (mObjIdTableEnt matches tagged Valid .objIdTableEnt) begin // Second maybe to see if this was a valid entry
                 Bool isSealed = extractObjIdSeal(objIdTableEnt, objIdOffset);
                 if (!isSealed) objIdVAddr = tagged Invalid;
             end
