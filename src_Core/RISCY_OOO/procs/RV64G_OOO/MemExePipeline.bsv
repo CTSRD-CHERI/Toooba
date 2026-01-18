@@ -125,7 +125,8 @@ typedef struct {
     // result
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
-    Maybe#(Addr) objIdAddr;
+    Maybe#(Addr) objIdAddr; // ObjId physical addr (Invalid if TLB fault)
+    Maybe#(Addr) objIdVAddr; // ObjId virtual addr (preserved for fault reporting)
     Bit#(7) objIdOffset;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
@@ -743,7 +744,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     ldstq_tag: x.ldstq_tag,
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
-                    objIdAddr: objIdVAddr, //Valid('h80010000),
+                    objIdAddr: objIdVAddr, // Will be replaced with paddr by doObjIdTlb
+                    objIdVAddr: objIdVAddr, // Preserve vaddr for fault reporting
                     objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
@@ -773,6 +775,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
                     objIdAddr: Invalid,
+                    objIdVAddr: Invalid, // No ObjId check for this path
                     objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
@@ -823,6 +826,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 vaddr: x.vaddr,
                 // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
                 objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
+                objIdVAddr: x.objIdVAddr, // Preserve vaddr for fault reporting
                 objIdOffset: x.objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.store_data,
@@ -849,12 +853,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Addr paddr = 0;
         Bool allowCapPTE = False;
         Maybe#(Trap) cause = x.cause;
+        Bool isObjFault = isValid(cause);
         if (dTlbResp.resp matches tagged Valid .rsp) begin
             Maybe#(Exception) expCause = Invalid;
             {paddr, expCause, allowCapPTE} = rsp;
-            if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
-        end
-        else begin
+            if (!isValid(cause) && isValid(expCause)) begin
+               cause = Valid(Exception(fromMaybe(?, expCause)));
+            end        
+        end else begin
             doAssert(False, "[doFinishMem] Regular DTlb response must be valid");
         end
 
@@ -925,7 +931,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                               !isMMIO && isValid(x.objIdAddr);
         Bool access_at_commit = !isValid(cause) && (isMMIO || isLrScAmo);
         Bool non_mmio_st_done = !isValid(cause) && !isMMIO && (x.mem_func == St) && !needsObjIdCheck;
-        inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
+        Addr faultAddr = isObjFault ? fromMaybe(0, x.objIdVAddr) : getAddr(x.vaddr);
+        inIfc.rob_setExecuted_doFinishMem(x.tag, faultAddr ,
 `ifdef INCLUDE_TANDEM_VERIF
                                           store_data, store_data_BE,
 `endif
