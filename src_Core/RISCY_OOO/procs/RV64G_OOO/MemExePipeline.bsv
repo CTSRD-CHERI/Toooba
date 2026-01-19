@@ -692,7 +692,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         // calculate bitmap offset and send to TLB here
 `ifdef OBJID_DEBUG
-        Maybe#(Addr) objIdVAddr = Valid((getAddr(x.vaddr)>>7) & (-1<<4)); // derive default from VAddr
+        Maybe#(Addr) objIdVAddr = Valid(((getAddr(x.vaddr)>>7) & (-1<<4)) + 'h80000000); // derive default from VAddr, locate in TestRIG memory.
 `else
         Maybe#(Addr) objIdVAddr = Invalid; // default invalid
 `endif
@@ -1229,7 +1229,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (mInstInfo matches tagged Valid { .instTag, .memFunc } &&& memFunc == St) begin
             inIfc.rob_setExecuted_doFinishMem(
                 instTag,
-                0, // vaddr not needed for this bookkeeping pulse
+                -1, // vaddr not needed for this bookkeeping pulse
 `ifdef INCLUDE_TANDEM_VERIF
                 0, 0, // store_data, store_data_BE (unused here)
 `endif
