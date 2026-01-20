@@ -356,22 +356,20 @@ def run_command (command, log_fd):
         if python_minor_version < 6:
             # Python 3.5 and earlier
             result = subprocess.run (args = command,
-                                    bufsize = 0,
-                                    stdout = subprocess.PIPE,
+                                    bufsize = -1,
+                                    stdout = log_fd,
                                     stderr = subprocess.STDOUT,
                                     universal_newlines = True,
                                     timeout=timeout)
         else:
             # Python 3.6 and later
             result = subprocess.run (args = command,
-                                    bufsize = 0,
-                                    stdout = subprocess.PIPE,
+                                    bufsize = -1,
+                                    stdout = log_fd,
                                     stderr = subprocess.STDOUT,
                                     encoding='utf-8',
                                     timeout=timeout)
         log_fd.write(f"Finished with exit code {result.returncode}\n")
-        log_fd.write("Stdout:\n")
-        log_fd.write (result.stdout)
         return result
     except subprocess.TimeoutExpired:
         sys.stderr.write(f"TIMEOUT: {command_str} !\n")
