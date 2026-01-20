@@ -125,8 +125,7 @@ typedef struct {
     // result
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
-    Maybe#(Addr) objIdAddr; // ObjId physical addr (Invalid if TLB fault)
-    Maybe#(Addr) objIdVAddr; // ObjId virtual addr (preserved for fault reporting)
+    Maybe#(Addr) objIdAddr;
     Bit#(7) objIdOffset;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
@@ -134,7 +133,6 @@ typedef struct {
     ByteEn  store_data_BE;
 `endif
     Bool misaligned;
-    Maybe#(Trap) cause;
     Bool capStore;
     Bool allowCapLoad;
     Maybe#(CSR_XCapCause) capException;
@@ -744,15 +742,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     ldstq_tag: x.ldstq_tag,
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
-                    objIdAddr: objIdVAddr, // Will be replaced with paddr by doObjIdTlb
-                    objIdVAddr: objIdVAddr, // Preserve vaddr for fault reporting
+                    objIdAddr: objIdVAddr, //Valid('h80010000),
                     objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
                     store_data_BE: origBE,
 `endif
                     misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
-                    cause: Invalid,
                     capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                     allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                     capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, ccpt),
@@ -766,37 +762,35 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             });
         end
         else begin
-            dTlb.procReq(DTlbReq {
-            //dTlbReqQ.enq(ToSpecFifo {
-                inst: MemExeToFinish {
+            // dTlb.procReq(
+            dTlbReqQ.enq(ToSpecFifo {
+                data: MemExeToFinish {
                     mem_func: x.mem_func,
                     tag: x.tag,
                     ldstq_tag: x.ldstq_tag,
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
                     objIdAddr: Invalid,
-                    objIdVAddr: Invalid, // No ObjId check for this path
                     objIdOffset: objIdOffset,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
                     store_data_BE: origBE,
 `endif
                     misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE),
-                    cause: Invalid,
                     capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                     allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                     capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, ccpt),
                     check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                            ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks, ccpt)
+                                            ddc, getAddr(x.vaddr),
+                                            accessByteCount, x.cap_checks, ccpt)
 `ifdef KONATA
                     , u_id: x.u_id
 `endif
                 },
-                specBits: regToExe.spec_bits
+                spec_bits: regToExe.spec_bits
             });
         end
     endrule
-
     (* descending_urgency = "doObjIdTlb, doExeMem" *)
     rule doObjIdTlb;
         objIdTlb.deqProcResp;
@@ -816,34 +810,65 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(verbose) $display("%t : [doObjIdTlb] ", $time, fshow(objIdTlbResp));
         if(isValid(cause) && verbose) $display("  [doObjIdTlb - objIdTlb response] PAGEFAULT!");
 
-        dTlb.procReq(DTlbReq {
-        //dTlbReqQ.enq(ToSpecFifo {
-            inst: MemExeToFinish {
-                mem_func: x.mem_func,
-                tag: x.tag,
-                ldstq_tag: x.ldstq_tag,
-                shiftedBE: x.shiftedBE,
-                vaddr: x.vaddr,
-                // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
-                objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
-                objIdVAddr: x.objIdVAddr, // Preserve vaddr for fault reporting
-                objIdOffset: x.objIdOffset,
+        if(isValid(cause)) begin
+            // update LSQ with fault
+            doAssert(isValid(x.objIdAddr), "fault must have come from translation of valid objId VAddr");
+            inIfc.rob_setExecuted_doFinishMem(x.tag, fromMaybe(0, x.objIdAddr),
 `ifdef INCLUDE_TANDEM_VERIF
-                store_data: x.store_data,
-                store_data_BE: x.store_data_BE,
+                                             x.store_data, x.store_data_BE,
 `endif
-                misaligned: x.misaligned,
-                cause: cause,
-                capStore: x.capStore,
-                allowCapLoad: x.allowCapLoad,
-                capException: x.capException,
-                check: x.check
+                                             False, False
+`ifdef RVFI
+                                             , ExtraTraceBundle{
+                                                 regWriteData: memData[pack(x.ldstq_tag)],
+                                                 memByteEn: unpack(truncate(pack(x.shiftedBE.DataMemAccess) >> getAddr(x.vaddr)[3:0]))
+                                             }
+`endif
+                                            );
+            LSQUpdateAddrResult updRes <- lsq.updateAddr(
+                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE,
+                /*(((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)*/ Invalid, x.objIdOffset
+        );
+        end
+        else begin
+            // dTlb.procReq(
+            dTlbReqQ.enq(ToSpecFifo {
+                data: MemExeToFinish {
+                    mem_func: x.mem_func,
+                    tag: x.tag,
+                    ldstq_tag: x.ldstq_tag,
+                    shiftedBE: x.shiftedBE,
+                    vaddr: x.vaddr,
+                    // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
+                    objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
+                    objIdOffset: x.objIdOffset,
+`ifdef INCLUDE_TANDEM_VERIF
+                    store_data: x.store_data,
+                    store_data_BE: x.store_data_BE,
+`endif
+                    misaligned: x.misaligned,
+                    capStore: x.capStore,
+                    allowCapLoad: x.allowCapLoad,
+                    capException: x.capException,
+                    check: x.check
 `ifdef KONATA
-                , u_id: x.u_id
+                    , u_id: x.u_id
 `endif
-            },
-            specBits: objIdTlbResp.specBits
+                },
+                spec_bits: objIdTlbResp.specBits
+            });
+        end
+    endrule
+    
+    rule doDTlb;
+        dTlbReqQ.deq;
+        let memExeFin = dTlbReqQ.first;
+        let x = memExeFin.data;
+        dTlb.procReq(DTlbReq {
+            inst: x,
+            specBits: memExeFin.spec_bits
         });
+        if (verbose) $display("%t : [doDTlb] ", $time, fshow(memExeFin));
     endrule
 
     rule doFinishMem;
@@ -852,15 +877,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let x = dTlbResp.inst;
         Addr paddr = 0;
         Bool allowCapPTE = False;
-        Maybe#(Trap) cause = x.cause;
-        Bool isObjFault = isValid(cause);
+        Maybe#(Trap) cause = Invalid;
         if (dTlbResp.resp matches tagged Valid .rsp) begin
             Maybe#(Exception) expCause = Invalid;
             {paddr, expCause, allowCapPTE} = rsp;
-            if (!isValid(cause) && isValid(expCause)) begin
-               cause = Valid(Exception(fromMaybe(?, expCause)));
-            end        
-        end else begin
+            if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
+        end
+        else begin
             doAssert(False, "[doFinishMem] Regular DTlb response must be valid");
         end
 
@@ -931,8 +954,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                               !isMMIO && isValid(x.objIdAddr);
         Bool access_at_commit = !isValid(cause) && (isMMIO || isLrScAmo);
         Bool non_mmio_st_done = !isValid(cause) && !isMMIO && (x.mem_func == St) && !needsObjIdCheck;
-        Addr faultAddr = isObjFault ? fromMaybe(0, x.objIdVAddr) : getAddr(x.vaddr);
-        inIfc.rob_setExecuted_doFinishMem(x.tag, faultAddr ,
+        inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
 `ifdef INCLUDE_TANDEM_VERIF
                                           store_data, store_data_BE,
 `endif
