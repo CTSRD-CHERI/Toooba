@@ -108,14 +108,14 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          let mem_req_rd_addr = AXI4_ARFlit {arid:     arid,
                                             araddr:   addr,
                                             arlen:    0,           // burst len = arlen+1
-                                            arsize:   id.tag_req ? 1 : 64,
+                                            arsize:   64,
                                             arburst:  INCR,
                                             arlock:   fabric_default_lock,
                                             arcache:  fabric_default_arcache,
                                             arprot:   fabric_default_prot,
                                             arqos:    fabric_default_qos,
                                             arregion: fabric_default_region,
-                                            aruser:   pack(id.tag_req)};
+                                            aruser:   fabric_default_aruser};
 
          masterPortShim.slave.ar.put(mem_req_rd_addr);
 
@@ -137,7 +137,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       end
 
       Addr  line_addr = {ld.addr [63:6], 6'h0 };                      // Addr of containing cache line
-      fa_fabric_send_read_req (line_addr, LLC_AXI_ID{tag_req: ld.tag_req, id: ld.id, child: ld.child});
+      fa_fabric_send_read_req (line_addr, LLC_AXI_ID{id: ld.id, child: ld.child});
       llc.toM.deq;
    endrule
 
@@ -159,9 +159,6 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       MemRsMsg #(idT, childT) resp = MemRsMsg {data:  new_cline,
                                               child: id.child,
                                               id:    id.id};
-      if (id.tag_req) begin
-        resp.data = CLine { tag: unpack(truncate(mem_rsp.rdata)), data: ?};
-      end
       llc.rsFromM.enq (resp);
       if (cfg_verbosity > 1)
         $display ("    Response to LLC: ", fshow (resp));

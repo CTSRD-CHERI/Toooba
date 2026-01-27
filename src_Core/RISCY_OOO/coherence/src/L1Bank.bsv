@@ -880,10 +880,10 @@ endfunction
         // check tag match
         Bool tag_match = ram.info.tag == getTag(procRq.addr);
         // check enough cache state for hit
-        Bool enough_cs_to_hit = enoughCacheState(ram.info.cs, procRq.toState);
+        Bool enough_cs = enoughCacheState(ram.info.cs, procRq.toState);
         // check if cs is not I
         Bool cs_valid = ram.info.cs > I;
-        Bool enough_cs_no_replace = ram.info.cs >= S || (ram.info.cs >= T && procRq.toState == T);
+
         if(ram.info.owner matches tagged Valid .cOwner) begin
             if(cOwner != n) begin
                 doAssert(pipeOutCState == Init, "must first time go through tag match");
@@ -929,7 +929,7 @@ endfunction
                     "cRq swapped in by previous cRq, tag must match & cs > I"
                 );
                 // Hit or Miss (but no replacement)
-                if(enough_cs_to_hit) begin
+                if(enough_cs) begin
                    if (verbose)
                     $display("%t L1 %m pipelineResp: cRq: own by itself, hit", $time);
                     cRqHit(n, procRq);
@@ -945,15 +945,9 @@ endfunction
                     cRqScEarlyFail(True);
                 end
                 else begin
-                   if (enough_cs_no_replace) begin
-                      if (verbose)
-                       $display("%t L1 %m pipelineResp: cRq: own by itself, miss no replace", $time);
-                      cRqMissNoReplacement;
-                   end else begin
-                      if (verbose)
-                       $display("%t L1 %m pipelineResp: cRq: own by itself, replace as upgrade from tag only", $time);
-                      cRqReplacement;
-                   end
+                   if (verbose)
+                    $display("%t L1 %m pipelineResp: cRq: own by itself, miss no replace", $time);
+                    cRqMissNoReplacement;
                 end
             end
         end
@@ -968,7 +962,7 @@ endfunction
             doAssert(!isValid(cRqDependEOC), "end of chain is valid but the chosen way is not owned");
             
             // Check hit or miss, replacment may be needed
-            if(tag_match && enough_cs_to_hit) begin
+            if(tag_match && enough_cs) begin
                 // Hit
                 doAssert(cs_valid, "hit, so cs must > I");
                 if (verbose)
