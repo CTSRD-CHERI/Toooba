@@ -883,6 +883,7 @@ endfunction
         Bool enough_cs_to_hit = enoughCacheState(ram.info.cs, procRq.toState);
         // check if cs is not I
         Bool cs_valid = ram.info.cs > I;
+        Bool enough_cs_no_replace = ram.info.cs >= S || (ram.info.cs >= T && procRq.toState == T);
         if(ram.info.owner matches tagged Valid .cOwner) begin
             if(cOwner != n) begin
                 doAssert(pipeOutCState == Init, "must first time go through tag match");
@@ -944,9 +945,15 @@ endfunction
                     cRqScEarlyFail(True);
                 end
                 else begin
-                  if (verbose)
-                   $display("%t L1 %m pipelineResp: cRq: own by itself, miss no replace", $time);
-                  cRqMissNoReplacement;
+                   if (enough_cs_no_replace) begin
+                      if (verbose)
+                       $display("%t L1 %m pipelineResp: cRq: own by itself, miss no replace", $time);
+                      cRqMissNoReplacement;
+                   end else begin
+                      if (verbose)
+                       $display("%t L1 %m pipelineResp: cRq: own by itself, replace as upgrade from tag only", $time);
+                      cRqReplacement;
+                   end
                 end
             end
         end

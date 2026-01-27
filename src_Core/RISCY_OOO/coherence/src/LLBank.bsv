@@ -969,7 +969,6 @@ endfunction
         );
         // decide upgrade state
         Msi toState = cRq.toState;
-        // XXX Add auto update to S from T here
         if(cRq.toState == S && cRq.canUpToE && ram.info.dir == replicate(I) && respLoadWithE(isMRs)) begin
             toState = E;
         end
@@ -980,7 +979,7 @@ endfunction
             toState: toState
         });
         cRqMshr.pipelineResp.setStateSlot(n, Done, ?); // we no longer need slot info
-        cRqMshr.pipelineResp.setData(n, ram.info.dir[cRq.child] <= T ? Valid (ram.line) : Invalid);
+        cRqMshr.pipelineResp.setData(n, ram.info.dir[cRq.child] == I ? Valid (ram.line) : Invalid);
         // update child dir
         dirT newDir = ram.info.dir;
         if (!cRqIsPrefetch[n]) begin
@@ -1182,26 +1181,25 @@ endfunction
         endfunction
 
         // function to process cRq from child miss without replacement (MSHR slot may have garbage)
-        function Action cRqFromCMissNoReplacement(Vector#(childNum, DirPend) dirPend, Bool dataReq);
+        function Action cRqFromCMissNoReplacement(Vector#(childNum, DirPend) dirPend);
         action
             doAssert(isRqFromC(cRq.id), "should be cRq from child");
             // it is impossible in LLC to have slot.waitP == True in this function
             // because there is no pRq in LLC to interrupt a cRq
             cRqSlotT cSlot = pipeOutCSlot;
             doAssert(!cSlot.waitP, "waitP must be false");
-            // in LLC, we req memory only when we don't have enough data
-            Bool reqMem = ram.info.cs == I || (dataReq && ram.info.cs == T);
-            if(reqMem) begin
+            // in LLC, we req memory only when cur cs is I
+            if(ram.info.cs == I) begin
                 toMInfoQ.enq(ToMemInfo{
                     mshrIdx: n,
                     t: Ld
                 });
-                //doAssert(ram.info.dir == replicate(I), "dir should be all I");
+                doAssert(ram.info.dir == replicate(I), "dir should be all I");
             end
             // update mshr (data field is irrelevant, should be already invalid)
             cRqMshr.pipelineResp.setStateSlot(n, WaitSt, LLCRqSlot {
                 way: pipeOut.way, // use way from pipeline
-                waitP: reqMem,
+                waitP: ram.info.cs == I,
                 repTag: ?, // no replacement
                 dirPend: dirPend
             });
@@ -1364,7 +1362,7 @@ endfunction
                 if(cRq.id matches tagged Child ._i) begin
                     // req from child, get dir pend
                     Vector#(childNum, DirPend) dirPend = getDirPendNonCompatForChild;
-                    if(dirPend == replicate(Invalid) && (cRq.toState == T || ram.info.cs >= S)) begin
+                    if(dirPend == replicate(Invalid)) begin
                        if (verbose)
                         $display("%t LL %m pipelineResp: cRq from child: own by itself, hit", $time);
                         cRqFromCHit(n, cRq, False);
@@ -1374,13 +1372,13 @@ endfunction
                         $display("%t LL %m pipelineResp: cRq from child: own by itself, miss no replace: ", $time,
                             fshow(dirPend)
                         );
-                        cRqFromCMissNoReplacement(dirPend, cRq.toState >= S);
+                        cRqFromCMissNoReplacement(dirPend);
                     end
                 end
                 else begin
                     // req from DMA, get dir pend
                     Vector#(childNum, DirPend) dirPend = getDirPendNonCompatForDma;
-                    if(dirPend == replicate(Invalid) && (cRq.toState == T || ram.info.cs >= S)) begin
+                    if(dirPend == replicate(Invalid)) begin
                        if (verbose)
                         $display("%t LL %m pipelineResp: cRq from dma: own by itself, hit", $time);
                         cRqFromDmaHit(n, cRq);
@@ -1417,7 +1415,7 @@ endfunction
                     if(ram.info.cs == I || ram.info.tag == getTag(cRq.addr)) begin
                         // No Replacement necessary, check dir
                         Vector#(childNum, DirPend) dirPend = getDirPendNonCompatForChild;
-                        if(ram.info.cs > I && dirPend == replicate(Invalid) && (cRq.toState == T || ram.info.cs >= S)) begin
+                        if(ram.info.cs > I && dirPend == replicate(Invalid)) begin
                            if (verbose)
                             $display("%t LL %m pipelineResp: cRq: no owner, hit", $time);
                             cRqFromCHit(n, cRq, False);
@@ -1427,7 +1425,7 @@ endfunction
                             $display("%t LL %m pipelineResp: cRq: no owner, miss no replace: ", $time,
                                 fshow(dirPend)
                             );
-                            cRqFromCMissNoReplacement(dirPend, cRq.toState >= S);
+                            cRqFromCMissNoReplacement(dirPend);
                         end
                     end
                     else begin
@@ -1445,11 +1443,11 @@ endfunction
                     // cRq from DMA
                     if(ram.info.cs > I && ram.info.tag == getTag(cRq.addr)) begin
                         // hit in LLC, check dir
-                        if(dirPend == replicate(Invalid) && (cRq.toState == T || ram.info.cs >= S)) begin
+                        if(dirPend == replicate(Invalid)) begin
                             cRqFromDmaHit(n, cRq);
                         end
                         else begin
-                            cRqFromDmaMissByChildren(dirPend); // XXX this might need fixing up in the T->S case?
+                            cRqFromDmaMissByChildren(dirPend);
                         end
                     end
                     else begin
@@ -1495,7 +1493,7 @@ endfunction
         doAssert(ram.info.cs >= cRq.toState && ram.info.tag == getTag(cRq.addr),
             "mRs must be tag match & have enough cs"
         );
-        //doAssert(ram.info.dir == replicate(I), "all children must be I");
+        doAssert(ram.info.dir == replicate(I), "all children must be I");
         doAssert(!cOwner.replacing, "mRs cannot hit on replacing line");
         doAssert(cSlot.way == pipeOut.way, "mRs should hit on way in MSHR slot");
         doAssert(cSlot.waitP, "mRs should match cRq which is waiting for it");
