@@ -112,12 +112,14 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     // EHR ports for renaming_table
     Integer rt_get_port = 0;
     function Integer rt_commit_port(Integer i) = i;
+    Integer rt_post_commit_port = valueof(SupSize);
 
     // EHR ports for valid
     Integer valid_get_port = 0;
     Integer valid_commit_port = 0;
     Integer valid_wrongSpec_port = 1;
     Integer valid_claim_port = 1;
+    Integer valid_post_commit_port = 1;
 
     // EHR ports for spec_bits
     Integer sb_wrongSpec_port = 0;
@@ -126,7 +128,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
 
     // non-speculative renaming table at commit port
     // initially arch reg i --> phy reg i
-    Vector#(NumArchReg, Ehr#(SupSize, PhyRIndx)) renaming_table <- genWithM(compose(mkEhr, fromInteger));
+    Vector#(NumArchReg, Ehr#(TAdd#(SupSize, 1), PhyRIndx)) renaming_table <- genWithM(compose(mkEhr, fromInteger));
 
     // A FIFO of
     // - in-flight renaming: when valid = True i.e. within [renamings_enqP, renamings_deqP)
@@ -253,45 +255,83 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         return pred[tag] ? Valid (tag) : Invalid;
     endfunction
 
+    // find the nth freed phy reg to be added to the free list, invalid if not present
+    function Maybe#(PhyRIndx) nthFreedPhy(Integer n, Vector#(SupSize, Maybe#(PhyRIndx)) freed_by_lane);
+        SupCnt num_freed_prior = 0;
+        Maybe#(PhyRIndx) out = Invalid;
+        for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+            if (freed_by_lane[i] matches tagged Valid .p) begin 
+                if (num_freed_prior == fromInteger(n)) begin 
+                    out = Valid(p);
+                end
+                num_freed_prior = num_freed_prior + 1;
+            end
+        end
+        return out;
+    endfunction
+
     // canonicalize deq, wrongSpec/enq
     (* fire_when_enabled, no_implicit_conditions *)
     rule canon;
         Vector#(SupSize, SupWaySel) supIdxVec = genWith(fromInteger);
 
         // apply commit actions
+        SupCnt num_phy_freed = 0;
+        Vector#(SupSize, Maybe#(PhyRIndx)) freed_by_lane = replicate(Invalid);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
             if(commitEn[i]) begin
                 indexT curDeqP = renamingsCommitIndex[i];
-                indexT curFreeEnqP = freeReleaseIndex[i];
                 PhyRIndx commit_phy_reg = new_renamings_phy[curDeqP];
                 Maybe#(ArchRIndx) commit_arch_reg = new_renamings_arch[curDeqP];
-                // Since no move elimination yet, all commits will add to free list
+                PhyRIndx freed_phy_reg;
+                // Commit will add to free list if phy reg in renaming_table not otherwise in use (right now no move elimination, so should be always)
                 if(commit_arch_reg matches tagged Valid .arch) begin
                     let rtIdx = getRTIndex(arch);
-                    // free phy reg being overwritten in the renaming_table (arch reg is don't care)
-                    PhyRIndx freed_phy_reg = renaming_table[rtIdx][rt_commit_port(i)];
-                    free_phy_regs[curFreeEnqP] <= freed_phy_reg;
-                    valid[curDeqP][valid_commit_port] <= False;
+                    // find phy reg freed in renaming_table
+                    freed_phy_reg = renaming_table[rtIdx][rt_commit_port(i)];
                     // update renaming_table
                     renaming_table[rtIdx][rt_commit_port(i)] <= commit_phy_reg;
                 end
                 else begin
                     // free the phy reg claimed by this renaming (arch reg is don't care)
-                    free_phy_regs[curFreeEnqP] <= commit_phy_reg;
-                    valid[curDeqP][valid_commit_port] <= False;
-
+                    freed_phy_reg = commit_phy_reg;
                 end
+                // check if phy reg no longer in use
+                Bool in_use = False;
+                // check if phy_reg will end up in in-flight renamings
+                for(Integer j=0; j<valueof(size); j = j+1) begin 
+                    in_use = in_use || (new_renamings_phy[j] == freed_phy_reg && valid[j][valid_post_commit_port]);
+                end
+                // check if phy reg will end up in renaming table
+                for(Integer j=0; j<valueof(NumArchReg); j = j+1) begin 
+                    in_use = in_use || (renaming_table[fromInteger(j)][rt_post_commit_port] == freed_phy_reg);
+                end
+                // mark phy reg to be fully freed if not in use
+                if(!in_use) begin 
+                    num_phy_freed = num_phy_freed + 1;
+                    freed_by_lane[i] = Valid (freed_phy_reg);
+                end
+                // mark old in-flight renaming invalid
+                valid[curDeqP][valid_commit_port] <= False;
                 // sanity check
                 doAssert(valid[curDeqP][valid_commit_port], "committing entry must be valid");
             end
         end
+
+        // move freed phy registers into the free list
+        for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+            indexT curFreeEnqP = freeReleaseIndex[i];
+            Maybe#(PhyRIndx) free_phy_reg = nthFreedPhy(i, freed_by_lane);
+            if (free_phy_reg matches tagged Valid .p) begin 
+                free_phy_regs[curFreeEnqP] <= p;
+            end
+        end
+
         // move renamings_deqP and free_phy_enqP: find the first non-commit port
         function Bool notCommit(SupWaySel i) = !commitEn[i];
         indexT nextDeqP;
-        indexT nextFreeEnqP;
         if(find(notCommit, supIdxVec) matches tagged Valid .idx) begin
             nextDeqP = renamingsCommitIndex[idx];
-            nextFreeEnqP = freeReleaseIndex[idx];
             // sanity check: commit is done consecutively
             for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
                 doAssert((fromInteger(i) < idx) == commitEn[i], "commit must be consecutive");
@@ -299,10 +339,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         end
         else begin
             nextDeqP = incrIndex(renamings_deqP, fromInteger(valueof(SupSize)));
-            nextFreeEnqP = incrIndex(free_phy_enqP, fromInteger(valueof(SupSize)));
         end
         renamings_deqP <= nextDeqP;
-        free_phy_enqP <= nextFreeEnqP;
+        free_phy_enqP <= incrIndex(free_phy_enqP, num_phy_freed);
 
         // do wrongSpec OR claim free phy reg
         if(wrongSpecEn.wget matches tagged Valid .x) begin
@@ -326,11 +365,29 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
             // find **valid** entries being killed
             Vector#(size, Bool) killValid = zipWith( \&& , isKill , readVEhr(valid_wrongSpec_port, valid) );
 
-            // re-free the most recently dequeued free physical registers (1 for each killed valid renaming)
+            // re-free the most recently dequeued free physical registers (1 for each killed valid and otherwise unused renaming)
             countT numKilled = 0;
             for(Integer i = 0; i < valueof(size); i = i+1) begin
                 if(killValid[i]) begin 
-                    numKilled = numKilled+1;
+                    // check if unused
+                    Bool in_use = False;
+                    Bool first_in_killValid = True;
+                    PhyRIndx phy_reg = new_renamings_phy[i];
+                    // not in rename table
+                    for(Integer j = 0; j < valueof(NumArchReg); j = j+1) begin 
+                        in_use = in_use || (renaming_table[j][rt_post_commit_port] == phy_reg);
+                    end
+                    // not (valid and not killed)
+                    for(Integer j=0; j < valueof(size); j = j+1) begin 
+                        in_use = in_use || (new_renamings_phy[j] == phy_reg && valid[j][valid_wrongSpec_port] && !killValid[j]);
+                        // only count each freed phy reg once
+                        if(killValid[j] && new_renamings_phy[j] == phy_reg && j<i) begin 
+                            first_in_killValid = False;
+                        end
+                    end
+                    if(first_in_killValid && !in_use) begin
+                        numKilled = numKilled+1;
+                    end
                 end
             end
             free_phy_deqP <= decrIndex(free_phy_deqP, numKilled);
