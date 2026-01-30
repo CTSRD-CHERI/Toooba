@@ -387,12 +387,10 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
             doAssert(iType == St, "must be St");
         end
         // update VAddr
-        if (vaddr != -1) // hack to work around this function being called again for ObjId stores and ruining the trace.
-            ppc_vaddr_csrData[pvc_finishMem_port] <= VAddr (vaddr);
+        ppc_vaddr_csrData[pvc_finishMem_port] <= VAddr (vaddr);
 `ifdef RVFI
         //$display("%t : traceBundle = ", $time(), fshow(tb), " in setExecuted_doFinishMem for %x", pc);
-        if (pack(tb) != 0) // hack to work around this function being called again for ObjId stores and ruining the trace.
-            traceBundle[traceBundle_deqLSQ_port] <= tb;
+        traceBundle[traceBundle_deqLSQ_port] <= tb;
 `endif
 `ifdef INCLUDE_TANDEM_VERIF
         // Store-data (for mem instrs that store data)
