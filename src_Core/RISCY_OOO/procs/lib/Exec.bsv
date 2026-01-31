@@ -593,12 +593,12 @@ function Maybe#(Trap) checkForException(
 endfunction
 
 // check mem access misaligned: byteEn is unshifted (just from Decode)
-function Bool memAddrMisaligned(Addr addr, ByteOrTagEn byteOrTagEn, Bit#(2) alloc_policy);
+function Bool memAddrMisaligned(Addr addr, ByteOrTagEn byteOrTagEn, Bit#(3) alloc_policy);
     MemDataByteEn byteEn = byteOrTagEn.DataMemAccess;
-    if (byteOrTagEn == TagMemAccess || alloc_policy == 2'b01 || alloc_policy == 2'b11) begin
+    if (byteOrTagEn == TagMemAccess || alloc_policy == 3'b001 || alloc_policy == 3'b011) begin
         return(!isCLineAlignAddr(addr));
     end
-    else if(byteEn[15] || alloc_policy == 2'b10 ) begin
+    else if(byteEn[15] || alloc_policy == 3'b010 ) begin
         return addr[3:0] != 0;
     end
     else if(byteEn[7]) begin

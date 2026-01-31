@@ -172,7 +172,7 @@ function Maybe#(MemInst) decodeMemInst(Instruction inst, Bool cap_mode, RiscVISA
                                 amo_func: amo_func,
                                 unsignedLd: unsignedLd,
                                 byteOrTagEn: DataMemAccess(byteEn),
-				                alloc_policy: 2'b00,
+				                alloc_policy: 3'b00,
                                 aq: aq,
                                 rl: rl,
                                 reg_bounds: cap_mode } );
@@ -193,12 +193,12 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
     // it doesn't matter if this is set to True for stores
     Bool unsignedLd = unpack(mem_code[2]);
     Bit#(2) width = mem_code[1:0];
-    Bit#(2) alloc_policy = 2'b00;
+    Bit#(3) alloc_policy = 3'b00;
 
     Bool capWidth = False;
     if (funct7 == f7_cap_Stores && unsignedLd) begin
         capWidth = True;
-        alloc_policy = mem_code[1:0];
+        alloc_policy = zeroExtend(mem_code[1:0]);
         //if (width != 0) illegalInst = True;
     end
     if (funct7 == f7_cap_Loads && amo && unsignedLd) begin
@@ -844,7 +844,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             mem_func: Fence,
                             amo_func: None,
                             unsignedLd: False,
-			    alloc_policy: 2'b00,
+			                alloc_policy: 3'b000,
                             byteOrTagEn: DataMemAccess(replicate(False)),
                             aq: reconcile,
                             rl: commit,
@@ -1368,7 +1368,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                         mem_func: Ld,
                                         amo_func: None,
                                         unsignedLd: False,
-					                    alloc_policy: 2'b00,
+					                    alloc_policy: 3'b100,
                                         byteOrTagEn: DataMemAccess(unpack(16'hffff)),
                                         aq: False,
                                         rl: False,
@@ -1392,7 +1392,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                         mem_func: Ld,
                                         amo_func: None,
                                         unsignedLd: False,
-					                    alloc_policy: 2'b00,
+					                    alloc_policy: 3'b000,
                                         byteOrTagEn: TagMemAccess,
                                         aq: False,
                                         rl: False,

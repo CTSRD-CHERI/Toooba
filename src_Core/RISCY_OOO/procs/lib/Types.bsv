@@ -175,7 +175,7 @@ typedef struct {
     Bool           aq;
     Bool           rl;
     Bool           reg_bounds;
-    Bit#(2)        alloc_policy;
+    Bit#(3)        alloc_policy;
 } MemInst deriving(Bits, Eq, FShow);
 
 `ifdef BSIM
