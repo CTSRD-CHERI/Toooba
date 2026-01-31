@@ -574,10 +574,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let {shiftBEData, shiftData} = getShiftedBEData(getAddr(vaddr), origBE.DataMemAccess, toMemData);
 
         let poisoned_shiftdata = shiftData;
-        if(lsq.getAllocPolicy(x.ldstq_tag) == 3'b010 || lsq.getAllocPolicy(x.ldstq_tag) == 3'b011) poisoned_shiftdata.data[1][46] = 1'b1;
+        CapPipe shiftData_poisoned = fromMem(unpack(pack(shiftData)));
+        
+        if(lsq.getAllocPolicy(x.ldstq_tag) == 3'b010 || lsq.getAllocPolicy(x.ldstq_tag) == 3'b011) begin
+            shiftData_poisoned = setCapPoison(shiftData_poisoned);
+            MemTaggedData shiftData_poisoned_debug = unpack(pack(toMem(shiftData_poisoned)));
+            $display("cpoisonline ", fshow(shiftData), fshow(shiftData_poisoned_debug));
+        end 
         // update LSQ data now
         if(x.ldstq_tag matches tagged St .stTag) begin
-            MemTaggedData d = x.mem_func == Amo ? toMemData : poisoned_shiftdata; // XXX don't shift for AMO
+            MemTaggedData d = x.mem_func == Amo ? toMemData : unpack(pack(toMem(shiftData_poisoned))); // XXX don't shift for AMO
             lsq.updateData(stTag, d);
 `ifdef PERFORMANCE_MONITORING
             EventsCore events = unpack(0);
@@ -913,7 +919,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             CapPipe loaded_dataUnpacked = fromMem(unpack(pack(data)));
             loaded_dataUnpacked = setValidCap(loaded_dataUnpacked, res.allowCap && isValidCap(loaded_dataUnpacked));
             Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
-            $display("%t poison check: ", $time, rule_name, " ", fshow(data), " ", fshow(res), " ", fshow(data.data[1][46] ));
+            $display("%t poison check: ", $time, rule_name, " ", fshow(data), " ", fshow(res), " ", fshow(data.data[1][47] ));
 
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
@@ -922,10 +928,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
             end 
 
-            Bit#(1) isPoison = (data.data[1][46] ==1'b1 && data.tag==True) ? 1'b1: 1'b0;
+            Bit#(1) isPoison = (getCapPoison(loaded_dataUnpacked) ==1'b1 && data.tag==True) ? 1'b1: 1'b0;
 
             //if (data.data[1][46] ==1'b1 && data.tag==True && !res.permitPoison) begin 
-            if (data.data[1][46] ==1'b1 && data.tag==True && res.pver != 8'h0) begin
+            if (getCapPoison(loaded_dataUnpacked) == 1'b1 && data.tag==True && res.pver != 8'h0) begin
                 if (res.alloc_policy == 3'b100) begin 
                     inIfc.writeRegFile(dst.indx, unpack(zeroExtend(isPoison)));
                     $display("%t return getPoison1 res: ", $time, rule_name, " ", fshow(isPoison));
@@ -949,7 +955,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end else begin 
                 if (res.alloc_policy == 3'b100) begin 
                     $display("%t return getPoison2 res: ", $time, rule_name, " ", fshow(isPoison));
-                    inIfc.writeRegFile(dst.indx, unpack(zeroExtend(isPoison)));
+                    inIfc.writeRegFile(dst.indx, fromMem(unpack(pack(zeroExtend(isPoison)))));
                 end else begin 
                     inIfc.writeRegFile(dst.indx, dataUnpacked);
                 end 
@@ -1413,7 +1419,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             // data for Amo). AMO doesn't use BE. Sc uses **shifted** BE and
             // data (firstSt.stData is shifted for Sc).
             byteEn: lsqDeqSt.shiftedBE,
-            alloc_policy: zeroExtend(lsqDeqSt.alloc_policy),
+            alloc_policy: lsqDeqSt.alloc_policy,
             data: lsqDeqSt.stData,
             amoInst: AmoInst {
                 func: lsqDeqSt.amoFunc,

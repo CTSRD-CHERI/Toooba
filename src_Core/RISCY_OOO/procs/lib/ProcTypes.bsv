@@ -367,6 +367,7 @@ typedef union tagged {
     void GetType;
     void GetHigh;
     void GetPVer;
+    void GetCapPoison;
     void ToPtr;
 } CapInspectFunc deriving(Bits, Eq, FShow);
 
@@ -1070,7 +1071,7 @@ function Fmt showInst(Instruction inst);
   return ret;
 endfunction
 
-function x addPc(x cap, Bit#(12) inc) provisos (Add#(f, 12, d), CHERICap::CHERICap#(x, a, b, c, d, e, h)) = setAddrUnsafe(cap, getAddr(cap) + signExtend(inc));
+function x addPc(x cap, Bit#(12) inc) provisos (Add#(f, 12, e), CHERICap::CHERICap#(x, a, b, c, d, e, h, j)) = setAddrUnsafe(cap, getAddr(cap) + signExtend(inc));
 
 
 `ifdef PERFORMANCE_MONITORING

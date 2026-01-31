@@ -318,6 +318,8 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                    zeroExtend(tpl_2(toMem(a))[127:64]);
                tagged GetPVer                : 
                    zeroExtend(getPVer(a));
+               tagged GetCapPoison                : 
+                   zeroExtend(getCapPoison(a));
                tagged GetType                :
                    tpl_1(extractType(a));
                tagged ToPtr                  :

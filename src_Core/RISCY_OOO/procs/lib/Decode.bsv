@@ -1384,6 +1384,13 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capFunc = CapInspect (GetPVer);
                                 end 
+                                f5rs2_cap_CGetCapPoison: begin 
+                                    legalInst = True;
+                                    dInst.iType = Cap;
+                                    regs.dst = Valid(tagged Gpr rd);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    dInst.capFunc = CapInspect (GetCapPoison);
+                                end 
                                 f5rs2_cap_CLoadTags: begin
                                     legalInst = True;
                                     dInst.iType = Ld;
