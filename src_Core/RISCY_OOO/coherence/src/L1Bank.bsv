@@ -654,11 +654,13 @@ endfunction
                 if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked) == 1'b1 && req.pver!= 8'h0 ) begin
                     if (req.pver > poison_pver ) begin  
                     //if(pver == pver) begin
+
+                        let unpoisoned_curLine = setTaggedDataAt( curLine, dataSel, unpack(0));
+                        newLine = getUpdatedLine(unpoisoned_curLine, be, wrLine);
                         $display("%t L1 %m pipelineResp: found mismatch poison on store access, return 0",
                             $time,
-                            fshow(curData)
+                            fshow(curLine), fshow(newLine)
                         );
-                        newLine = getUpdatedLine(curLine, be, unpack(0));
                     end else begin 
                         $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
                             $time,
