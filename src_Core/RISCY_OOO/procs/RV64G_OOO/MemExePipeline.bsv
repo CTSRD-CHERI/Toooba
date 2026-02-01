@@ -933,7 +933,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                        inIfc.writeRegFile(dst.indx, unpack(0));
                        $display("%t poison load mismatch return 0: ", $time, rule_name, " ", fshow(data));
                     end else begin 
-                       $display("%t poison load exception: ", $time, rule_name, " ", fshow(data));
+                       $display("%t poison load exception but not throw exception for debugging return 0 ", $time, rule_name, " ", fshow(data));
+                       inIfc.writeRegFile(dst.indx, unpack(0));
+                       /*
                        inIfc.rob_setExecuted_deqLSQ(res.instTag, Valid(Exception(excLoadAccessFault)), Invalid
                     
 `ifdef RVFI
@@ -943,6 +945,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             }
 `endif
         );  
+                    */
                     end 
                 end 
             end else begin 
