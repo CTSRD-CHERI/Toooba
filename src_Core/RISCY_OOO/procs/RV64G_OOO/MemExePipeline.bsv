@@ -424,15 +424,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             // now figure out the data to be written
             CLineMemDataByteEn be = replicate(replicate(False));
             Line data = unpack(0);
-            if (waitSt.cacheLineWr) begin 
-                be = replicate(replicate(True));
-                data.data = replicate(waitSt.shiftedData.data);
-                data.tag  = replicate(waitSt.shiftedData.tag);
-            end else begin 
-                be[waitSt.offset] = waitSt.shiftedBE;
-                data.data[waitSt.offset] = waitSt.shiftedData.data;
-                data.tag[waitSt.offset] = waitSt.shiftedData.tag;
-            end 
+            be[waitSt.offset] = waitSt.shiftedBE;
+            data.data[waitSt.offset] = waitSt.shiftedData.data;
+            data.tag[waitSt.offset] = waitSt.shiftedData.tag;
             //return tuple4(unpack(pack(be)), data, waitSt.permitPoison, waitSt.pver);
             return tuple4(unpack(pack(be)), data, waitSt.permitPoison, waitSt.pver);
         endmethod
@@ -576,7 +570,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let poisoned_shiftdata = shiftData;
         CapPipe shiftData_poisoned = fromMem(unpack(pack(shiftData)));
         
-        if(lsq.getAllocPolicy(x.ldstq_tag) == 3'b010 || lsq.getAllocPolicy(x.ldstq_tag) == 3'b011) begin
+        if(lsq.getAllocPolicy(x.ldstq_tag) == 3'b010) begin
             shiftData_poisoned = setCapPoison(shiftData_poisoned);
             MemTaggedData shiftData_poisoned_debug = unpack(pack(toMem(shiftData_poisoned)));
             $display("cpoisonline ", fshow(shiftData), fshow(shiftData_poisoned_debug));
@@ -925,7 +919,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
             if(res.alloc_policy == 3'b100) begin 
                 $display("cgetpoison",fshow(res));
-
             end 
 
             Bit#(1) isPoison = (getCapPoison(loaded_dataUnpacked) ==1'b1 && data.tag==True) ? 1'b1: 1'b0;
@@ -1302,10 +1295,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         waitStRespQ.enq(WaitStResp {
             offset: getLineMemDataOffset(addr),
             shiftedBE: lsqDeqSt.shiftedBE,
-            shiftedData: lsqDeqSt.stData,
+            shiftedData: lsqDeqSt.alloc_policy == 3'b001 ? unpack(0): lsqDeqSt.stData,
             permitPoison: lsqDeqSt.permitPoison,
             pver: lsqDeqSt.pver,
-            cacheLineWr: lsqDeqSt.alloc_policy == 3'b001 || lsqDeqSt.alloc_policy == 3'b011
+            cacheLineWr: False
         });
         // we leave deq to resp time
         // ROB should have already been set to executed

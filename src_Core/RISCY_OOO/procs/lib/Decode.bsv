@@ -172,7 +172,7 @@ function Maybe#(MemInst) decodeMemInst(Instruction inst, Bool cap_mode, RiscVISA
                                 amo_func: amo_func,
                                 unsignedLd: unsignedLd,
                                 byteOrTagEn: DataMemAccess(byteEn),
-				                alloc_policy: 3'b00,
+				                alloc_policy: 3'b000,
                                 aq: aq,
                                 rl: rl,
                                 reg_bounds: cap_mode } );
@@ -193,7 +193,7 @@ function Maybe#(MemInst) decodeExplicitBoundsMemInst(Instruction inst);
     // it doesn't matter if this is set to True for stores
     Bool unsignedLd = unpack(mem_code[2]);
     Bit#(2) width = mem_code[1:0];
-    Bit#(3) alloc_policy = 3'b00;
+    Bit#(3) alloc_policy = 3'b000;
 
     Bool capWidth = False;
     if (funct7 == f7_cap_Stores && unsignedLd) begin
