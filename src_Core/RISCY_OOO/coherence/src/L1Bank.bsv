@@ -622,7 +622,7 @@ endfunction
                     //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
                     if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked)  == 1'b1 && req.pver !=8'h0 ) begin 
                     //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
-                        if (req.pver >  poison_pver ) begin  
+                        if (req.pver >  poison_pver || req.alloc_policy == 3'b001  ) begin  
                             let newTaggedData =
                                 mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
                             newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
@@ -652,7 +652,7 @@ endfunction
                 Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
                 //if(isValidCap(loaded_dataUnpacked) && curData.data[1][46] == 1'b1 && !permitPoison ) begin
                 if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked) == 1'b1 && req.pver!= 8'h0 ) begin
-                    if (req.pver > poison_pver ) begin  
+                    if (req.pver > poison_pver || req.alloc_policy == 3'b001  ) begin  
                     //if(pver == pver) begin
                         $display("%t L1 %m pipelineResp: found mismatch poison on store access, return 0",
                             $time,
