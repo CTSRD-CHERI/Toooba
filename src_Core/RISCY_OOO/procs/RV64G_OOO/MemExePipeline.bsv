@@ -924,7 +924,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Bit#(1) isPoison = (getCapPoison(loaded_dataUnpacked) ==1'b1 && data.tag==True) ? 1'b1: 1'b0;
 
             //if (data.data[1][46] ==1'b1 && data.tag==True && !res.permitPoison) begin 
-            if (getCapPoison(loaded_dataUnpacked) == 1'b1 && data.tag==True && res.pver != 8'h0) begin
+            if (getCapPoison(loaded_dataUnpacked) == 1'b1 && data.tag==True && !res.permitPoison) begin
                 if (res.alloc_policy == 3'b100) begin 
                     inIfc.writeRegFile(dst.indx, unpack(zeroExtend(isPoison)));
                     $display("%t return getPoison1 res: ", $time, rule_name, " ", fshow(isPoison));
