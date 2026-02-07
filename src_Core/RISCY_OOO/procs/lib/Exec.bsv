@@ -80,7 +80,7 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
 endfunction
 
 (* noinline *)
-function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn);
+function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapChecks toCheck, MemFunc mem_func, ByteOrTagEn byteOrTagEn, Bit#(3)alloc_policy);
     function Maybe#(CSR_XCapCause) eAuth(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg: case (toCheck.check_authority_src) matches Src1: toCheck.rn1;
                                                                                                                                        Ddc: {1'b1, pack(scrAddrDDC)};
                                                                                               endcase
@@ -101,6 +101,8 @@ function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapCheck
     else if (isLoad && !getHardPerms(auth).permitLoadCap && byteOrTagEn == TagMemAccess)
         result = eAuth(cheriExcPermitRCapViolation);
     else if (isStore && !getHardPerms(auth).permitStore)
+        result = eAuth(cheriExcPermitWViolation);
+    else if (isStore && (alloc_policy == 3'b010 || alloc_policy == 3'b011 || alloc_policy == 3'b001) && !getHardPerms(auth).permitPoison)
         result = eAuth(cheriExcPermitWViolation);
     else if (storeValidCap && !getHardPerms(auth).permitStoreCap)
         result = eAuth(cheriExcPermitWCapViolation);

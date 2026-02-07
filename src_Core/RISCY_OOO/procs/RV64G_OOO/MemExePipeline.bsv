@@ -424,9 +424,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             // now figure out the data to be written
             CLineMemDataByteEn be = replicate(replicate(False));
             Line data = unpack(0);
-            be[waitSt.offset] = waitSt.shiftedBE;
-            data.data[waitSt.offset] = waitSt.shiftedData.data;
-            data.tag[waitSt.offset] = waitSt.shiftedData.tag;
+            if (waitSt.cacheLineWr) begin 
+                be = replicate(replicate(True));
+                data.data = replicate(waitSt.shiftedData.data);
+                data.tag  = replicate(waitSt.shiftedData.tag);
+            end else begin 
+                be[waitSt.offset] = waitSt.shiftedBE;
+                data.data[waitSt.offset] = waitSt.shiftedData.data;
+                data.tag[waitSt.offset] = waitSt.shiftedData.tag;
+            end 
             //return tuple4(unpack(pack(be)), data, waitSt.permitPoison, waitSt.pver);
             return tuple4(unpack(pack(be)), data, waitSt.permitPoison, waitSt.pver);
         endmethod
@@ -570,7 +576,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let poisoned_shiftdata = shiftData;
         CapPipe shiftData_poisoned = fromMem(unpack(pack(shiftData)));
         
-        if(lsq.getAllocPolicy(x.ldstq_tag) == 3'b010) begin
+        if(lsq.getAllocPolicy(x.ldstq_tag) == 3'b010 || lsq.getAllocPolicy(x.ldstq_tag) == 3'b011) begin
             shiftData_poisoned = setCapPoison(shiftData_poisoned);
             MemTaggedData shiftData_poisoned_debug = unpack(pack(toMem(shiftData_poisoned)));
             $display("cpoisonline ", fshow(shiftData), fshow(shiftData_poisoned_debug));
@@ -654,7 +660,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE, x.alloc_policy),
                 capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                 allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
-                capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
+                capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE, x.alloc_policy),
                 permitPoison:  getHardPerms(x.rVal1).permitPoison,
                 check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
                                           ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
@@ -1298,7 +1304,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             shiftedData: lsqDeqSt.alloc_policy == 3'b001 ? unpack(0): lsqDeqSt.stData,
             permitPoison: lsqDeqSt.permitPoison,
             pver: lsqDeqSt.pver,
-            cacheLineWr: False
+            cacheLineWr: lsqDeqSt.alloc_policy == 3'b001 || lsqDeqSt.alloc_policy == 3'b011
         });
         // we leave deq to resp time
         // ROB should have already been set to executed
