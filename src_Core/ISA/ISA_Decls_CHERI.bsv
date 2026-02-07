@@ -194,6 +194,8 @@ Bit #(5) f5rs2_cap_CGetHigh    = 5'h17;
 Bit #(5) f5rs2_cap_CGetPoison  = 5'h19;
 Bit #(5) f5rs2_cap_CGetCapVersion = 5'h1a; 
 Bit #(5) f5rs2_cap_CGetCapPoison = 5'h1b;
+Bit #(5) f5rs2_cap_CGetPCapBase = 5'h1c;
+Bit #(5) f5rs2_cap_CGetPCapTop  = 5'h1d;
 // 5'h18-5'h1f unused (5'h1f reserved for 1-reg instructions)
 
 // ================================================================
