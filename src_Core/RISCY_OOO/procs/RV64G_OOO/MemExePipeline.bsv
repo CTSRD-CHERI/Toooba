@@ -1304,7 +1304,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             shiftedData: lsqDeqSt.alloc_policy == 3'b001 ? unpack(0): lsqDeqSt.stData,
             permitPoison: lsqDeqSt.permitPoison,
             pver: lsqDeqSt.pver,
-            cacheLineWr: lsqDeqSt.alloc_policy == 3'b001 || lsqDeqSt.alloc_policy == 3'b011
+            cacheLineWr: lsqDeqSt.alloc_policy == 3'b011
         });
         // we leave deq to resp time
         // ROB should have already been set to executed

@@ -620,15 +620,15 @@ endfunction
                     CapPipe loaded_dataUnpacked = fromMem(unpack(pack(taggedData)));
                     Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
                     //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
-                    if(req.alloc_policy == 3'b001) begin 
-                            //let newTaggedData =
-                            //     mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
-                            newLine = setTaggedDataAt( curLine, dataSel, unpack(0));
-                            $display("%t L1 %m pipelineResp: zero poison",
-                                $time,
-                                fshow(curLine), fshow(newLine)
-                            );
-                    end else begin 
+                    //if(req.alloc_policy == 3'b001) begin 
+                    //        //let newTaggedData =
+                    //        //     mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
+                    //        newLine = setTaggedDataAt( curLine, dataSel, unpack(0));
+                    //        $display("%t L1 %m pipelineResp: zero poison",
+                    //            $time,
+                    //            fshow(curLine), fshow(newLine)
+                    //        );
+                    //end else begin 
                         if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked)  == 1'b1 && !req.permitPoison) begin 
                         //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
                             if (req.pver >  poison_pver ) begin  
@@ -646,7 +646,7 @@ endfunction
                                 mergeMemTaggedDataBE(taggedData, req.data, zeroExtend(pack(req.byteEn)));
                             newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
                         end 
-                    end 
+                    //end 
                 end
                 // reset link addr
                 linkAddr <= Invalid;
@@ -661,17 +661,17 @@ endfunction
                 CapPipe loaded_dataUnpacked = fromMem(unpack(pack(curData)));
                 Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
                 //if(isValidCap(loaded_dataUnpacked) && curData.data[1][46] == 1'b1 && !permitPoison ) begin
-                if(req.alloc_policy == 3'b001) begin 
-                    //let newTaggedData =
-                    //     mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
-                    newLine = setTaggedDataAt( curLine, dataSel, unpack(0));
-                    $display("%t L1 %m pipelineResp: zero poison",
-                        $time,
-                        fshow(curLine), fshow(newLine)
-                    );
-                end else begin 
+                //if(req.alloc_policy == 3'b001) begin 
+                //    //let newTaggedData =
+                //    //     mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
+                //    newLine = setTaggedDataAt( curLine, dataSel, unpack(0));
+                //    $display("%t L1 %m pipelineResp: zero poison",
+                //        $time,
+                //        fshow(curLine), fshow(newLine)
+                //    );
+                //end else begin 
                     if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked) == 1'b1 && !req.permitPoison) begin
-                        if (req.pver > poison_pver || req.alloc_policy == 3'b001 ) begin  
+                        if (req.pver > poison_pver ) begin  
                         //if(pver == pver) begin
                             let unpoisoned_curLine = setTaggedDataAt( curLine, dataSel, unpack(0));
                             newLine = getUpdatedLine(unpoisoned_curLine, be, wrLine);
@@ -688,7 +688,7 @@ endfunction
                     end else begin 
                         newLine = getUpdatedLine(curLine, be, wrLine);
                     end 
-                end 
+                //end 
             end
             default: begin
                 doAssert(False, "unknown mem op");
