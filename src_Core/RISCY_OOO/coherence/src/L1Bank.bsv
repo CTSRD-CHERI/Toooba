@@ -129,7 +129,7 @@ module mkL1Bank#(
     Bit#(lgBankNum) bankId,
     module#(L1CRqMshr#(cRqNum, indexT, wayT, tagT, procRqT)) mkL1CRqMshrLocal,
     module#(L1PRqMshr#(pRqNum)) mkL1PRqMshrLocal,
-    module#(L1Pipe#(lgBankNum, wayNum, indexT, tagT, cRqIdxT, pRqIdxT)) mkL1Pipeline,
+    module#(L1Pipe#(lgBankNum, wayNum, indexT, tagT, poisonT, cRqIdxT, pRqIdxT)) mkL1Pipeline,
     L1ProcResp#(procRqIdT) procResp
 )(
     L1Bank#(lgBankNum, wayNum, indexSz, tagSz, cRqNum, pRqNum, procRqIdT)
@@ -142,7 +142,7 @@ module mkL1Bank#(
     Alias#(cacheOwnerT, Maybe#(cRqIdxT)), // actually owner cannot be pRq
     Alias#(cacheSetAuxT, Maybe#(cRqIdxT)),
     Alias#(cacheInfoT, CacheInfo#(tagT, Msi, void, cacheOwnerT, void)),
-    Alias#(ramDataT, RamData#(tagT, Msi, void, cacheOwnerT, void, Line)),
+    Alias#(ramDataT, RamData#(tagT, poisonT, Msi, void, cacheOwnerT, void, Line)),
     Alias#(procRqT, ProcRq#(procRqIdT)),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
     Alias#(cRsToPT, CRsMsg#(void)),
@@ -151,7 +151,8 @@ module mkL1Bank#(
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(cRqSlotT, L1CRqSlot#(wayT, tagT)), // cRq MSHR slot
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, void, cacheOwnerT, void, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
+    Alias#(poisonT, Bit#(wayNum)),
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, Msi, void, cacheOwnerT, void, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
     // requirements
     Bits#(procRqIdT, _procRqIdT),
     FShow#(procRqIdT),
@@ -166,7 +167,7 @@ module mkL1Bank#(
 
     L1PRqMshr#(pRqNum) pRqMshr <- mkL1PRqMshrLocal;
 
-    L1Pipe#(lgBankNum, wayNum, indexT, tagT, cRqIdxT, pRqIdxT) pipeline <- mkL1Pipeline;
+    L1Pipe#(lgBankNum, wayNum, indexT, tagT, poisonT, cRqIdxT, pRqIdxT) pipeline <- mkL1Pipeline;
 
     Fifo#(1, procRqT) rqFromCQ <- mkBypassFifo;
 
@@ -1427,7 +1428,7 @@ endmodule
 module mkL1Cache#(
     module#(L1CRqMshr#(cRqNum, indexT, wayT, tagT, procRqT)) mkL1CRqMshrLocal,
     module#(L1PRqMshr#(pRqNum)) mkL1PRqMshrLocal,
-    module#(L1Pipe#(lgBankNum, wayNum, indexT, tagT, cRqIdxT, pRqIdxT)) mkL1Pipeline,
+    module#(L1Pipe#(lgBankNum, wayNum, indexT, tagT, poisonT, cRqIdxT, pRqIdxT)) mkL1Pipeline,
     L1ProcResp#(procRqIdT) procResp
 )(
     L1Bank#(lgBankNum, wayNum, indexSz, tagSz, cRqNum, pRqNum, procRqIdT)
@@ -1446,9 +1447,10 @@ module mkL1Cache#(
     Alias#(procRqT, ProcRq#(procRqIdT)),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
     Alias#(cRsToPT, CRsMsg#(void)),
+    Alias#(poisonT, Bit#(wayNum)),
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, void, cacheOwnerT, void, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, Msi, void, cacheOwnerT, void, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
     // requirements
     Bits#(procRqIdT, _procRqIdT),
     FShow#(procRqIdT),

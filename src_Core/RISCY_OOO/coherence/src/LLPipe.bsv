@@ -87,25 +87,26 @@ interface LLPipe#(
     numeric type wayNum,
     type indexT,
     type tagT,
+    type poisonT,
     type cRqIdxT
 );
     method Action send(LLPipeIn#(Bit#(TLog#(childNum)), Bit#(TLog#(wayNum)), cRqIdxT) r);
     method Bool notEmpty;
     method PipeOut#(
         Bit#(TLog#(wayNum)),
-        tagT, Msi, Vector#(childNum, Msi),
+        tagT, poisonT, Msi, Vector#(childNum, Msi),
         Maybe#(CRqOwner#(cRqIdxT)), void, RandRepInfo, // no other
         Line, void, LLCmd#(Bit#(TLog#(childNum)), cRqIdxT) // no aux set data
     ) first;
     method PipeOut#(
         Bit#(TLog#(wayNum)),
-        tagT, Msi, Vector#(childNum, Msi),
+        tagT, poisonT, Msi, Vector#(childNum, Msi),
         Maybe#(CRqOwner#(cRqIdxT)), void, RandRepInfo, // no other
         Line, void, LLCmd#(Bit#(TLog#(childNum)), cRqIdxT) // no aux set data
     ) unguard_first;
     method Action deqWrite(
         Maybe#(cRqIdxT) swapRq,
-        RamData#(tagT, Msi, Vector#(childNum, Msi), Maybe#(CRqOwner#(cRqIdxT)), void, Line) wrRam, // always write BRAM
+        RamData#(tagT, poisonT, Msi, Vector#(childNum, Msi), Maybe#(CRqOwner#(cRqIdxT)), void, Line) wrRam, // always write BRAM
         Bool updateRep
     );
 endinterface
@@ -132,7 +133,7 @@ typedef union tagged {
 ) deriving (Bits, Eq, FShow);
 
 module mkLLPipe(
-    LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIdxT)
+    LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, poisonT, cRqIdxT)
 ) provisos(
     Alias#(childT, Bit#(TLog#(childNum))),
     Alias#(wayT, Bit#(TLog#(wayNum))),
@@ -143,9 +144,9 @@ module mkLLPipe(
     Alias#(pipeInT, LLPipeIn#(childT, wayT, cRqIdxT)),
     Alias#(pipeCmdT, LLPipeCmd#(childT, wayT, cRqIdxT)),
     Alias#(llCmdT, LLCmd#(childT, cRqIdxT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, dirT, ownerT, otherT, repT, Line, void, llCmdT)), // output type
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, Msi, dirT, ownerT, otherT, repT, Line, void, llCmdT)), // output type
     Alias#(infoT, CacheInfo#(tagT, Msi, dirT, ownerT, otherT)),
-    Alias#(ramDataT, RamData#(tagT, Msi, dirT, ownerT, otherT, Line)),
+    Alias#(ramDataT, RamData#(tagT, poisonT, Msi, dirT, ownerT, otherT, Line)),
     Alias#(respStateT, RespState#(Msi)),
     Alias#(tagMatchResT, TagMatchResult#(wayT)),
     Alias#(updateByUpCsT, UpdateByUpCs#(Msi)),
@@ -324,14 +325,14 @@ module mkLLPipe(
     endactionvalue
     endfunction
 
-    CCPipe#(wayNum, indexT, tagT, Msi, dirT, ownerT, otherT, repT, Line, void, pipeCmdT) pipe <- mkCCPipe(
+    CCPipe#(wayNum, indexT, tagT, poisonT, Msi, dirT, ownerT, otherT, repT, Line, void, pipeCmdT) pipe <- mkCCPipe(
         regToReadOnly(initDone), getIndex, tagMatch,
         updateByUpCs, updateByDownDir, updateRepInfo,
         infoRam, repRam, dataRam, setAuxDataRam
     );
 
     // get first output from CCPipe output
-    function pipeOutT getFirst(PipeOut#(wayT, tagT, Msi, dirT, ownerT, otherT, repT, Line, void, pipeCmdT) pout);
+    function pipeOutT getFirst(PipeOut#(wayT, tagT, poisonT, Msi, dirT, ownerT, otherT, repT, Line, void, pipeCmdT) pout);
         return PipeOut {
             cmd: (case(pout.cmd) matches
                 tagged CRq .rq: LLCRq (rq.mshrIdx);

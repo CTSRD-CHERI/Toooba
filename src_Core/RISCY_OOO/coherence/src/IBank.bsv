@@ -114,7 +114,7 @@ module mkIBank#(
     Bit#(lgBankNum) bankId,
     module#(ICRqMshr#(cRqNum, wayT, tagT, procRqT, resultT)) mkICRqMshrLocal,
     module#(IPRqMshr#(pRqNum)) mkIPRqMshrLocal,
-    module#(L1Pipe#(lgBankNum, wayNum, indexT, tagT, cRqIdxT, pRqIdxT)) mkL1Pipeline
+    module#(L1Pipe#(lgBankNum, wayNum, indexT, tagT, poisonT, cRqIdxT, pRqIdxT)) mkL1Pipeline
 )(
     IBank#(supSz, lgBankNum, wayNum, indexSz, tagSz, cRqNum, pRqNum)
 ) provisos(
@@ -127,16 +127,17 @@ module mkIBank#(
     Alias#(cacheOtherT, void), // owner cannot be pRq
     Alias#(cacheSetAuxT, Maybe#(cRqIdxT)),
     Alias#(cacheInfoT, CacheInfo#(tagT, Msi, void, cacheOwnerT, void)),
-    Alias#(ramDataT, RamData#(tagT, Msi, void, cacheOwnerT, cacheOtherT, Line)),
+    Alias#(ramDataT, RamData#(tagT, poisonT, Msi, void, cacheOwnerT, cacheOtherT, Line)),
     Alias#(procRqT, ProcRqToI),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
     Alias#(cRsToPT, CRsMsg#(void)),
     Alias#(pRqFromPT, PRqMsg#(void)),
     Alias#(pRsFromPT, PRsMsg#(wayT, void)),
+    Alias#(poisonT, Bit#(wayNum)),
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(cRqSlotT, ICRqSlot#(wayT, tagT)), // cRq MSHR slot
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, void, cacheOwnerT, cacheOtherT, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, Msi, void, cacheOwnerT, cacheOtherT, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
     Mul#(2, supSz, supSzX2),
     Alias#(resultT, Vector#(supSzX2, Maybe#(Instruction16))),
     // requirements
@@ -153,7 +154,7 @@ module mkIBank#(
 
     IPRqMshr#(pRqNum) pRqMshr <- mkIPRqMshrLocal;
 
-    L1Pipe#(lgBankNum, wayNum, indexT, tagT, cRqIdxT, pRqIdxT) pipeline <- mkL1Pipeline;
+    L1Pipe#(lgBankNum, wayNum, indexT, tagT, poisonT, cRqIdxT, pRqIdxT) pipeline <- mkL1Pipeline;
 
     Fifo#(1, Addr) rqFromCQ <- mkBypassFifo;
 

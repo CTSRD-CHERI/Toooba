@@ -55,7 +55,7 @@ typedef struct {
     // tag match & ram output
     wayT way;
     Bool pRqMiss; // pRq miss, valid only if go through tag match
-    RamData#(tagT, msiT, dirT, ownerT, otherT, lineT) ram;
+    RamData#(tagT, poisonT, msiT, dirT, ownerT, otherT, lineT) ram;
     // replace info, actually not needed, just output for debug purposes
     repT repInfo;
     // the next-in-line queuer for this cache index
@@ -63,6 +63,7 @@ typedef struct {
 } PipeOut#(
     type wayT,
     type tagT,
+    type poisonT,
     type msiT,
     type dirT,
     type ownerT,
@@ -77,6 +78,7 @@ interface CCPipe#(
     numeric type wayNum,
     type indexT,
     type tagT,
+    type poisonT,
     type msiT,
     type dirT,
     type ownerT,
@@ -88,12 +90,12 @@ interface CCPipe#(
 );
     method Action enq(pipeCmdT cmd, Maybe#(lineT) respLine, RespState#(msiT) toState);
     method Bool notFull;
-    method PipeOut#(Bit#(TLog#(wayNum)), tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT) first;
-    method PipeOut#(Bit#(TLog#(wayNum)), tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT) unguard_first;
+    method PipeOut#(Bit#(TLog#(wayNum)), tagT, poisonT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT) first;
+    method PipeOut#(Bit#(TLog#(wayNum)), tagT, poisonT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT) unguard_first;
     method Bool notEmpty;
     method Action deqWrite(
         Maybe#(pipeCmdT) newCmd,
-        RamData#(tagT, msiT, dirT, ownerT, otherT, lineT) wrRam,
+        RamData#(tagT, poisonT, msiT, dirT, ownerT, otherT, lineT) wrRam,
         setAuxT setAuxData,
         Bool updateRep // update replacement info
     );
@@ -158,13 +160,14 @@ typedef struct {
 typedef struct {
     indexT index;
     wayT way;
-    RamData#(tagT, msiT, dirT, ownerT, otherT, lineT) ram; // data to write into RAM
+    RamData#(tagT, poisonT, msiT, dirT, ownerT, otherT, lineT) ram; // data to write into RAM
     repT repInfo; // replacement info write into RAM
     setAuxT setAuxData;
 } BypassInfo#(
     type wayT,
     type indexT,
     type tagT,
+    type poisonT,
     type msiT,
     type dirT,
     type ownerT,
@@ -222,17 +225,17 @@ module mkCCPipe#(
     RWBramCore#(dataIndexT, lineT) dataRam,
     RWBramCore#(indexT, setAuxT) setAuxDataRam
 )(
-    CCPipe#(wayNum, indexT, tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)
+    CCPipe#(wayNum, indexT, tagT, poisonT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)
 ) provisos (
     Alias#(wayT, Bit#(TLog#(wayNum))),
     Alias#(indexT, Bit#(_indexSz)),
     Alias#(infoT, CacheInfo#(tagT, msiT, dirT, ownerT, otherT)),
-    Alias#(ramDataT, RamData#(tagT, msiT, dirT, ownerT, otherT, lineT)),
+    Alias#(ramDataT, RamData#(tagT, poisonT, msiT, dirT, ownerT, otherT, lineT)),
     Alias#(respStateT, RespState#(msiT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)),
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)),
     Alias#(enq2MatchT, Enq2Match#(wayNum, tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)),
     Alias#(match2OutT, Match2Out#(wayT, tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)),
-    Alias#(bypassInfoT, BypassInfo#(wayT, indexT, tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT)),
+    Alias#(bypassInfoT, BypassInfo#(wayT, indexT, tagT, poisonT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT)),
     Bits#(tagT, _tagSz),
     Bits#(msiT, _msiSz),
     Bits#(dirT, _dirSz),
@@ -469,17 +472,17 @@ module mkCCPipeSingleCycle#(
     Vector#(wayNum, RWBramCore#(dataIndexT, lineT)) dataRam,
     RWBramCore#(indexT, setAuxT) setAuxDataRam
 )(
-    CCPipe#(wayNum, indexT, tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)
+    CCPipe#(wayNum, indexT, tagT, poisonT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)
 ) provisos (
     Alias#(wayT, Bit#(TLog#(wayNum))),
     Alias#(indexT, Bit#(_indexSz)),
     Alias#(infoT, CacheInfo#(tagT, msiT, dirT, ownerT, otherT)),
-    Alias#(ramDataT, RamData#(tagT, msiT, dirT, ownerT, otherT, lineT)),
+    Alias#(ramDataT, RamData#(tagT, poisonT, msiT, dirT, ownerT, otherT, lineT)),
     Alias#(respStateT, RespState#(msiT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)),
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)),
     Alias#(enq2MatchT, Enq2Match#(wayNum, tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)),
     Alias#(match2OutT, Match2Out#(wayT, tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT)),
-    Alias#(bypassInfoT, BypassInfo#(wayT, indexT, tagT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT)),
+    Alias#(bypassInfoT, BypassInfo#(wayT, indexT, tagT, poisonT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT)),
     Bits#(tagT, _tagSz),
     Bits#(msiT, _msiSz),
     Bits#(dirT, _dirSz),

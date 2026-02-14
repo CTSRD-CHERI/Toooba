@@ -103,6 +103,7 @@ typedef LgDSetNum DIndexSz;
 typedef Bit#(DIndexSz) DIndex;
 typedef GetTagSz#(LgDBankNum, LgDSetNum) DTagSz;
 typedef Bit#(DTagSz) DTag;
+typedef Bit#(L1WayNum) PoisonTag;
 
 `ifdef L1D_CRQ_NUM
 typedef `L1D_CRQ_NUM DCRqNum;
@@ -164,7 +165,7 @@ typedef SelfInvL1PRqStuck L1DPRqStuck;
 
 (* synthesize *)
 module mkDPipeline(
-    L1Pipe#(LgDBankNum, L1WayNum, DIndex, DTag, DCRqMshrIdx, DPRqMshrIdx)
+    L1Pipe#(LgDBankNum, L1WayNum, DIndex, DTag, PoisonTag, DCRqMshrIdx, DPRqMshrIdx)
 );
     let m <- mkL1Pipe;
     return m;
@@ -358,7 +359,7 @@ endmodule
 
 (* synthesize *)
 module mkIPipeline(
-    L1Pipe#(LgIBankNum, L1WayNum, IIndex, ITag, ICRqMshrIdx, IPRqMshrIdx)
+    L1Pipe#(LgIBankNum, L1WayNum, IIndex, ITag, PoisonTag, ICRqMshrIdx, IPRqMshrIdx)
 );
     let m <- mkL1Pipe;
     return m;

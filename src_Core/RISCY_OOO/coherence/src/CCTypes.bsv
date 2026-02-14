@@ -188,6 +188,7 @@ typedef struct {
     lineT line;
 } RamData#(
     type tagT,
+    type poisonT,
     type msiT,
     type dirT,
     type ownerT,

@@ -149,7 +149,7 @@ typedef enum {Child, Dma} LLCRqSrc deriving(Bits, Eq, FShow);
 
 module mkLLBank#(
     module#(LLCRqMshr#(cRqNum, wayT, tagT, Vector#(childNum, DirPend), cRqT)) mkLLMshr,
-    module#(LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIndexT)) mkLLPipeline,
+    module#(LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, poisonT, cRqIndexT)) mkLLPipeline,
     // Whether we resp a load request (to S) with E permission. The directory
     // is all I when this function is called. fetchFromMem indicates whether
     // the data is just fetched from DRAM or not. Any function given here will
@@ -166,7 +166,7 @@ module mkLLBank#(
     Alias#(cRqIndexT, Bit#(TLog#(cRqNum))),
     Alias#(cacheOwnerT, Maybe#(CRqOwner#(cRqIndexT))),
     Alias#(cacheInfoT, CacheInfo#(tagT, Msi, dirT, cacheOwnerT, void)),
-    Alias#(ramDataT, RamData#(tagT, Msi, dirT, cacheOwnerT, void, Line)),
+    Alias#(ramDataT, RamData#(tagT, poisonT, Msi, dirT, cacheOwnerT, void, Line)),
     Alias#(cRqFromCT, CRqMsg#(cRqIdT, childT)),
     Alias#(cRsFromCT, CRsMsg#(childT)),
     Alias#(pRqRsToCT, PRqRsMsg#(cRqIdT, childT)),
@@ -179,7 +179,7 @@ module mkLLBank#(
     Alias#(cRqT, LLRq#(cRqIdT, dmaRqIdT, childT)),
     Alias#(cRqSlotT, LLCRqSlot#(wayT, tagT, Vector#(childNum, DirPend))), // cRq MSHR slot
     Alias#(llCmdT, LLCmd#(childT, cRqIndexT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, dirT, cacheOwnerT, void, RandRepInfo, Line, void, llCmdT)),
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, Msi, dirT, cacheOwnerT, void, RandRepInfo, Line, void, llCmdT)),
     // requirements
     Bits#(cRqIdT, _cRqIdSz),
     Bits#(dmaRqIdT, _dmaRqIdSz),
@@ -195,7 +195,7 @@ module mkLLBank#(
 
     LLCRqMshr#(cRqNum, wayT, tagT, Vector#(childNum, DirPend), cRqT) cRqMshr <- mkLLMshr;
 
-    LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, cRqIndexT) pipeline <- mkLLPipeline;
+    LLPipe#(lgBankNum, childNum, wayNum, indexT, tagT, poisonT, cRqIndexT) pipeline <- mkLLPipeline;
 
     Fifo#(2, cRqFromCT) rqFromCQ <- mkCFFifo;
     Fifo#(2, cRsFromCT) rsFromCQ <- mkCFFifo;

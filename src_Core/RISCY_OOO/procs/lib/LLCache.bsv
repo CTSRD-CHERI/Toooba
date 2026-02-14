@@ -90,7 +90,7 @@ typedef Bit#(LLIndexSz) LLIndex;
 typedef GetTagSz#(LgLLBankNum, LgLLSetNum) LLTagSz;
 typedef Bit#(LLTagSz) LLTag;
 typedef Bit#(TLog#(LLWayNum)) LLWay;
-
+typedef Bit#(LLWayNum) LLPoisonT;
 
 `ifdef USE_LLC_MSHR_SECURE_MODEL
 `ifndef DISABLE_SECURE_BW
@@ -230,7 +230,7 @@ endmodule
 
 (* synthesize *)
 module mkLLPipeline(
-    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLCRqMshrIdx)
+    LLPipe#(LgLLBankNum, LLChildNum, LLWayNum, LLIndex, LLTag, LLPoisonT, LLCRqMshrIdx)
 );
     let m <- mkLLPipe;
     return m;

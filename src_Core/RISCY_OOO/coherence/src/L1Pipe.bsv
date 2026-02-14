@@ -118,19 +118,20 @@ interface L1Pipe#(
     numeric type wayNum,
     type indexT,
     type tagT,
+    type poisonT,
     type cRqIdxT,
     type pRqIdxT
 );
     method Action send(L1PipeIn#(Bit#(TLog#(wayNum)), indexT, cRqIdxT, pRqIdxT) r);
     method PipeOut#(
         Bit#(TLog#(wayNum)),
-        tagT, Msi, void, // no dir
+        tagT, poisonT, Msi, void, // no dir
         Maybe#(cRqIdxT), void, RandRepInfo, // no other
         Line, Maybe#(cRqIdxT), L1Cmd#(indexT, cRqIdxT, pRqIdxT)
     ) first;
     method Action deqWrite(
         Maybe#(cRqIdxT) swapRq,
-        RamData#(tagT, Msi, void, Maybe#(cRqIdxT), void, Line) wrRam, // always write BRAM
+        RamData#(tagT, poisonT, Msi, void, Maybe#(cRqIdxT), void, Line) wrRam, // always write BRAM
         Maybe#(cRqIdxT) nextInQueue,
         Bool updateRep
     );
@@ -157,7 +158,7 @@ typedef union tagged {
 ) deriving (Bits, Eq, FShow);
 
 module mkL1Pipe(
-    L1Pipe#(lgBankNum, wayNum, indexT, tagT, cRqIdxT, pRqIdxT)
+    L1Pipe#(lgBankNum, wayNum, indexT, tagT, poisonT, cRqIdxT, pRqIdxT)
 ) provisos(
     Alias#(wayT, Bit#(TLog#(wayNum))),
     Alias#(dirT, void), // no directory
@@ -168,9 +169,9 @@ module mkL1Pipe(
     Alias#(pipeInT, L1PipeIn#(wayT, indexT, cRqIdxT, pRqIdxT)),
     Alias#(pipeCmdT, L1PipeCmd#(wayT, indexT, cRqIdxT, pRqIdxT)),
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, dirT, ownerT, otherT, repT, Line, setAuxT, l1CmdT)), // output type
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, Msi, dirT, ownerT, otherT, repT, Line, setAuxT, l1CmdT)), // output type
     Alias#(infoT, CacheInfo#(tagT, Msi, dirT, ownerT, otherT)),
-    Alias#(ramDataT, RamData#(tagT, Msi, dirT, ownerT, otherT, Line)),
+    Alias#(ramDataT, RamData#(tagT, poisonT, Msi, dirT, ownerT, otherT, Line)),
     Alias#(respStateT, RespState#(Msi)),
     Alias#(tagMatchResT, TagMatchResult#(wayT)),
     Alias#(updateByUpCsT, UpdateByUpCs#(Msi)),
@@ -179,6 +180,7 @@ module mkL1Pipe(
     // requirement
     Alias#(indexT, Bit#(indexSz)),
     Alias#(tagT, Bit#(tagSz)),
+    Alias#(poisonT, Bit#(wayNum)),
     Alias#(cRqIdxT, Bit#(cRqIdxSz)),
     Alias#(pRqIdxT, Bit#(pRqIdxSz)),
     Add#(indexSz, a__, AddrSz),
@@ -346,7 +348,7 @@ module mkL1Pipe(
     endfunction
 
     CCPipe#(
-        wayNum, indexT, tagT, Msi, dirT, ownerT, otherT, repT, Line, setAuxT, pipeCmdT
+        wayNum, indexT, tagT, poisonT, Msi, dirT, ownerT, otherT, repT, Line, setAuxT, pipeCmdT
     ) pipe <- mkCCPipeSingleCycle(
         regToReadOnly(initDone), getIndex, tagMatch,
         updateByUpCs, updateByDownDir, updateRepInfo,
