@@ -126,7 +126,7 @@ module mkIBank#(
     Alias#(cacheOwnerT, Maybe#(cRqIdxT)), // owner cannot be pRq
     Alias#(cacheOtherT, void), // owner cannot be pRq
     Alias#(cacheSetAuxT, Maybe#(cRqIdxT)),
-    Alias#(cacheInfoT, CacheInfo#(tagT, Msi, void, cacheOwnerT, void)),
+    Alias#(cacheInfoT, CacheInfo#(tagT, poisonT, Msi, void, cacheOwnerT, void)),
     Alias#(ramDataT, RamData#(tagT, poisonT, Msi, void, cacheOwnerT, cacheOtherT, Line)),
     Alias#(procRqT, ProcRqToI),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
@@ -530,11 +530,11 @@ module mkIBank#(
         pipeline.deqWrite(succ, RamData {
             info: CacheInfo {
                 tag: getTag(req.addr), // should be the same as original tag
+                poisonTag: 0,
                 cs: ram.info.cs, // use cs in ram
                 dir: ?,
                 owner: succ,
-                other: ?,
-                poisoned: False
+                other: ?
             },
             line: ram.line
         }, Invalid, True); // hit, so update rep info
@@ -594,11 +594,11 @@ module mkIBank#(
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // tag may be garbage if cs == I
+                    poisonTag: 0,
                     cs: ram.info.cs,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
-                    other: ?,
-                    poisoned: False
+                    other: ?
                 },
                 line: ram.line
             }, Invalid, False);
@@ -617,11 +617,11 @@ module mkIBank#(
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // set to req tag (old tag is replaced right now)
+                    poisonTag: 0,
                     cs: I,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
-                    other: ?,
-                    poisoned: False
+                    other: ?
                 },
                 line: ? // data is no longer used
             }, Invalid, False);
@@ -760,11 +760,11 @@ module mkIBank#(
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag,
+                    poisonTag: 0,
                     cs: I, // I$ is always downgraded by pRq to I
                     dir: ?,
                     owner: Invalid, // no successor
-                    other: ?,
-                    poisoned: False
+                    other: ?
                 },
                 line: ? // line is not useful
             }, Invalid, False);
@@ -825,8 +825,7 @@ module mkIBank#(
                 cs: I, // downgraded to I
                 dir: ?,
                 owner: Invalid, // no successor
-                other: ?,
-                poisoned: False
+                other: ?
             },
             line: ?
         }, Invalid, False);

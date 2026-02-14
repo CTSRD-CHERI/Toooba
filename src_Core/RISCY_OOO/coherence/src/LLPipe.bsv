@@ -145,7 +145,7 @@ module mkLLPipe(
     Alias#(pipeCmdT, LLPipeCmd#(childT, wayT, cRqIdxT)),
     Alias#(llCmdT, LLCmd#(childT, cRqIdxT)),
     Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, Msi, dirT, ownerT, otherT, repT, Line, void, llCmdT)), // output type
-    Alias#(infoT, CacheInfo#(tagT, Msi, dirT, ownerT, otherT)),
+    Alias#(infoT, CacheInfo#(tagT, poisonT, Msi, dirT, ownerT, otherT)),
     Alias#(ramDataT, RamData#(tagT, poisonT, Msi, dirT, ownerT, otherT, Line)),
     Alias#(respStateT, RespState#(Msi)),
     Alias#(tagMatchResT, TagMatchResult#(wayT)),
@@ -155,6 +155,7 @@ module mkLLPipe(
     // requirement
     Alias#(indexT, Bit#(indexSz)),
     Alias#(tagT, Bit#(tagSz)),
+    Alias#(poisonT, Bit#(poisonSz)),
     Alias#(cRqIdxT, Bit#(_cRqIdxSz)),
     Add#(indexSz, a__, AddrSz),
     Add#(tagSz, b__, AddrSz)
@@ -176,11 +177,11 @@ module mkLLPipe(
         for(Integer i = 0; i < valueOf(wayNum); i = i+1) begin
             infoRam[i].wrReq(initIndex, CacheInfo {
                 tag: 0,
+                poisonTag: 0,
                 cs: I,
                 dir: replicate(I),
                 owner: Invalid,
-                other: ?,
-                poisoned : False
+                other: ?
             });
         end
         repRam.wrReq(initIndex, randRepInitInfo); // useless for random replace

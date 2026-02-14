@@ -169,13 +169,14 @@ typedef union tagged {
 // cache info: tag, cs, dir, owner, and other
 typedef struct {
     tagT tag;
+    poisonT poisonTag;
     msiT cs;
     dirT dir;
     ownerT owner;
     otherT other;
-    Bool poisoned;
 } CacheInfo#(
     type tagT,
+    type poisonT,
     type msiT,
     type dirT,
     type ownerT,
@@ -184,7 +185,7 @@ typedef struct {
 
 // ram output
 typedef struct {
-    CacheInfo#(tagT, msiT, dirT, ownerT, otherT) info;
+    CacheInfo#(tagT, poisonT, msiT, dirT, ownerT, otherT) info;
     lineT line;
 } RamData#(
     type tagT,

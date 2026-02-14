@@ -170,7 +170,7 @@ module mkL1Pipe(
     Alias#(pipeCmdT, L1PipeCmd#(wayT, indexT, cRqIdxT, pRqIdxT)),
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
     Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, Msi, dirT, ownerT, otherT, repT, Line, setAuxT, l1CmdT)), // output type
-    Alias#(infoT, CacheInfo#(tagT, Msi, dirT, ownerT, otherT)),
+    Alias#(infoT, CacheInfo#(tagT, poisonT, Msi, dirT, ownerT, otherT)),
     Alias#(ramDataT, RamData#(tagT, poisonT, Msi, dirT, ownerT, otherT, Line)),
     Alias#(respStateT, RespState#(Msi)),
     Alias#(tagMatchResT, TagMatchResult#(wayT)),
@@ -203,11 +203,11 @@ module mkL1Pipe(
         for(Integer i = 0; i < valueOf(wayNum); i = i+1) begin
             infoRam[i].wrReq(initIndex, CacheInfo {
                 tag: 0,
+                poisonTag: 0, 
                 cs: I,
                 dir: ?,
                 owner: Invalid,
-                other: ?,
-                poisoned: False
+                other: ?
             });
         end
         repRam.wrReq(initIndex, randRepInitInfo); // useless for random replace

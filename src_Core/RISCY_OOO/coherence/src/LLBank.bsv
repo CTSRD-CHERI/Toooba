@@ -163,9 +163,10 @@ module mkLLBank#(
     Alias#(dirT, Vector#(childNum, Msi)),
     Alias#(indexT, Bit#(indexSz)),
     Alias#(tagT, Bit#(tagSz)),
+    Alias#(poisonT, Bit#(wayNum)),
     Alias#(cRqIndexT, Bit#(TLog#(cRqNum))),
     Alias#(cacheOwnerT, Maybe#(CRqOwner#(cRqIndexT))),
-    Alias#(cacheInfoT, CacheInfo#(tagT, Msi, dirT, cacheOwnerT, void)),
+    Alias#(cacheInfoT, CacheInfo#(tagT, poisonT, Msi, dirT, cacheOwnerT, void)),
     Alias#(ramDataT, RamData#(tagT, poisonT, Msi, dirT, cacheOwnerT, void, Line)),
     Alias#(cRqFromCT, CRqMsg#(cRqIdT, childT)),
     Alias#(cRsFromCT, CRsMsg#(childT)),
@@ -1004,6 +1005,7 @@ endfunction
         pipeline.deqWrite(succ, RamData {
             info: CacheInfo {
                 tag: getTag(cRq.addr), // should be the same as original tag
+                poisonTag: 0, 
                 cs: newCs,
                 dir: newDir,
                 owner: (case(succ) matches // pass owner to successor
@@ -1013,8 +1015,7 @@ endfunction
                     });
                     default: return Invalid;
                 endcase),
-                other: ?,
-                poisoned: False
+                other: ?
             },
             line: ram.line // use line in ram
         }, True); // hit, so update rep info
@@ -1061,6 +1062,7 @@ endfunction
         pipeline.deqWrite(succ, RamData {
             info: CacheInfo {
                 tag: getTag(cRq.addr), // should be the same as original tag
+                poisonTag: 0,
                 cs: newCs,
                 dir: ram.info.dir, // dir does not change
                 owner: (case(succ) matches // pass owner to successor
@@ -1070,8 +1072,7 @@ endfunction
                     });
                     default: return Invalid;
                 endcase),
-                other: ?,
-                poisoned: False
+                other: ?
             },
             line: newLine // use new line
         }, True); // hit, so update rep info
@@ -1127,14 +1128,14 @@ endfunction
         pipeline.deqWrite(Invalid, RamData {
             info: CacheInfo {
                 tag: getTag(cRq.addr), // set to new tag (old tag is replaced)
+                poisonTag: 0, 
                 cs: I,
                 dir: replicate(I),
                 owner: Valid (CRqOwner {
                     mshrIdx: n, // owner is current cRq
                     replacing: False // replacement is done right now
                 }),
-                other: ?,
-                poisoned: False
+                other: ?
             },
             line: ? // data is no longer used
         }, False);
@@ -1218,11 +1219,11 @@ endfunction
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(cRq.addr), // tag may be garbage if cs == I
+                    poisonTag: ram.info.poisonTag,
                     cs: ram.info.cs,
                     dir: ram.info.dir,
                     owner: Valid (CRqOwner {mshrIdx: n, replacing: False}), // owner is req itself
-                    other: ?,
-                    poisoned: False
+                    other: ?
                 },
                 line: ram.line
             }, False);
@@ -1261,11 +1262,11 @@ endfunction
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(cRq.addr),
+                    poisonTag: ram.info.poisonTag,
                     cs: ram.info.cs,
                     dir: ram.info.dir,
                     owner: Valid (CRqOwner {mshrIdx: n, replacing: False}), // owner is req itself
-                    other: ?,
-                    poisoned: False
+                    other: ?
                 },
                 line: ram.line
             }, False);
@@ -1288,14 +1289,14 @@ endfunction
                 pipeline.deqWrite(Invalid, RamData {
                     info: CacheInfo {
                         tag: ram.info.tag,
+                        poisonTag: ram.info.poisonTag,
                         cs: ram.info.cs,
                         dir: ram.info.dir,
                         owner: Valid (CRqOwner {
                             mshrIdx: n,
                             replacing: True // replacement is ongoing
                         }),
-                        other: ?,
-                        poisoned: False
+                        other: ?
                     },
                     line: ram.line // keep data the same
                 }, False);

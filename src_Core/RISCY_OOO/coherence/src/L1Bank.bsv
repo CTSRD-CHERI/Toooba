@@ -141,7 +141,7 @@ module mkL1Bank#(
     Alias#(pRqIdxT, Bit#(TLog#(pRqNum))),
     Alias#(cacheOwnerT, Maybe#(cRqIdxT)), // actually owner cannot be pRq
     Alias#(cacheSetAuxT, Maybe#(cRqIdxT)),
-    Alias#(cacheInfoT, CacheInfo#(tagT, Msi, void, cacheOwnerT, void)),
+    Alias#(cacheInfoT, CacheInfo#(tagT, poisonT, Msi, void, cacheOwnerT, void)),
     Alias#(ramDataT, RamData#(tagT, poisonT, Msi, void, cacheOwnerT, void, Line)),
     Alias#(procRqT, ProcRq#(procRqIdT)),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
@@ -706,11 +706,11 @@ endfunction
                     // may cache hit cases (e.g., req S and hit in M).
                     // req.toState > ram.info.cs is also possible in case of
                     // req M and hit E.
+                    poisonTag: 0,
                     cs: max(ram.info.cs, req.toState),
                     dir: ?,
                     owner: succ,
-                    other: ?,
-                    poisoned : line_poisoned
+                    other: ?
                 },
                 line: newLine // write new data into cache
             }, isValid(succ) ? pipeOutNextInQueue : pipeOutSecondInQueue, True); // hit, so update rep info
@@ -783,11 +783,11 @@ endfunction
         pipeline.deqWrite(succ, RamData {
             info: CacheInfo {
                 tag: getTag(req.addr), // should be the same as original tag
+                poisonTag: 0,
                 cs: M, // AMO always gets to M
                 dir: ?,
                 owner: succ,
-                other: ?,
-                poisoned : False
+                other: ?
             },
             line: newLine // write new data into cache
         }, amoHit.nextInQueue, True); // hit, so update rep info
@@ -827,11 +827,11 @@ endfunction
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag,
+                    poisonTag: ram.info.poisonTag,
                     cs: ram.info.cs,
                     dir: ram.info.dir,
                     owner: resetOwner ? Invalid : ram.info.owner,
-                    other: ram.info.other,
-                    poisoned: ram.info.poisoned
+                    other: ram.info.other
                 },
                 line: ram.line
             }, pipeOutNextInQueue, False);
@@ -875,11 +875,11 @@ endfunction
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // tag may be garbage if cs == I
+                    poisonTag: ram.info.poisonTag,
                     cs: ram.info.cs,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
-                    other: ?,
-                    poisoned: False
+                    other: ?
                 },
                 line: ram.line
             }, pipeOutNextInQueue, False);
@@ -897,11 +897,11 @@ endfunction
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // set to req tag (old tag is replaced right now)
+                    poisonTag: 0,
                     cs: I,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
-                    other: ?,
-                    poisoned: ?
+                    other: ?
                 },
                 line: ? // data is no longer used
             }, pipeOutNextInQueue, False);
@@ -1134,11 +1134,11 @@ endfunction
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag, // keep tag the same (for sake of cRq)
+                    poisonTag: ram.info.poisonTag,
                     cs: I, // downgraded to I
                     dir: ?,
                     owner: ram.info.owner, // keep owner to cRq
-                    other: ?,
-                    poisoned: ram.info.poisoned
+                    other: ?
                 },
                 line: ram.line
             }, pipeOutNextInQueue, False);
@@ -1166,11 +1166,11 @@ endfunction
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag,
+                    poisonTag: ram.info.poisonTag,
                     cs: pRq.toState,
                     dir: ?,
                     owner: Invalid, // no successor
-                    other: ?,
-                    poisoned: ram.info.poisoned
+                    other: ?
                 },
                 line: ram.line
             }, pipeOutSecondInQueue, False);
@@ -1234,8 +1234,7 @@ endfunction
                 cs: I, // downgraded to I
                 dir: ?,
                 owner: Invalid, // no successor
-                other: ?,
-                poisoned: False
+                other: ?
             },
             line: ?
         }, Invalid, False);
