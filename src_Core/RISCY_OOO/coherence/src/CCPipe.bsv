@@ -211,6 +211,7 @@ module mkCCPipe#(
         // below are current RAM outputs, is merged with ram write from final stage
         // but is NOT merged with state changes carried in PRs/CRs
         Vector#(wayNum, tagT) tagVec,
+        Vector#(wayNum, poisonT) poisonTagVec,
         Vector#(wayNum, msiT) csVec,
         Vector#(wayNum, ownerT) ownerVec,
         repT repInfo
@@ -297,14 +298,16 @@ module mkCCPipe#(
         setAuxT setAuxData = fromMaybe(setAuxDataRam.rdResp, e2m.setAuxData);
         // do tag match to get way to occupy
         Vector#(wayNum, tagT) tagVec;
+        Vector#(wayNum, poisonT) poisonTagVec;
         Vector#(wayNum, msiT) csVec;
         Vector#(wayNum, ownerT) ownerVec;
         for(Integer i = 0; i < valueOf(wayNum); i = i+1) begin
             tagVec[i] = infoVec[i].tag;
+            poisonTagVec[i] = infoVec[i].poisonTag;
             csVec[i] = infoVec[i].cs;
             ownerVec[i] = infoVec[i].owner;
         end
-        let tmRes <- tagMatch(e2m.cmd, tagVec, csVec, ownerVec, repInfo);
+        let tmRes <- tagMatch(e2m.cmd, tagVec, poisonTagVec, csVec, ownerVec, repInfo);
         wayT way = tmRes.way;
         Bool pRqMiss = tmRes.pRqMiss;
         // read data
@@ -458,6 +461,7 @@ module mkCCPipeSingleCycle#(
         // below are current RAM outputs, is merged with ram write from final stage
         // but is NOT merged with state changes carried in PRs/CRs
         Vector#(wayNum, tagT) tagVec,
+        Vector#(wayNum, poisonT) poisonTagVec,
         Vector#(wayNum, msiT) csVec,
         Vector#(wayNum, ownerT) ownerVec,
         repT repInfo
@@ -531,14 +535,16 @@ module mkCCPipeSingleCycle#(
         //$display("%t : doTagMatch repRamdeqRdResp ", $time);
         // do tag match to get way to occupy
         Vector#(wayNum, tagT) tagVec;
+        Vector#(wayNum, poisonT) poisonTagVec;
         Vector#(wayNum, msiT) csVec;
         Vector#(wayNum, ownerT) ownerVec;
         for(Integer i = 0; i < valueOf(wayNum); i = i+1) begin
             tagVec[i] = infoVec[i].tag;
+            poisonTagVec[i] = infoVec[i].poisonTag;
             csVec[i] = infoVec[i].cs;
             ownerVec[i] = infoVec[i].owner;
         end
-        let tmRes <- tagMatch(e2m.cmd, tagVec, csVec, ownerVec, repInfo);
+        let tmRes <- tagMatch(e2m.cmd, tagVec, poisonTagVec, csVec, ownerVec, repInfo);
         wayT way = tmRes.way;
         Bool pRqMiss = tmRes.pRqMiss;
         // set mat2out & merge with CRs/PRs

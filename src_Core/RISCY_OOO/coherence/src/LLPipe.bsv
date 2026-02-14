@@ -212,6 +212,7 @@ module mkLLPipe(
     function ActionValue#(tagMatchResT) tagMatch(
         pipeCmdT cmd,
         Vector#(wayNum, tagT) tagVec,
+        Vector#(wayNum, poisonT) poisonTagVec,
         Vector#(wayNum, Msi) csVec,
         Vector#(wayNum, ownerT) ownerVec,
         repT repInfo
@@ -224,6 +225,7 @@ module mkLLPipe(
                 fshow(cmd), " ; ",
                 fshow(getTag(getAddrFromCmd(cmd))), " ; ",
                 fshow(tagVec), " ; ",
+                fshow(poisonTagVec), " ; ",
                 fshow(csVec), " ; ",
                 fshow(ownerVec)
             );
