@@ -67,7 +67,8 @@ interface RandomReplace#(numeric type wayNum);
     // and Invalid way has priority
     method Maybe#(Bit#(TLog#(wayNum))) getReplaceWay(
         Vector#(wayNum, Bool) unlocked, 
-        Vector#(wayNum, Bool) invalid
+        Vector#(wayNum, Bool) invalid,
+        Vector#(wayNum, Bool) poisoned
     );
 endinterface
 
@@ -80,13 +81,19 @@ module mkRandomReplace(RandomReplace#(wayNum)) provisos(
         randWay <= randWay == fromInteger(valueOf(wayNum) - 1) ? 0 : randWay + 1;
     endrule
     
-    method Maybe#(wayT) getReplaceWay(Vector#(wayNum, Bool) unlocked, Vector#(wayNum, Bool) invalid);
+    method Maybe#(wayT) getReplaceWay(Vector#(wayNum, Bool) unlocked, Vector#(wayNum, Bool) invalid,  Vector#(wayNum, Bool) poisoned);
         // first search for invalid & unlocked way
         function Bool isInvUnlock(Integer i);
             return unlocked[i] && invalid[i];
         endfunction
+        function Bool isPoisoned(Integer i);
+            return poisoned[i] && unlocked[i];
+        endfunction
         Vector#(wayNum, Integer) idxVec = genVector;
         Maybe#(wayT) repWay = searchIndex(isInvUnlock, idxVec);
+        if(!isValid(repWay)) begin 
+            repWay = searchIndex(isPoisoned, idxVec);    
+        end 
         if(!isValid(repWay)) begin
             // check whether random way is unlocked
             if(unlocked[randWay]) begin

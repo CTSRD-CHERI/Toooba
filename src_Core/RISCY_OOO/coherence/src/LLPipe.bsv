@@ -261,11 +261,13 @@ module mkLLPipe(
                     // find a unlocked way to replace for cRq
                     Vector#(wayNum, Bool) unlocked = ?;
                     Vector#(wayNum, Bool) invalid = ?;
+                    Vector#(wayNum, Bool) poisoned = ?;
                     for(Integer i = 0; i < valueOf(wayNum); i = i+1) begin
                         invalid[i] = csVec[i] == I;
                         unlocked[i] = !isValid(ownerVec[i]);
+                        poisoned[i] = poisonTagVec[i] == 1'b1;
                     end
-                    Maybe#(wayT) repWay = randRep.getReplaceWay(unlocked, invalid);
+                    Maybe#(wayT) repWay = randRep.getReplaceWay(unlocked, invalid, poisoned);
                     // sanity check: repWay must be valid
                     doAssert(isValid(repWay), "should always find a way to replace");
                     return TagMatchResult {

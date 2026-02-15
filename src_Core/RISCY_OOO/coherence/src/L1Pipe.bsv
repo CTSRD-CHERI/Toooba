@@ -305,11 +305,21 @@ module mkL1Pipe(
                     // find a unlocked way to replace for cRq
                     Vector#(wayNum, Bool) unlocked = ?;
                     Vector#(wayNum, Bool) invalid = ?;
+                    Vector#(wayNum, Bool) poisoned = ?;
                     for(Integer i = 0; i < valueOf(wayNum); i = i+1) begin
                         invalid[i] = csVec[i] == I;
                         unlocked[i] = !isValid(ownerVec[i]);
+                        poisoned[i] = (poisonTagVec[i] != 0);
                     end
-                    Maybe#(wayT) repWay = randRep.getReplaceWay(unlocked, invalid);
+                    $display("%t L1 %m tagMatch: poisoned", fshow(poisonTagVec), fshow(poisoned), $time);
+                    if( pack(poisoned) != 0) begin 
+                        $display("%t L1 %m tagMatch: getReplaceWay has poisoned", $time);
+                    end 
+                    Maybe#(wayT) repWay = randRep.getReplaceWay(unlocked, invalid, poisoned);
+                    if( pack(poisoned) != 0) begin 
+                        $display("%t L1 %m tagMatch: replaceWay result", fshow(poisoned), fshow(repWay), $time);
+                    end 
+                    //if(poisoned[unpack(repWay) ==])
                     // There may be no way to replace if all ways are locked.
                     // Just choose a locked way. This will cause the request to be queued.
                     if(verbose && !isValid(repWay)) begin
