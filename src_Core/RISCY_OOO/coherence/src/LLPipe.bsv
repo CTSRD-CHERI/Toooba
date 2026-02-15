@@ -155,7 +155,7 @@ module mkLLPipe(
     // requirement
     Alias#(indexT, Bit#(indexSz)),
     Alias#(tagT, Bit#(tagSz)),
-    Alias#(poisonT, Bit#(poisonSz)),
+    Alias#(poisonT, Bit#(1)),
     Alias#(cRqIdxT, Bit#(_cRqIdxSz)),
     Add#(indexSz, a__, AddrSz),
     Add#(tagSz, b__, AddrSz)

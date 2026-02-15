@@ -180,7 +180,7 @@ module mkL1Pipe(
     // requirement
     Alias#(indexT, Bit#(indexSz)),
     Alias#(tagT, Bit#(tagSz)),
-    Alias#(poisonT, Bit#(wayNum)),
+    Alias#(poisonT, Bit#(1)),
     Alias#(cRqIdxT, Bit#(cRqIdxSz)),
     Alias#(pRqIdxT, Bit#(pRqIdxSz)),
     Add#(indexSz, a__, AddrSz),

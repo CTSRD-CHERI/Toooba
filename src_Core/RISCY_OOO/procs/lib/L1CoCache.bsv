@@ -103,7 +103,7 @@ typedef LgDSetNum DIndexSz;
 typedef Bit#(DIndexSz) DIndex;
 typedef GetTagSz#(LgDBankNum, LgDSetNum) DTagSz;
 typedef Bit#(DTagSz) DTag;
-typedef Bit#(L1WayNum) PoisonTag;
+typedef Bit#(1) PoisonTag;
 
 `ifdef L1D_CRQ_NUM
 typedef `L1D_CRQ_NUM DCRqNum;

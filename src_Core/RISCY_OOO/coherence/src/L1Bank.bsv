@@ -151,7 +151,7 @@ module mkL1Bank#(
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(cRqSlotT, L1CRqSlot#(wayT, tagT)), // cRq MSHR slot
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
-    Alias#(poisonT, Bit#(wayNum)),
+    Alias#(poisonT, Bit#(1)),
     Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, Msi, void, cacheOwnerT, void, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
     // requirements
     Bits#(procRqIdT, _procRqIdT),
@@ -699,6 +699,24 @@ endfunction
         // path for AMO
         Maybe#(cRqIdxT) succ = pipeOutSucc;
         if(req.op != Amo) begin
+            Bit#(4)  poisonVec = 4'h0;
+            for (Integer i = 0; i < valueof(4); i = i+1) begin
+                MemTaggedData poison_check_curData = getTaggedDataAt(newLine, unpack(fromInteger(i)));
+                CapPipe poison_check_dataUnpacked = fromMem(unpack(pack(poison_check_curData)));
+                if(isValidCap(poison_check_dataUnpacked) && getCapPoison(poison_check_dataUnpacked) == 1'b1 ) begin 
+                    poisonVec[i] = 1'b1;
+                end else begin 
+                    poisonVec[i] = 1'b0;
+                end
+            end
+            if(poisonVec == 4'b1111) begin 
+                    $display("%t L1 %m pipelineResp: cache line is fully poisoned, mark it",
+                                $time,
+                                fshow(newLine), fshow(poisonVec)
+                            );           
+            end 
+            Bit#(1) poisonTagVec = 0;
+            
             pipeline.deqWrite(succ, RamData {
                 info: CacheInfo {
                     tag: getTag(req.addr), // should be the same as original tag
@@ -706,7 +724,7 @@ endfunction
                     // may cache hit cases (e.g., req S and hit in M).
                     // req.toState > ram.info.cs is also possible in case of
                     // req M and hit E.
-                    poisonTag: 0,
+                    poisonTag: poisonVec == 4'b1111 ? 1'b1: 1'b0,
                     cs: max(ram.info.cs, req.toState),
                     dir: ?,
                     owner: succ,
@@ -1446,7 +1464,7 @@ module mkL1Cache#(
     Alias#(procRqT, ProcRq#(procRqIdT)),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
     Alias#(cRsToPT, CRsMsg#(void)),
-    Alias#(poisonT, Bit#(wayNum)),
+    Alias#(poisonT, Bit#(1)),
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
     Alias#(pipeOutT, PipeOut#(wayT, tagT, poisonT, Msi, void, cacheOwnerT, void, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),

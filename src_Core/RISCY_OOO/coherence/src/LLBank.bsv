@@ -163,7 +163,7 @@ module mkLLBank#(
     Alias#(dirT, Vector#(childNum, Msi)),
     Alias#(indexT, Bit#(indexSz)),
     Alias#(tagT, Bit#(tagSz)),
-    Alias#(poisonT, Bit#(wayNum)),
+    Alias#(poisonT, Bit#(1)),
     Alias#(cRqIndexT, Bit#(TLog#(cRqNum))),
     Alias#(cacheOwnerT, Maybe#(CRqOwner#(cRqIndexT))),
     Alias#(cacheInfoT, CacheInfo#(tagT, poisonT, Msi, dirT, cacheOwnerT, void)),

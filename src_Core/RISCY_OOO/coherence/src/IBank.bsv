@@ -133,7 +133,7 @@ module mkIBank#(
     Alias#(cRsToPT, CRsMsg#(void)),
     Alias#(pRqFromPT, PRqMsg#(void)),
     Alias#(pRsFromPT, PRsMsg#(wayT, void)),
-    Alias#(poisonT, Bit#(wayNum)),
+    Alias#(poisonT, Bit#(1)),
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(cRqSlotT, ICRqSlot#(wayT, tagT)), // cRq MSHR slot
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),

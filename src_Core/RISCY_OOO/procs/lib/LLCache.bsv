@@ -90,7 +90,7 @@ typedef Bit#(LLIndexSz) LLIndex;
 typedef GetTagSz#(LgLLBankNum, LgLLSetNum) LLTagSz;
 typedef Bit#(LLTagSz) LLTag;
 typedef Bit#(TLog#(LLWayNum)) LLWay;
-typedef Bit#(LLWayNum) LLPoisonT;
+typedef Bit#(1) LLPoisonT;
 
 `ifdef USE_LLC_MSHR_SECURE_MODEL
 `ifndef DISABLE_SECURE_BW
