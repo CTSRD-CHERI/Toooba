@@ -317,7 +317,7 @@ module mkL1Pipe(
                     end 
                     Maybe#(wayT) repWay = randRep.getReplaceWay(unlocked, invalid, poisoned);
                     if( pack(poisoned) != 0) begin 
-                        $display("%t L1 %m tagMatch: replaceWay result", fshow(poisoned), fshow(repWay), $time);
+                        $display("%t L1 %m tagMatch: L1replaceWay result", fshow(tagVec), fshow(csVec), fshow(poisoned), fshow(repWay), $time);
                     end 
                     //if(poisoned[unpack(repWay) ==])
                     // There may be no way to replace if all ways are locked.
@@ -370,16 +370,16 @@ module mkL1Pipe(
     method Action send(pipeInT req);
         case(req) matches
             tagged CRq .rq: begin
-                pipe.enq(CRq (rq), Invalid, Invalid);
+                pipe.enq(CRq (rq), Invalid, Invalid, 1'b0);
             end
             tagged PRq .rq: begin
-                pipe.enq(PRq (rq), Invalid, Invalid);
+                pipe.enq(PRq (rq), Invalid, Invalid, 1'b0);
             end
             tagged PRs .rs: begin
                 pipe.enq(PRs (L1PipePRsCmd {
                     addr: rs.addr,
                     way: rs.way
-                }), rs.data, UpCs (rs.toState));
+                }), rs.data, UpCs (rs.toState), 1'b0);
             end
 `ifdef SECURITY_CACHES
             tagged Flush .flush: begin

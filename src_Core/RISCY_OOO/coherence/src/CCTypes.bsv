@@ -278,6 +278,7 @@ typedef struct {
     Addr addr;
     Msi toState;
     Maybe#(Line) data;
+    Bit#(1) poisonTag;
     childT child; // from which child
 } CRsMsg#(type childT) deriving(Bits, Eq, FShow);
 

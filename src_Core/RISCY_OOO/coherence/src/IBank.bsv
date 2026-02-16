@@ -387,6 +387,7 @@ module mkIBank#(
         cRsToPT resp = CRsMsg {
             addr: {slot.repTag, truncate(req.addr)}, // get bank id & index from req
             toState: I,
+            poisonTag: 0,
             data: Invalid, // I$ never downgrade with data to writeback
             child: ?
         };
@@ -410,6 +411,7 @@ module mkIBank#(
         cRsToPT resp = CRsMsg {
             addr: req.addr,
             toState: I, // I$ must downgrade to I
+            poisonTag: 0,
             data: Invalid, // I$ never downgrade with data to writeback
             child: ?
         };

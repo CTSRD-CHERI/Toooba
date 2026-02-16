@@ -62,7 +62,8 @@ module mkL1LLConnect#(
                 addr: r.addr,
                 toState: r.toState,
                 data: r.data,
-                child: child 
+                child: child,
+                poisonTag: r.poisonTag
             }
         };
     endfunction

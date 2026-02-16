@@ -451,10 +451,21 @@ endfunction
         doAssert(state == WaitNewTag,
             "send replacement resp to parent, state should be WaitNewTag"
         );
+        Bit#(4)  poisonVec = 4'h0;
+        for (Integer i = 0; i < valueof(4); i = i+1) begin
+            MemTaggedData poison_check_curData = getTaggedDataAt(fromMaybe(unpack(0), data), unpack(fromInteger(i)));
+            CapPipe poison_check_dataUnpacked = fromMem(unpack(pack(poison_check_curData)));
+            if(isValidCap(poison_check_dataUnpacked) && getCapPoison(poison_check_dataUnpacked) == 1'b1 ) begin 
+                poisonVec[i] = 1'b1;
+            end else begin 
+                poisonVec[i] = 1'b0;
+            end
+        end
         // send resp to parent
         cRsToPT resp = CRsMsg {
             addr: {slot.repTag, truncate(req.addr)}, // get bank id & index from req
             toState: I,
+            poisonTag: poisonVec == 4'b1111 ? 1'b1: 1'b0,
             data: data,
             child: ?
         };
@@ -482,9 +493,21 @@ endfunction
         // get pRq info & send resp & release MSHR entry
         pRqFromPT req = pRqMshr.sendRsToP_pRq.getRq(n);
         Maybe#(Line) data = pRqMshr.sendRsToP_pRq.getData(n);
+        Bit#(4)  poisonVec = 4'h0;
+        for (Integer i = 0; i < valueof(4); i = i+1) begin
+            MemTaggedData poison_check_curData = getTaggedDataAt(fromMaybe(unpack(0), data), unpack(fromInteger(i)));
+            CapPipe poison_check_dataUnpacked = fromMem(unpack(pack(poison_check_curData)));
+            if(isValidCap(poison_check_dataUnpacked) && getCapPoison(poison_check_dataUnpacked) == 1'b1) begin 
+                poisonVec[i] = 1'b1;
+                $display("%t L1 %m sendRsToP: write back to LLC has poison", fshow(poisonVec), fshow(data), $time);
+            end else begin 
+                poisonVec[i] = 1'b0;
+            end
+        end
         cRsToPT resp = CRsMsg {
             addr: req.addr,
             toState: req.toState,
+            poisonTag: poisonVec == 4'b1111 ? 1'b1 : 1'b0,
             data: data,
             child: ?
         };
@@ -715,7 +738,6 @@ endfunction
                                 fshow(newLine), fshow(poisonVec)
                             );           
             end 
-            Bit#(1) poisonTagVec = 0;
             
             pipeline.deqWrite(succ, RamData {
                 info: CacheInfo {
@@ -893,7 +915,7 @@ endfunction
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // tag may be garbage if cs == I
-                    poisonTag: ram.info.poisonTag,
+                    poisonTag: 0,
                     cs: ram.info.cs,
                     dir: ?,
                     owner: Valid (n), // owner is req itself
@@ -1152,7 +1174,7 @@ endfunction
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag, // keep tag the same (for sake of cRq)
-                    poisonTag: ram.info.poisonTag,
+                    poisonTag: 0,
                     cs: I, // downgraded to I
                     dir: ?,
                     owner: ram.info.owner, // keep owner to cRq
@@ -1184,7 +1206,7 @@ endfunction
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag,
-                    poisonTag: ram.info.poisonTag,
+                    poisonTag: 0,
                     cs: pRq.toState,
                     dir: ?,
                     owner: Invalid, // no successor

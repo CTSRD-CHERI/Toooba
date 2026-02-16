@@ -268,6 +268,9 @@ module mkLLPipe(
                         poisoned[i] = poisonTagVec[i] == 1'b1;
                     end
                     Maybe#(wayT) repWay = randRep.getReplaceWay(unlocked, invalid, poisoned);
+                    if( pack(poisoned) != 0) begin 
+                        $display("%t LL %m tagMatch: LLCreplaceWay result", fshow(tagVec), fshow(csVec), fshow(poisoned), fshow(repWay), $time);
+                    end 
                     // sanity check: repWay must be valid
                     doAssert(isValid(repWay), "should always find a way to replace");
                     return TagMatchResult {
@@ -356,19 +359,19 @@ module mkLLPipe(
     method Action send(pipeInT req);
         case(req) matches
             tagged CRq .rq: begin
-                pipe.enq(CRq (rq), Invalid, Invalid);
+                pipe.enq(CRq (rq), Invalid, Invalid, 1'b0);
             end
             tagged CRs .rs: begin
                 pipe.enq(CRs (LLPipeCRsCmd {
                     addr: rs.addr,
                     child: rs.child
-                }), rs.data, DownDir (rs.toState));
+                }), rs.data, DownDir (rs.toState), rs.poisonTag );
             end
             tagged MRs .rs: begin
                 pipe.enq(MRs (LLPipeMRsCmd {
                     addr: rs.addr,
                     way: rs.way
-                }), Valid (rs.data), UpCs (rs.toState));
+                }), Valid (rs.data), UpCs (rs.toState), 1'b0);
             end
         endcase
     endmethod

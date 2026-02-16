@@ -88,7 +88,7 @@ interface CCPipe#(
     type setAuxT,
     type pipeCmdT
 );
-    method Action enq(pipeCmdT cmd, Maybe#(lineT) respLine, RespState#(msiT) toState);
+    method Action enq(pipeCmdT cmd, Maybe#(lineT) respLine, RespState#(msiT) toState, poisonT poisonTag);
     method Bool notFull;
     method PipeOut#(Bit#(TLog#(wayNum)), tagT, poisonT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT) first;
     method PipeOut#(Bit#(TLog#(wayNum)), tagT, poisonT, msiT, dirT, ownerT, otherT, repT, lineT, setAuxT, pipeCmdT) unguard_first;
@@ -118,6 +118,7 @@ typedef struct {
     Maybe#(lineT) respLine;
     RespState#(msiT) toState;
     Maybe#(setAuxT) setAuxData;
+    poisonT poisonTag;
 } Enq2Match#(
     numeric type wayNum,
     type tagT,
@@ -249,6 +250,7 @@ module mkCCPipe#(
     Bits#(lineT, _lineSz),
     Bits#(pipeCmdT, _pipeCmdSz),
     Bits#(setAuxT, _setOtherSz),
+    Bitwise#(poisonT),
     // index to data ram: {way, normal index}
     Alias#(dataIndexT, Bit#(TAdd#(TLog#(wayNum), _indexSz)))
 );
@@ -315,6 +317,7 @@ module mkCCPipe#(
         dataRam.rdReq(getDataRamIndex(way, index));
         // set mat2out & merge with CRs/PRs & merge with data bypass
         // resp data has higher priority than data bypass
+        infoVec[way].poisonTag= e2m.poisonTag | poisonTagVec[way];
         match2OutT m2o = Match2Out {
             cmd: e2m.cmd,
             way: way,
@@ -367,7 +370,7 @@ module mkCCPipe#(
     Bool deq_guard = isValid(mat2Out_out) && initDone;
 
     // stage 1: enq req to pipeline: access info+rep RAM & bypass
-    method Action enq(pipeCmdT cmd, Maybe#(lineT) respLine, respStateT toState) if(enq_guard);
+    method Action enq(pipeCmdT cmd, Maybe#(lineT) respLine, respStateT toState, poisonT poisonTag) if(enq_guard);
         // read ram
         indexT index = getIndex(cmd);
         for(Integer i = 0; i < valueOf(wayNum); i = i+1) begin
@@ -382,7 +385,8 @@ module mkCCPipe#(
             repInfo: Invalid,
             respLine: respLine,
             toState: toState,
-            setAuxData: Invalid
+            setAuxData: Invalid,
+            poisonTag: poisonTag
         };
         if(bypass.wget matches tagged Valid .b &&& b.index == index) begin
             e2m.infoVec[b.way] = Valid (b.ram.info);
@@ -598,7 +602,7 @@ module mkCCPipeSingleCycle#(
     Bool deq_guard = isValid(mat2Out_out) && initDone;
 
     // stage 1: enq req to pipeline: access info+rep RAM
-    method Action enq(pipeCmdT cmd, Maybe#(lineT) respLine, respStateT toState) if(enq_guard);
+    method Action enq(pipeCmdT cmd, Maybe#(lineT) respLine, respStateT toState, poisonT poisonTag) if(enq_guard);
         // read ram
         indexT index = getIndex(cmd);
         for(Integer i = 0; i < valueOf(wayNum); i = i+1) begin
@@ -615,7 +619,8 @@ module mkCCPipeSingleCycle#(
             repInfo: Invalid,
             respLine: respLine,
             toState: toState,
-            setAuxData: Invalid
+            setAuxData: Invalid,
+            poisonTag: poisonTag
         };
         enq2Mat_enq <= Valid (e2m);
     endmethod
