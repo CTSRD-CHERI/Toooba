@@ -59,9 +59,17 @@ interface RTCommit;
     method Bool canCommit; // guard of commit
 endinterface
 
+interface RTMove;
+    // Interface to claim move from src to dst register
+    // Claimed renaming accessible as normal via getRename
+    method Action claimMove(Move m, SpecBits sb);
+    method Bool canMove; // guard of move
+endinterface
+
 interface RegRenamingTable;
     interface Vector#(SupSize, RTRename) rename; // rename port
     interface Vector#(SupSize, RTCommit) commit; // commit port
+    interface Vector#(SupSize, RTMove) move; // move port
 
     // This subinterface contains the methods specifying correct and incorrect
     // speculation. If the speculation is correct, the dependencies on that
