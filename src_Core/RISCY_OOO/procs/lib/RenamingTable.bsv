@@ -86,6 +86,7 @@ typedef struct {
     Maybe#(ArchRIndx) arch;
     PhyRIndx phy;
     SpecBits specBits;
+    Bool isMove;
 } RenameClaim deriving(Bits, Eq, FShow);
 
 // actions in case of wrongSpec
@@ -409,26 +410,30 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         end
         else begin
             // claim phy reg
+            SupCnt num_non_move_renames = 0;
             for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
                 if(claimEn[i].wget matches tagged Valid .claim) begin
                     indexT curEnqP = renamingsClaimIndex[i];
-                    indexT curFreeDeqP = freeClaimIndex[i];
+                    indexT curFreeDeqP = freeClaimIndex[num_non_move_renames];
                     new_renamings_arch[curEnqP] <= claim.arch;
-                    new_renamings_phy[curEnqP] <= free_phy_regs[curFreeDeqP];
+                    new_renamings_phy[curEnqP] <= claim.phy;
                     valid[curEnqP][valid_claim_port] <= True;
                     spec_bits[curEnqP][sb_claim_port] <= claim.specBits;
+                    if(!claim.isMove) begin
+                        num_non_move_renames = num_non_move_renames + 1;
+                    end 
                     // sanity check
                     doAssert(!valid[curEnqP][valid_get_port], "claiming entry must be invalid");
-                    doAssert(claim.phy == free_phy_regs[curFreeDeqP], "phy reg should match");
+                    doAssert(claim.isMove || claim.phy == free_phy_regs[curFreeDeqP], "phy reg should match free list if not move");
                 end
             end
             // move renamings_enqP and free_phy_deqP: find the first non-claim port
             function Bool notClaim(SupWaySel i) = !isValid(claimEn[i].wget);
             indexT nextEnqP;
             indexT nextFreeDeqP;
+            nextFreeDeqP = incrIndex(free_phy_deqP, num_non_move_renames);
             if(find(notClaim, supIdxVec) matches tagged Valid .idx) begin
                 nextEnqP = renamingsClaimIndex[idx];
-                nextFreeDeqP = freeClaimIndex[idx];
                 // sanity check: rename is consecutive
                 for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
                     doAssert((fromInteger(i) < idx) == isValid(claimEn[i].wget), "claim is consecutive");
@@ -436,7 +441,6 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
             end
             else begin
                 nextEnqP = incrIndex(renamings_enqP, fromInteger(valueof(SupSize)));
-                nextFreeDeqP = incrIndex(free_phy_deqP, fromInteger(valueof(SupSize)));
             end
             renamings_enqP <= nextEnqP;
             free_phy_deqP <= nextFreeDeqP;
@@ -566,7 +570,8 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 claimEn[i].wset(RenameClaim {
                     arch: r.dst,
                     phy: claim_phy_reg,
-                    specBits: sb
+                    specBits: sb,
+                    isMove: False
                 });
                 // conflict with wrong spec
                 wrongSpec_rename_conflict[i].wset(?);
@@ -575,6 +580,28 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
             endmethod
             
             method canRename = guard;
+        endinterface);
+    end
+
+    Vector#(SupSize, RTMove) moveIfc;
+    for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+        Bool guard = !valid[renamingsClaimIndex[i]][valid_get_port];
+        moveIfc[i] = (interface RTMove;
+            method Action claimMove(Move m, SpecBits sb) if(guard);
+                // record the claim
+                claimEn[i].wset(RenameClaim {
+                    arch: tagged Valid m.dst,
+                    phy: get_src_renaming(i, m.src),
+                    specBits: sb,
+                    isMove: True
+                });
+                // conflict with wrong spec
+                wrongSpec_rename_conflict[i].wset(?);
+                // ordering with commit
+                commit_SB_rename[i] <= False;
+            endmethod
+            
+            method canMove = guard;
         endinterface);
     end
 
@@ -593,6 +620,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
 
     interface rename = renameIfc;
     interface commit = commitIfc;
+    interface move = moveIfc;
 
     interface SpeculationUpdate specUpdate;
         method Action incorrectSpeculation(Bool killAll, SpecTag specTag);
