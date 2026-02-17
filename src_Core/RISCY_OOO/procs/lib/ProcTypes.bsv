@@ -596,13 +596,10 @@ typedef struct {
     Bool        illegalInst;
 } DecodeResult deriving(Bits, Eq, FShow);
 
-typedef union tagged {
-    void EffectiveNop;
-    struct {
-        ArchRIndx src;
-        ArchRIndx dst;
-    } Move;
-} MoveType deriving(Bits, Eq, FShow);
+typedef struct {
+    ArchRIndx src;
+    ArchRIndx dst;
+} Move deriving(Bits, Eq, FShow);
 
 typedef enum {
     Src1,
