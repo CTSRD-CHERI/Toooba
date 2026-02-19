@@ -16,7 +16,11 @@
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
 //-
-//
+//-
+// Colored-Cap modifications: 
+//      Author: Hakan Englund, Merve Gulmez
+//      Copyright (c) Ericsson AB 
+//-
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without

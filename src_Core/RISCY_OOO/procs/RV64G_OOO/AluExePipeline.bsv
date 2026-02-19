@@ -21,7 +21,11 @@
 //     SIPP (Secure IoT Processor Platform with Remote Attestation)
 //     project funded by EPSRC: EP/S030868/1
 //-
-//
+//-
+// Colored-Cap modifications: 
+//      Author: Hakan Englund
+//      Copyright (c) Ericsson AB 
+//-
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without

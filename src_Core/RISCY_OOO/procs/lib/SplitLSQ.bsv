@@ -14,6 +14,16 @@
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
 //-
+//-
+// Colored-Cap Main Designer: 
+//      Author: Hossam ElAtali
+//      Copyright (c) 2025 Secure System's Group
+// Colored-Cap (Atomic L&S, Sealing enforcement )
+//      Author: Hakan Englund, Merve Gulmez
+//      Copyright (c) 2025 Ericsson AB 
+// Colored-Cap ObjID Buffer Implementation 
+//      Copyright (c) 2020 Jonathan Woodruff
+//-
 //
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation

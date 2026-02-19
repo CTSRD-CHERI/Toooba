@@ -8,6 +8,11 @@
  * Technology) under DARPA contract HR0011-18-C-0016 ("ECATS"), as part of the
  * DARPA SSITH research programme.
 
+ * 
+ * Colored-Cap modifications: 
+ *      Author: Hakan Englund, Merve Gulmez
+ *      Copyright (c) Ericsson AB 
+ *
  * This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
  *
  * @BERI_LICENSE_HEADER_START@

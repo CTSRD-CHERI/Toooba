@@ -21,7 +21,16 @@
 //     SIPP (Secure IoT Processor Platform with Remote Attestation)
 //     project funded by EPSRC: EP/S030868/1
 //-
-//
+//-
+// Colored-Cap Main Designer: 
+//      Author: Hossam ElAtali
+//      Copyright (c) 2025 Secure System's Group
+// Colored-Cap (Compatibility with CHERI sealing + Atomic L&S enforcement + Bug Fixes)
+//      Author: Hakan Englund, Merve Gulmez
+//      Copyright (c) 2025 Ericsson AB 
+// Colored-Cap ObjID Buffer Implementation 
+//      Copyright (c) 2020 Jonathan Woodruff
+//-
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without

@@ -1,6 +1,10 @@
 
 // Copyright (c) 2017 Massachusetts Institute of Technology
-// 
+//-
+// Colored-Cap modifications: 
+//      Author: Hossam ElAtali
+//      Copyright (c) 2025 Secure System's Group
+//-
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without

@@ -13,6 +13,12 @@
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
 //-
 
+//-
+// Colored-Cap modifications: 
+//      Author: Hakan Englund
+//      Copyright (c) Ericsson AB 
+//-
+
 // ================================================================
 // WARNING: this is an 'include' file, not a separate BSV package!
 //
