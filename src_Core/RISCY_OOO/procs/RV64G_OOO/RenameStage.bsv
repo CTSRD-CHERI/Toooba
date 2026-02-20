@@ -860,7 +860,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
     endfunction
 
     // :)
-    function Maybe#(MoveType) getMoveType(DecodedInst dInst, ArchRegs arch_regs);
+    function Maybe#(Move) getMove(DecodedInst dInst, ArchRegs arch_regs);
         Bool has_imm = isValid(dInst.imm);
         Bool imm_0 = (dInst.imm == tagged Valid 0);
         Bool src1_x0 = (arch_regs.src1 == tagged Valid (tagged Gpr 0));
@@ -884,20 +884,15 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
             default: begin end
         endcase
 
-        Maybe#(MoveType) result = tagged Invalid;
+        Maybe#(Move) result = tagged Invalid;
 
         // if no move found then move_src invalid
         if (move_src matches tagged Valid .rs 
             &&& arch_regs.dst matches tagged Valid .rd) begin
-            if (rs == rd || rd == tagged Gpr 0) begin
-                //
-                result = tagged Valid (tagged EffectiveNop);
-            end else begin
-                result = tagged Valid (tagged Move {
+                result = tagged Valid (Move {
                     src: rs,
                     dst: rd
                 });
-            end
         end
 
         return result;
@@ -980,14 +975,10 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 
                 $display("hihihihi hello");
 
-                Maybe#(MoveType) moveType = getMoveType(dInst, arch_regs);
+                Maybe#(Move) move = getMove(dInst, arch_regs);
 
-                if(moveType matches tagged Valid (tagged Move .*)) begin
+                if(move matches tagged Valid .*) begin
                     $display("effective move :)", fshow(dInst), fshow(arch_regs));
-                end
-
-                if (moveType matches tagged Valid (tagged EffectiveNop)) begin
-                    $display("effective move nop :)");
                 end
 
                 // check for wrong path, if wrong path, don't process it, leave to the other rule in next cycle
@@ -1075,20 +1066,24 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                     Bool to_exec = False;
                     Bool to_mem = False;
                     Bool to_FpuMulDiv = False;
-                    case (dInst.capFunc) matches
-                        tagged CapInspect .ci:  to_exec = True;
-                        tagged CapModify  .cm:  to_exec = True;
-                    endcase
-                    case (dInst.execFunc) matches
-                        tagged Alu .alu:        to_exec = True; // TODO You dont want this for effective move :)
-                        tagged Br .br:          to_exec = True;
-                        tagged MulDiv .muldiv:  to_FpuMulDiv = True;
-                        tagged Fpu .fpu:        to_FpuMulDiv = True;
-                        tagged Mem .mem:        to_mem = True;
-                        default:
-                            // no need for execution, directly become Executed
-                            noAction;
-                    endcase
+                    // dont do anything if a move, action already handled when claimed in rename table
+                    // no execution pipeline availability needed if a move so don't need to check
+                    if(move matches tagged Invalid) begin
+                        case (dInst.capFunc) matches
+                            tagged CapInspect .ci:  to_exec = True;
+                            tagged CapModify  .cm:  to_exec = True;
+                        endcase
+                        case (dInst.execFunc) matches
+                            tagged Alu .alu:        to_exec = True; // TODO You dont want this for effective move :)
+                            tagged Br .br:          to_exec = True;
+                            tagged MulDiv .muldiv:  to_FpuMulDiv = True;
+                            tagged Fpu .fpu:        to_FpuMulDiv = True;
+                            tagged Mem .mem:        to_mem = True;
+                            default:
+                                // no need for execution, directly become Executed
+                                noAction;
+                        endcase
+                    end
 
                     if (to_exec) begin
                         // find an ALU pipeline
@@ -1221,8 +1216,12 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             specTagManager.claimSpecTag;
                         end
 
-                        // Do renaming
-                        regRenamingTable.rename[i].claimRename(arch_regs, renaming_spec_bits);
+                        // If move claim move, else do renaming
+                        if(move matches tagged Valid .m) begin 
+                            regRenamingTable.move[i].claimMove(m, renaming_spec_bits);
+                        end else begin 
+                            regRenamingTable.rename[i].claimRename(arch_regs, renaming_spec_bits);
+                        end
 
                         // Scoreboard Operations
                         sbCons.setBusy[i].set(phy_regs.dst);
