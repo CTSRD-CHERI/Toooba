@@ -164,9 +164,6 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(SupSize, PulseWire) commitEn <- replicateM(mkPulseWire);
     RWire#(RTWrongSpec) wrongSpecEn <- mkRWire;
 
-    // :)
-    Vector(NumPhyReg, Reg#(TLog#(MaxPhyRegRefs))) refCounts <- replicateM(mkReg(0));
-
     // ordering regs
     Vector#(SupSize, Reg#(Bool)) commit_SB_rename <- replicateM(mkRevertingVirtualReg(True));
     Reg#(Bool) commit_SB_wrongSpec <- mkRevertingVirtualReg(True);
