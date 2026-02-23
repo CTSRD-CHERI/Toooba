@@ -324,7 +324,7 @@ module mkLLBank#(
     Count#(Data) dmaStReqCnt <- mkCount(0);
 `endif
 `ifdef PERFORMANCE_MONITORING
-    Array #(Reg #(EventsLL)) perf_events <- mkDRegOR (6, unpack (0));
+    Array #(Reg #(EventsLL)) perf_events <- mkDRegOR (9, unpack (0));
 `endif
 
     function Action incrMissCnt(cRqT cRq, cRqIndexT idx, Bool isDma, Bool isInstructionAccess);
@@ -971,7 +971,7 @@ module mkLLBank#(
                 doLdAfterReplace <= True;
 `ifdef PERFORMANCE_MONITORING
                 EventsLL events = unpack (0);
-                events.evt_ST_MISS = 1;
+                //events.evt_ST_MISS = 1;
                 perf_events[0] <= events;
 `endif
                if (verbose)
@@ -1630,6 +1630,12 @@ module mkLLBank#(
                     // add to same addr dependency
                     if (cRqIsPrefetch[n]) begin
                         cRqDrop;
+                        // This prefetch was late
+                        if (!cRqIsPrefetch[m]) begin
+                            EventsLL events = unpack (0);
+                            events.evt_ST_MISS = 1;
+                            perf_events[7] <= events;
+                        end
                     end else begin
                         cRqMshr.pipelineResp.setAddrSucc(m, Valid (n));
                         cRqSetDepNoCacheChange;
@@ -1638,6 +1644,16 @@ module mkLLBank#(
                     $display("%t LL %m pipelineResp: cRq: own by other cRq, same addr dep: ", $time,
                         fshow(cOwner), " ; ", fshow(cRqEOC)
                     );
+                    if (prefetchVerbose)
+                        $display("%t LL cRq dependency (addr succ): mshr: %d, depMshr: %d, addr: 0x%h, cRq is prefetch: %d, other is prefetch: %d, reqCs: ",
+                            cur_cycle,
+                            n,
+                            m,
+                            cRq.addr,
+                            cRqIsPrefetch[n],
+                            cRqIsPrefetch[m],
+                            fshow(cRq.toState)
+                        );
                 end
                 else begin
                     // must be hitting on a line being replaced
@@ -1653,16 +1669,17 @@ module mkLLBank#(
                         fshow(cOwner)
                     );
                     doAssert(cOwner.replacing, "line must be replacing");
+                    if (prefetchVerbose)
+                        $display("%t LL cRq dependency (rep succ): mshr: %d, depMshr: %d, addr: 0x%h, cRq is prefetch: %d, other is prefetch: %d, reqCs: ",
+                            cur_cycle,
+                            n,
+                            cOwner.mshrIdx,
+                            cRq.addr,
+                            cRqIsPrefetch[n],
+                            cRqIsPrefetch[cOwner.mshrIdx],
+                            fshow(cRq.toState)
+                        );
                 end
-                if (prefetchVerbose)
-                    $display("%t LL cRq dependency: mshr: %d, depMshr: %d, addr: 0x%h, cRq is prefetch: %d, reqCs: ",
-                        cur_cycle,
-                        n,
-                        cOwner,
-                        cRq.addr,
-                        cRqIsPrefetch[n],
-                        fshow(cRq.toState)
-                    );
             end
             else begin
                 // owner is myself, so must be swapped in
@@ -1723,17 +1740,23 @@ module mkLLBank#(
                 );
                 if (cRqIsPrefetch[n]) begin
                     cRqDrop;
+                    if (!cRqIsPrefetch[m]) begin
+                        EventsLL events = unpack (0);
+                        events.evt_ST_MISS = 1;
+                        perf_events[8] <= events;
+                    end
                 end else begin
                     cRqMshr.pipelineResp.setAddrSucc(m, Valid (n));
                     cRqSetDepNoCacheChange;
                 end
                 if (prefetchVerbose)
-                    $display("%t LL cRq dependency: mshr: %d, depMshr: %d, addr: 0x%h, cRq is prefetch: %d, reqCs: ",
+                    $display("%t LL cRq dependency (addr succ): mshr: %d, depMshr: %d, addr: 0x%h, cRq is prefetch: %d, other is prefetch: %d, reqCs: ",
                         cur_cycle,
                         n,
                         m,
                         cRq.addr,
                         cRqIsPrefetch[n],
+                        cRqIsPrefetch[m],
                         fshow(cRq.toState)
                     );
             end

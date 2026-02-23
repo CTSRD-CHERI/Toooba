@@ -1208,23 +1208,27 @@ module mkCore#(CoreId coreId)(Core);
      EventsCore core_evts = unpack(pack(coreFix.memExeIfc.events) | pack(hpm_core_events[0]));
      EventsL1I imem_evts = unpack(pack(iMem.events) | pack(iTlb.events));
      EventsL1D dmem_evts = unpack(pack(dMem.events) | pack(dTlb.events));
-     EventsTGC tgc_evts = events_tgc_reg;
+     //EventsTGC tgc_evts = events_tgc_reg;
      EventsLL llmem_evts = unpack(pack(events_llc_reg) | pack(l2Tlb.events));
 
-     core_evts.evt_TRAP = dmem_evts.evt_AMO;
-     core_evts.evt_JAL = dmem_evts.evt_AMO_MISS;
-     core_evts.evt_JALR = dmem_evts.evt_AMO_MISS_LAT;
+     EventsTGC tgc_evts = unpack(0);   
+     
+     core_evts.evt_JALR = dmem_evts.evt_AMO_MISS_LAT;  // total l1  <- 5
+     core_evts.evt_JAL = dmem_evts.evt_AMO_MISS;       // miss L1   <- 6
+     core_evts.evt_TRAP = dmem_evts.evt_AMO;           // useful L1 <- 7
+     tgc_evts.evt_READ = dmem_evts.evt_EVICT;          // late L1   <- 25
 
-     core_evts.evt_REDIRECT = llmem_evts.evt_EVICT;
-     tgc_evts.evt_EVICT = llmem_evts.evt_TLB_FLUSH;
-     tgc_evts.evt_WRITE = llmem_evts.evt_ST;
-     tgc_evts.evt_SET_TAG_WRITE = llmem_evts.evt_ST;
 
-     core_evts.evt_BRANCH = (rob.isFull_ehrPort0) ? 1 : 0;
+     tgc_evts.evt_READ_MISS = llmem_evts.evt_ST;          // total LL  <- 26
+     // llmem_evts.evt_EVICT;                             // missed LL <- already event 27
+     tgc_evts.evt_WRITE_MISS = llmem_evts.evt_TLB_FLUSH;  // useful LL <- 28
+     tgc_evts.evt_EVICT = llmem_evts.evt_ST_MISS;         // late LL   <- 29
 
-     tgc_evts.evt_READ = events_llc_reg.evt_TLB;
-     tgc_evts.evt_SET_TAG_READ = events_llc_reg.evt_TLB;
-     tgc_evts.evt_READ_MISS = events_llc_reg.evt_TLB_MISS;
+     //core_evts.evt_BRANCH = (rob.isFull_ehrPort0) ? 1 : 0;
+
+     //tgc_evts.evt_READ = events_llc_reg.evt_TLB;
+     //tgc_evts.evt_SET_TAG_READ = events_llc_reg.evt_TLB;
+     //tgc_evts.evt_READ_MISS = events_llc_reg.evt_TLB_MISS;
 
 
         /*

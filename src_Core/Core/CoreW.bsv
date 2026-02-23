@@ -251,8 +251,8 @@ module mkCoreW_reset #(Reset porReset)
       //evts.evt_READ_MISS = zeroExtend(pack(cache_core_evts.evt_READ_MISS));
       //evts.evt_EVICT = zeroExtend(pack(cache_core_evts.evt_EVICT));
 `ifdef USECAP
-      evts.evt_SET_TAG_WRITE = zeroExtend(pack(cache_core_evts.evt_SET_TAG_WRITE));
-      evts.evt_SET_TAG_READ = zeroExtend(pack(cache_core_evts.evt_SET_TAG_READ));
+      //evts.evt_SET_TAG_WRITE = zeroExtend(pack(cache_core_evts.evt_SET_TAG_WRITE));
+      //evts.evt_SET_TAG_READ = zeroExtend(pack(cache_core_evts.evt_SET_TAG_READ));
 `endif
       proc.events_tgc(evts);
    endrule
