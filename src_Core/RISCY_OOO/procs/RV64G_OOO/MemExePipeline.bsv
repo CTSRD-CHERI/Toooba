@@ -344,7 +344,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     SplitLSQ lsq <- mkSplitLSQ;
     // wire to issue Ld which just finish addr tranlation
     RWire#(LSQIssueLdInfo) issueLd <- mkRWire;
-
+    Fifo#(1, InstTag) poisonExceptionFIFO <- mkBypassFifo;
     // waiting bit for Lr/Sc/Amo/MMIO resp
     Reg#(WaitLrScAmoMMIOResp) waitLrScAmoMMIOResp <- mkReg(Invalid);
 `ifdef TSO_MM
@@ -885,6 +885,19 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doIssueLd(lsq.getIssueLd, True);
     endrule
 
+    rule triggerPoisonException(poisonExceptionFIFO.notEmpty);
+        inIfc.rob_setExecuted_deqLSQ(poisonExceptionFIFO.first, Valid(Exception(excLoadAccessFault)), Invalid
+                    
+`ifdef RVFI
+            , ExtraTraceBundle{
+                regWriteData: pack(res.data.data[0]),
+                memByteEn: replicate(False)
+            }
+`endif
+        ); 
+        poisonExceptionFIFO.deq;
+    endrule 
+
     // we have ordered setRegReadyAggr_forward < setRegReadyAggr_mem to make
     // issue rule and cache resp rule to fire concurrently in weak model.
     // However, in TSO, when doAssert is removed in FPGA synthesis, lsq.deqLd
@@ -934,6 +947,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                        $display("%t poison load mismatch return 0: ", $time, rule_name, " ", fshow(data));
                     end else begin 
                        $display("%t poison load exception: ", $time, rule_name, " ", fshow(data));
+                       poisonExceptionFIFO.enq(res.instTag);
+                       /*
                        inIfc.rob_setExecuted_deqLSQ(res.instTag, Valid(Exception(excLoadAccessFault)), Invalid
                     
 `ifdef RVFI
@@ -942,7 +957,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 memByteEn: replicate(False)
             }
 `endif
-        );  
+        );  */
                     end 
                 end 
             end else begin 
