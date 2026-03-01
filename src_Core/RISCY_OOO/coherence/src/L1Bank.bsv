@@ -722,7 +722,6 @@ endfunction
         // path for AMO
         Maybe#(cRqIdxT) succ = pipeOutSucc;
         if(req.op != Amo) begin
-            /*
             Bit#(4)  poisonVec = 4'h0;
             for (Integer i = 0; i < valueof(4); i = i+1) begin
                 MemTaggedData poison_check_curData = getTaggedDataAt(newLine, unpack(fromInteger(i)));
@@ -739,7 +738,6 @@ endfunction
                                 fshow(newLine), fshow(poisonVec)
                             );           
             end 
-            */
             pipeline.deqWrite(succ, RamData {
                 info: CacheInfo {
                     tag: getTag(req.addr), // should be the same as original tag
@@ -747,7 +745,8 @@ endfunction
                     // may cache hit cases (e.g., req S and hit in M).
                     // req.toState > ram.info.cs is also possible in case of
                     // req M and hit E.
-                    poisonTag: poisonVec == 4'b1111 ? 1'b1: 1'b0,
+                    //poisonTag: poisonVec == 4'b1111 ? 1'b1: 1'b0,
+                    poisonTag: 1'b0,
                     cs: max(ram.info.cs, req.toState),
                     dir: ?,
                     owner: succ,
