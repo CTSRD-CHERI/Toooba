@@ -521,9 +521,24 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
         return fromMaybe(fromMaybe(existing_phy_reg, new_phy_reg), claim_phy_reg);
     endfunction
 
+    // function to count number of non-move renames prior to index into the free list
+    function Integer get_num_non_moves_prior(Integer idx);
+        Integer out = 0;
+        for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+            if(i < idx) begin
+                if(claimEn[i].wget matches tagged Valid .claim) begin 
+                    if(!claim.isMove) begin 
+                        out = out + 1;
+                    end
+                end
+            end
+        end
+        return out;
+    endfunction
+
     // function to find a free phy reg to claim (at port claimPort) for a dst arch reg
     function PhyRIndx get_dst_renaming(Integer claimPort);
-        return free_phy_regs[freeClaimIndex[claimPort]];
+        return free_phy_regs[freeClaimIndex[get_num_non_moves_prior(claimPort)]];
     endfunction
 
     function Bool isFpuReg(ArchRIndx arch_reg);
