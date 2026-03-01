@@ -894,7 +894,7 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                     dst: rd
                 });
         end
-
+        
         return result;
     endfunction
 
@@ -1216,16 +1216,15 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             specTagManager.claimSpecTag;
                         end
 
-                        // If move claim move, else do renaming
+                        // If move claim move, else do renaming and set destination busy
                         if(move matches tagged Valid .m) begin 
                             regRenamingTable.move[i].claimMove(m, renaming_spec_bits);
                         end else begin 
                             regRenamingTable.rename[i].claimRename(arch_regs, renaming_spec_bits);
+                            // Scoreboard Operations
+                            sbCons.setBusy[i].set(phy_regs.dst);
+                            sbAggr.setBusy[i].set(phy_regs.dst);
                         end
-
-                        // Scoreboard Operations
-                        sbCons.setBusy[i].set(phy_regs.dst);
-                        sbAggr.setBusy[i].set(phy_regs.dst);
 
                         // display information
                         if (verbose) begin
