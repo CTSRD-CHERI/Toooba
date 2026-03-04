@@ -973,8 +973,6 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 
                 CapMem fallthrough_pc = addPc(pc, ((orig_inst[1:0] == 2'b11) ? 4 : 2));
 
-                $display("hihihihi hello");
-
                 Maybe#(Move) move = getMove(dInst, arch_regs);
 
                 if(move matches tagged Valid .*) begin
@@ -1043,8 +1041,14 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                     // get renaming
                     // If the renaming is speculative, then the renaming will
                     // depend on the current spec_tag too.
+                    // If the renaming is a move then we need to get move result
                     let renaming_spec_bits = spec_bits | (speculative_renaming ? (1 << fromMaybe(?,spec_tag)) : 0);
-                    let rename_result = regRenamingTable.rename[i].getRename(arch_regs);
+                    RenameResult rename_result;
+                    if(move matches tagged Valid .m) begin 
+                        rename_result = regRenamingTable.move[i].getMoveResult(m, arch_regs);
+                    end else begin
+                        rename_result = regRenamingTable.rename[i].getRename(arch_regs);
+                    end
                     let phy_regs = rename_result.phy_regs;
 
                     // scoreboard lookup
