@@ -334,6 +334,12 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 for(Integer j=0; j<valueof(NumArchReg); j = j+1) begin 
                     in_use = in_use || (renaming_table[fromInteger(j)][rt_post_commit_port] == freed_phy_reg);
                 end
+                // check if phy reg already freed this cycle
+                for(Integer j = 0; j < valueof(SupSize); j = j+1) begin 
+                    if(j < i && freed_by_lane[j] == Valid(freed_phy_reg)) begin 
+                        in_use = True;
+                    end
+                end
                 // mark phy reg to be fully freed if not in use
                 if(!in_use) begin 
                     $display("Freeing phy_reg: %0d", freed_phy_reg);
