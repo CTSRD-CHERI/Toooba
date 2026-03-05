@@ -465,7 +465,7 @@ endfunction
         cRsToPT resp = CRsMsg {
             addr: {slot.repTag, truncate(req.addr)}, // get bank id & index from req
             toState: I,
-            poisonTag: poisonVec == 4'b1111 ? 1'b1: 1'b0,
+            poisonTag: 1'b0, //poisonVec == 4'b1111 ? 1'b1: 1'b0,
             data: data,
             child: ?
         };
@@ -507,7 +507,7 @@ endfunction
         cRsToPT resp = CRsMsg {
             addr: req.addr,
             toState: req.toState,
-            poisonTag: poisonVec == 4'b1111 ? 1'b1 : 1'b0,
+            poisonTag: 1'b0, //poisonVec == 4'b1111 ? 1'b1 : 1'b0,
             data: data,
             child: ?
         };
