@@ -509,7 +509,7 @@ function Bool overlapAddr(Addr addr_1, ByteOrTagEn shift_be_1, Bit#(3) alloc_pol
     Bool be_overlap = (pack(shift_be_1.DataMemAccess) & pack(shift_be_2.DataMemAccess)) != 0;
     Bool dataOverlap = be_overlap && sameDataAlignedAddr(addr_1, addr_2);
     Bool tagOverlap = sameCachelineAlignedAddr(addr_1, addr_2);
-    return (shift_be_1 == TagMemAccess || shift_be_2 == TagMemAccess ) ? tagOverlap : dataOverlap;
+    return (shift_be_1 == TagMemAccess || shift_be_2 == TagMemAccess || alloc_policy_1 == 3'b001 || alloc_policy_2 == 3'b001 ) ? tagOverlap : dataOverlap;
 endfunction
 
 // check shiftBE1 covers shiftBE2
@@ -522,7 +522,7 @@ endfunction
 // check whether mem op addr is aligned w.r.t data size
 function Bool checkAddrAlign(Addr addr, ByteOrTagEn byteOrTagEn, Bit#(3) alloc_policy);
     let byteEn = byteOrTagEn.DataMemAccess;
-    if (byteOrTagEn == TagMemAccess ) begin
+    if (byteOrTagEn == TagMemAccess || alloc_policy == 3'b001 ) begin
         return isCLineAlignAddr(addr);
     end
     else if(byteEn[15]) begin

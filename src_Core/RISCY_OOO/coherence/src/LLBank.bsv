@@ -208,7 +208,7 @@ module mkLLBank#(
 
     Fifo#(2, toMemT) toMQ <- mkCFFifo;
     Fifo#(2, memRsT) rsFromMQ <- mkCFFifo;
-
+    Fifo#(2, memRsT) nwz_rsFromMQ <- mkCFFifo;
     // mshr index of load or write to memory, all mem accesses are ordered here
     FIFO#(toMemInfoT) toMInfoQ <- mkSizedFIFO(valueOf(cRqNum));
     // mshr index of req that is waken up when replacement is done
@@ -609,6 +609,33 @@ endfunction
     (* preempts = "cRsTransfer, cRqTransfer_new_child_block" *)
     (* preempts = "cRsTransfer, cRqTransfer_new_dma_block" *)
 `endif
+    rule nwz_mRsTransfer(nwz_rsFromMQ.first.id.refill );
+        nwz_rsFromMQ.deq;
+        Line respData ;
+        memRsT mRs  = nwz_rsFromMQ.first;
+        respData = mRs.data;
+        
+        cRqIndexT n = mRs.id.mshrIdx;
+        
+        // get correspond cRq & slot
+        cRqT cRq = cRqMshr.transfer.getRq(n);
+        cRqSlotT cSlot = cRqMshr.transfer.getSlot(n);
+        doAssert(isRqFromC(cRq.id), "refill mem resp must be for child req");
+        // send to pipeline
+        pipeline.send(MRs (LLPipeMRsIn {
+            addr: cRq.addr,
+            toState: cRq.toState == M ? M : cRq.toState == T ? T : E, // set upgrade state
+            data: respData,
+            way: cSlot.way
+        }));
+       if (verbose)
+        $display("%t LL %m nwz_mRsTransfer: ", $time,
+            fshow(mRs), " ; ",
+            fshow(cRq), " ; ",
+            fshow(cSlot), " ; "
+        );
+    endrule
+
     rule mRsTransfer(rsFromMQ.first.id.refill);
         // get mem resp cRq index & data
         rsFromMQ.deq;
@@ -672,21 +699,36 @@ endfunction
         );
         // take actions according to type
         if(t == Ld) begin
+            if(cRq.alloc_policy == 3'b001) begin 
+                memRsT nwz_msg = MemRsMsg {
+                  data: unpack(0),
+                  child: ?,
+                  id:  LdMemRqId {
+                       // child rq needs refill cache line, dma rq does not
+                       refill: True,
+                       mshrIdx: n
+                   }
+               };
+               nwz_rsFromMQ.enq(nwz_msg);
+               $display("%t LL %m sendToM: non-write allocate: ", $time, fshow(nwz_msg));
+            end else begin 
             // only load mem: can be child or dma req
-            toMemT msg = Ld (LdMemRq {
-                addr: cRq.addr,
-                child: ?,
-                id: LdMemRqId {
-                    // child rq needs refill cache line, dma rq does not
-                    refill: isRqFromC(cRq.id),
-                    mshrIdx: n
-                },
-                tag_req: cRq.toState == T
-            });
-            toMQ.enq(msg);
+                toMemT msg = Ld (LdMemRq {
+                    addr: cRq.addr,
+                    child: ?,
+                    id: LdMemRqId {
+                        // child rq needs refill cache line, dma rq does not
+                        refill: isRqFromC(cRq.id),
+                        mshrIdx: n
+                    },
+                    tag_req: cRq.toState == T
+                });
+                toMQ.enq(msg);
+                $display("%t LL %m sendToM: load only: ", $time, fshow(msg));
+            end 
             toMInfoQ.deq; // deq info
            if (verbose)
-            $display("%t LL %m sendToM: load only: ", $time, fshow(msg));
+        
             doAssert(!isValid(data), "cannot have data");
             doAssert(!doLdAfterReplace, "doLdAfterReplace should be false");
             // performance counter: start miss timer

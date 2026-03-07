@@ -597,7 +597,7 @@ endfunction
 // check mem access misaligned: byteEn is unshifted (just from Decode)
 function Bool memAddrMisaligned(Addr addr, ByteOrTagEn byteOrTagEn, Bit#(3) alloc_policy);
     MemDataByteEn byteEn = byteOrTagEn.DataMemAccess;
-    if (byteOrTagEn == TagMemAccess) begin
+    if (byteOrTagEn == TagMemAccess || alloc_policy == 3'b001) begin
         return(!isCLineAlignAddr(addr));
     end
     else if(byteEn[15] ) begin
