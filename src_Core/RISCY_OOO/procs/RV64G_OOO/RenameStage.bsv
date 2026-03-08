@@ -859,6 +859,46 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
         return rdy[idx] ? Valid (idx) : Invalid;
     endfunction
 
+    // detect if instruction is a move
+    // if so get src and dst registers
+    function Maybe#(Move) getMove(DecodedInst dInst, ArchRegs arch_regs);
+        Bool has_imm = isValid(dInst.imm);
+        Bool imm_0 = (dInst.imm == tagged Valid 0);
+        Bool src1_x0 = (arch_regs.src1 == tagged Valid (tagged Gpr 0));
+        Bool src2_x0 = (arch_regs.src2 == tagged Valid (tagged Gpr 0));
+        
+        Maybe#(ArchRIndx) move_src = tagged Invalid;
+
+        case (dInst.execFunc) matches
+            tagged Alu Add: begin
+                if (has_imm && imm_0) begin
+                    // addi rd rs 0
+                    move_src = arch_regs.src1;
+                end else if (!has_imm && src1_x0) begin
+                    // add rd x0 rs
+                    move_src = arch_regs.src2;
+                end else if (!has_imm && src2_x0) begin
+                    // add rd rs x0
+                    move_src = arch_regs.src1;
+                end
+            end
+            default: begin end
+        endcase
+
+        Maybe#(Move) result = tagged Invalid;
+
+        // if no move found then move_src invalid
+        if (move_src matches tagged Valid .rs 
+            &&& arch_regs.dst matches tagged Valid .rd) begin
+                result = tagged Valid (Move {
+                    src: rs,
+                    dst: rd
+                });
+        end
+        
+        return result;
+    endfunction
+
     // rename correct path inst
     rule doRenaming(
         !inIfc.pendingMMIOPRq // stall when MMIO pRq is pending
@@ -934,6 +974,8 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 
                 CapMem fallthrough_pc = addPc(pc, ((orig_inst[1:0] == 2'b11) ? 4 : 2));
 
+                Maybe#(Move) move = getMove(dInst, arch_regs);
+
                 // check for wrong path, if wrong path, don't process it, leave to the other rule in next cycle
                 if(!epochManager.checkEpoch[i].check(main_epoch)) begin
                     stop = True;
@@ -996,8 +1038,14 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                     // get renaming
                     // If the renaming is speculative, then the renaming will
                     // depend on the current spec_tag too.
+                    // If the renaming is a move then we need to get move result
                     let renaming_spec_bits = spec_bits | (speculative_renaming ? (1 << fromMaybe(?,spec_tag)) : 0);
-                    let rename_result = regRenamingTable.rename[i].getRename(arch_regs);
+                    RenameResult rename_result;
+                    if(move matches tagged Valid .m) begin 
+                        rename_result = regRenamingTable.move[i].getMoveResult(m, arch_regs);
+                    end else begin
+                        rename_result = regRenamingTable.rename[i].getRename(arch_regs);
+                    end
                     let phy_regs = rename_result.phy_regs;
 
                     // scoreboard lookup
@@ -1019,20 +1067,24 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                     Bool to_exec = False;
                     Bool to_mem = False;
                     Bool to_FpuMulDiv = False;
-                    case (dInst.capFunc) matches
-                        tagged CapInspect .ci:  to_exec = True;
-                        tagged CapModify  .cm:  to_exec = True;
-                    endcase
-                    case (dInst.execFunc) matches
-                        tagged Alu .alu:        to_exec = True;
-                        tagged Br .br:          to_exec = True;
-                        tagged MulDiv .muldiv:  to_FpuMulDiv = True;
-                        tagged Fpu .fpu:        to_FpuMulDiv = True;
-                        tagged Mem .mem:        to_mem = True;
-                        default:
-                            // no need for execution, directly become Executed
-                            noAction;
-                    endcase
+                    // dont do anything if a move, action already handled when claimed in rename table
+                    // no execution pipeline availability needed if a move so don't need to check
+                    if(move matches tagged Invalid) begin
+                        case (dInst.capFunc) matches
+                            tagged CapInspect .ci:  to_exec = True;
+                            tagged CapModify  .cm:  to_exec = True;
+                        endcase
+                        case (dInst.execFunc) matches
+                            tagged Alu .alu:        to_exec = True; // TODO You dont want this for effective move :)
+                            tagged Br .br:          to_exec = True;
+                            tagged MulDiv .muldiv:  to_FpuMulDiv = True;
+                            tagged Fpu .fpu:        to_FpuMulDiv = True;
+                            tagged Mem .mem:        to_mem = True;
+                            default:
+                                // no need for execution, directly become Executed
+                                noAction;
+                        endcase
+                    end
 
                     if (to_exec) begin
                         // find an ALU pipeline
@@ -1165,12 +1217,15 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
                             specTagManager.claimSpecTag;
                         end
 
-                        // Do renaming
-                        regRenamingTable.rename[i].claimRename(arch_regs, renaming_spec_bits);
-
-                        // Scoreboard Operations
-                        sbCons.setBusy[i].set(phy_regs.dst);
-                        sbAggr.setBusy[i].set(phy_regs.dst);
+                        // If move claim move, else do renaming and set destination busy
+                        if(move matches tagged Valid .m) begin 
+                            regRenamingTable.move[i].claimMove(m, renaming_spec_bits);
+                        end else begin 
+                            regRenamingTable.rename[i].claimRename(arch_regs, renaming_spec_bits);
+                            // Scoreboard Operations
+                            sbCons.setBusy[i].set(phy_regs.dst);
+                            sbAggr.setBusy[i].set(phy_regs.dst);
+                        end
 
                         // display information
                         if (verbose) begin
