@@ -576,7 +576,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let poisoned_shiftdata = shiftData;
         CapPipe shiftData_poisoned = fromMem(unpack(pack(shiftData)));
         
-        if(lsq.getAllocPolicy(x.ldstq_tag) == 3'b010) begin
+        if(lsq.getAllocPolicy(x.ldstq_tag) == 3'b010 || lsq.getAllocPolicy(x.ldstq_tag) == 3'b011) begin
             shiftData_poisoned = setCapPoison(shiftData_poisoned);
             MemTaggedData shiftData_poisoned_debug = unpack(pack(toMem(shiftData_poisoned)));
             $display("cpoisonline ", fshow(shiftData), fshow(shiftData_poisoned_debug));
@@ -1319,7 +1319,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             shiftedData: lsqDeqSt.alloc_policy == 3'b001 ? unpack(0): lsqDeqSt.stData,
             permitPoison: lsqDeqSt.permitPoison,
             pver: lsqDeqSt.pver,
-            cacheLineWr: lsqDeqSt.alloc_policy == 3'b001 
+            cacheLineWr: lsqDeqSt.alloc_policy == 3'b001 || lsqDeqSt.alloc_policy == 3'b011
         });
         // we leave deq to resp time
         // ROB should have already been set to executed
