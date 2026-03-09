@@ -699,7 +699,7 @@ endfunction
         );
         // take actions according to type
         if(t == Ld) begin
-            if(cRq.alloc_policy == 3'b001) begin 
+            if(cRq.alloc_policy == 3'b001 || cRq.alloc_policy == 3'b011) begin 
                 memRsT nwz_msg = MemRsMsg {
                   data: unpack(0),
                   child: ?,
