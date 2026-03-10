@@ -206,6 +206,8 @@ typedef struct {
     AmoInst amoInst; // valid when op == Amo
     Bool loadTags; // valid when op == Ld
     Bit#(16) pcHash; // hash of instruction pc sending the request
+    Bit#(8) mte;
+    Bit#(3) tloc;
 } ProcRq#(type idT) deriving(Bits, Eq, FShow);
 
 interface L1ProcReq#(type idT);
