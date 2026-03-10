@@ -945,7 +945,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             //if (data.data[1][46] ==1'b1 && data.tag==True && !res.permitPoison) begin 
             if (getCapPoison(loaded_dataUnpacked) == 1'b1 && data.tag==True && !res.permitPoison) begin
                 if (res.alloc_policy == 3'b100) begin 
-                    inIfc.writeRegFile(dst.indx, unpack(zeroExtend(isPoison)));
+                    inIfc.writeRegFile(dst.indx, dataUnpacked);
                     $display("%t return getPoison1 res: ", $time, rule_name, " ", fshow(isPoison));
                 end else begin 
                     if(res.pver >  poison_pver ) begin  
@@ -969,7 +969,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end else begin 
                 if (res.alloc_policy == 3'b100) begin 
                     $display("%t return getPoison2 res: ", $time, rule_name, " ", fshow(isPoison));
-                    inIfc.writeRegFile(dst.indx, fromMem(unpack(pack(zeroExtend(isPoison)))));
+                    inIfc.writeRegFile(dst.indx, dataUnpacked);
                 end else begin 
                     inIfc.writeRegFile(dst.indx, dataUnpacked);
                 end 
