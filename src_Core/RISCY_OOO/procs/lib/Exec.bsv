@@ -274,6 +274,10 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 (getAddr(a) == 0 ? nullCap : setAddr(b_mut, getAddr(a)).value);
             tagged SetHigh:
                 fromMem(tuple2(False, {getAddr(b), getAddr(a)}));
+            tagged SetMTE:
+                setMTE(a_mut,  truncate(getAddr(b))); 
+            tagged SetTloc:
+                setTloc(a_mut,  truncate(getAddr(b))); 
             tagged BuildCap               :
                 setKind(setValidCap(a_mut, !buildCapIllegal), getKind(a)==SENTRY ? SENTRY : UNSEALED);
             tagged Move                   :
@@ -314,6 +318,10 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                    zeroExtend(getPerms(a));
                tagged GetHigh                :
                    zeroExtend(tpl_2(toMem(a))[127:64]);
+               tagged GetMTE                : 
+                   zeroExtend(getMTE(a));
+               tagged GetTloc                : 
+                   zeroExtend(getTloc(a));
                tagged GetType                :
                    tpl_1(extractType(a));
                tagged ToPtr                  :

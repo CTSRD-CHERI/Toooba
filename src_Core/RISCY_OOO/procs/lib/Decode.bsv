@@ -1169,6 +1169,22 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             regs.src2 = Valid(tagged Gpr rs2);
                             dInst.capFunc = CapModify (SetHigh);
                         end
+                        f7_cap_CSetMTE: begin
+                            legalInst = True;
+                            dInst.iType = Cap;
+                            regs.dst = Valid(tagged Gpr rd);
+                            regs.src1 = Valid(tagged Gpr rs1);
+                            regs.src2 = Valid(tagged Gpr rs2);
+                            dInst.capFunc = CapModify (SetMTE);
+                        end
+                        f7_cap_CSetTloc: begin
+                            legalInst = True;
+                            dInst.iType = Cap;
+                            regs.dst = Valid(tagged Gpr rd);
+                            regs.src1 = Valid(tagged Gpr rs1);
+                            regs.src2 = Valid(tagged Gpr rs2);
+                            dInst.capFunc = CapModify (SetTloc);
+                        end
                         f7_cap_CBuildCap: begin
                             legalInst = True;
                             // Swap arguments so SCR possibly goes in RS2
@@ -1346,6 +1362,20 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.dst = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capFunc = CapInspect (GetHigh);
+                                end
+                                f5rs2_cap_CGetMTE: begin
+                                    legalInst = True;
+                                    dInst.iType = Cap;
+                                    regs.dst = Valid(tagged Gpr rd);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    dInst.capFunc = CapInspect (GetMTE);
+                                end
+                                f5rs2_cap_CGetTloc: begin
+                                    legalInst = True;
+                                    dInst.iType = Cap;
+                                    regs.dst = Valid(tagged Gpr rd);
+                                    regs.src1 = Valid(tagged Gpr rs1);
+                                    dInst.capFunc = CapInspect (GetTloc);
                                 end
                                 f5rs2_cap_CLoadTags: begin
                                     legalInst = True;
