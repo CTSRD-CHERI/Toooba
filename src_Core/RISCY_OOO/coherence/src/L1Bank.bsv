@@ -379,8 +379,8 @@ endfunction
             amoInst: ?,
             loadTags: ?,
             pcHash: ?,
-            mte: ?,
-            tloc: ?
+            mte: 8'h0,
+            tloc: 4'h0
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
         // send to pipeline

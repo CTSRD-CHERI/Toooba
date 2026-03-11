@@ -125,7 +125,7 @@ typedef struct {
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
     Bit#(8) mte;
-    Bit#(3) tloc;
+    Bit#(4) tloc;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
     Data    store_data;
@@ -162,7 +162,7 @@ typedef struct {
     MemDataByteEn shiftedBE;
     MemTaggedData shiftedData;
     Bit#(8) mte;
-    Bit#(3) tloc;
+    Bit#(4) tloc;
 } WaitStResp deriving(Bits, Eq, FShow);
 
 //SpecFifo#(2,IncorrectSpec,1,1) incorrectSpec_ff <- mkSpecFifoCF(True);
@@ -351,12 +351,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, WaitStResp) waitStRespQ <- mkCFFifo;
 `endif
     // fifo for req mem
-    Fifo#(1, Tuple6#(LdQTag, Addr, Bool, Bit#(16), Bit#(8), Bit#(3))) reqLdQ <- mkBypassFifo;
+    Fifo#(1, Tuple6#(LdQTag, Addr, Bool, Bit#(16), Bit#(8), Bit#(4))) reqLdQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
-    Fifo#(1, Tuple4#(Addr, Bit#(16), Bit#(8), Bit#(3))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple4#(Addr, Bit#(16), Bit#(8), Bit#(4))) reqStQ <- mkBypassFifo;
 `else
-    Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(16), Bit#(8), Bit#(3))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(16), Bit#(8), Bit#(4))) reqStQ <- mkBypassFifo;
 `endif
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
@@ -633,7 +633,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 shiftedBE: shiftBE,
                 vaddr: x.vaddr,
                 mte: getMTE(x.rVal1),
-                tloc : getTloc(x.rVal1),
+                tloc: getTloc(x.rVal1),
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.rVal2,
                 store_data_BE: origBE,
@@ -1234,13 +1234,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
         // send to mem
         Addr addr = lsqDeqSt.paddr;
-        reqStQ.enq(tuple4(addr, lsqDeqSt.pcHash, lsqDeqLd.mte, lsqDeqLd.tloc));
+        reqStQ.enq(tuple4(addr, lsqDeqSt.pcHash, lsqDeqSt.mte, lsqDeqSt.tloc));
         // record waiting for store resp
         waitStRespQ.enq(WaitStResp {
             offset: getLineMemDataOffset(addr),
             shiftedBE: lsqDeqSt.shiftedBE,
             shiftedData: lsqDeqSt.stData,
-            mte: lsqDeqSt.mte,
+            mte:  lsqDeqSt.mte,
             tloc: lsqDeqSt.tloc
         });
         // we leave deq to resp time

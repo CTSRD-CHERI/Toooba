@@ -297,7 +297,7 @@ typedef struct {
     ByteOrTagEn shiftedBE;
     Bit#(16) pcHash;
     Bit#(8)  mte;
-    Bit#(3)  tloc;
+    Bit#(4)  tloc;
 } LSQIssueLdInfo deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -309,7 +309,7 @@ typedef struct {
 `endif
     MemTaggedData data;
     Bit#(8) mte;
-    Bit#(3) tloc;
+    Bit#(4) tloc;
 } LSQRespLdResult deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -333,7 +333,7 @@ typedef struct {
     Bool               allowCap;
     Maybe#(LdKilledBy) killed;
     Bit#(8)            mte;
-    Bit#(3)            tloc;
+    Bit#(4)            tloc;
 } LdQDeqEntry deriving (Bits, Eq, FShow);
 
 typedef struct {
@@ -351,7 +351,7 @@ typedef struct {
     Maybe#(Trap)      fault;
     Bit#(16)          pcHash;
     Bit#(8)           mte;
-    Bit#(3)           tloc;
+    Bit#(4)           tloc;
 } StQDeqEntry deriving (Bits, Eq, FShow);
 
 interface SplitLSQ;
@@ -384,7 +384,7 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(8) mte, Bit#(3) tloc
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(8) mte, Bit#(4) tloc
     );
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
@@ -670,7 +670,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_unsigned        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(ByteOrTagEn))             ld_byteOrTagEn     <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bit#(8)))                 ld_mte            <- replicateM(mkConfigRegU);
-    Vector#(LdQSize, Reg#(Bit#(3)))                 ld_tloc            <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Reg#(Bit#(4)))                 ld_tloc            <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_allowCap        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_acq             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_rel             <- replicateM(mkConfigRegU);
@@ -866,7 +866,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bit#(8)))              st_mte       <- replicateM(mkEhr(?));
-    Vector#(StQSize, Ehr#(2, Bit#(3)))              st_tloc      <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, Bit#(4)))              st_tloc      <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Trap)))         st_fault     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_allowCapAmoLd <- replicateM(mkEhr(?));
@@ -1450,7 +1450,7 @@ module mkSplitLSQ(SplitLSQ);
         ld_unsigned[ld_enqP] <= mem_inst.unsignedLd;
         ld_byteOrTagEn[ld_enqP] <= mem_inst.byteOrTagEn;
         ld_mte[ld_enqP] <= 8'h0;
-        ld_tloc[ld_enqP] <= 3'h0;
+        ld_tloc[ld_enqP] <= 4'h0;
         ld_acq[ld_enqP] <= mem_inst.aq;
         ld_rel[ld_enqP] <= mem_inst.rl;
         ld_dst[ld_enqP] <= dst;
@@ -1516,7 +1516,7 @@ module mkSplitLSQ(SplitLSQ);
         st_pcHash[st_enqP] <= pcHash;
         st_allowCapAmoLd_enq[st_enqP] <= False;
         st_mte_enq[st_enqP]     <= 8'h0;
-        st_tloc_enq[st_enqP]     <= 3'h0;
+        st_tloc_enq[st_enqP]     <= 4'h0;
         st_computed_enq[st_enqP] <= False;
         st_verified_enq[st_enqP] <= False;
         st_specBits_enq[st_enqP] <= spec_bits;
@@ -1534,7 +1534,7 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bit#(8) mte, Bit#(3) tloc
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bit#(8) mte, Bit#(4) tloc
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1998,7 +1998,7 @@ module mkSplitLSQ(SplitLSQ);
             dst: Invalid,
             allowCap: False,
             mte: 8'h0,
-            tloc: 3'h0,
+            tloc: 4'h0,
 `ifdef INCLUDE_TANDEM_VERIF
             instTag: ld_instTag [t],    // For recording Ld data in ROB
 `endif
