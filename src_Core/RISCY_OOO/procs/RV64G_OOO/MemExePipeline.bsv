@@ -341,6 +341,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     SplitLSQ lsq <- mkSplitLSQ;
     // wire to issue Ld which just finish addr tranlation
     RWire#(LSQIssueLdInfo) issueLd <- mkRWire;
+    Fifo#(1, InstTag) mteExceptionFIFO <- mkBypassFifo;
 
     // waiting bit for Lr/Sc/Amo/MMIO resp
     Reg#(WaitLrScAmoMMIOResp) waitLrScAmoMMIOResp <- mkReg(Invalid);
@@ -360,14 +361,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
-    Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
+    Fifo#(2, Tuple3#(LdQTag, MemResp,  Bit#(8))) memRespLdQ <- mkCFFifo;
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
     // resp ifc to D$
     L1ProcResp#(DProcReqId) procRespIfc = (interface L1ProcResp;
-        method Action respLd(DProcReqId id, MemTaggedData d);
+        method Action respLd(DProcReqId id, MemTaggedData d, Bit#(8) mte);
             LdQTag tag = truncate(id);
-            memRespLdQ.enq(tuple2(tag, d));
+            memRespLdQ.enq(tuple3(tag, d, mte));
             // early wake up RS and set SB
             // this is done only when the resp is not wrong path
             LSQHitInfo info <- lsq.getHit(Ld (tag));
@@ -870,6 +871,19 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doIssueLd(lsq.getIssueLd, True);
     endrule
 
+    rule triggerMTEException(mteExceptionFIFO.notEmpty);
+        inIfc.rob_setExecuted_deqLSQ(mteExceptionFIFO.first, Valid(Exception(excLoadAccessFault)), Invalid
+                    
+`ifdef RVFI
+            , ExtraTraceBundle{
+                regWriteData: pack(res.data.data[0]),
+                memByteEn: replicate(False)
+            }
+`endif
+        ); 
+        mteExceptionFIFO.deq;
+    endrule 
+
     // we have ordered setRegReadyAggr_forward < setRegReadyAggr_mem to make
     // issue rule and cache resp rule to fire concurrently in weak model.
     // However, in TSO, when doAssert is removed in FPGA synthesis, lsq.deqLd
@@ -890,14 +904,20 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     // handle load resp
-    function Action doRespLd(LdQTag tag, MemTaggedData data, String rule_name);
+    function Action doRespLd(LdQTag tag, MemTaggedData data, Bit#(8) mte, String rule_name);
     action
         LSQRespLdResult res <- lsq.respLd(tag, data);
         if(verbose) $display("%t : ", $time, rule_name, " ", fshow(tag), "; ", fshow(data), "; ", fshow(res));
         if(res.dst matches tagged Valid .dst) begin
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
-            dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
-            inIfc.writeRegFile(dst.indx, dataUnpacked);
+            if((res.mte != mte) && (mte != 8'h0) ) begin 
+                $display("%t illegal mte: ", $time, rule_name, " ", fshow(tag), "; ", fshow(dataUnpacked), "; ", fshow(res), fshow(mte));
+                mteExceptionFIFO.enq(res.instTag);
+            end 
+            else begin 
+                dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
+                inIfc.writeRegFile(dst.indx, dataUnpacked);
+            end 
 
 `ifdef INCLUDE_TANDEM_VERIF
             inIfc.rob_setExecuted_doFinishMem_RegData (res.instTag, res.data);
@@ -924,15 +944,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     rule doRespLdMem;
         memRespLdQ.deq;
-        let {t, d} = memRespLdQ.first;
-        doRespLd(t, d, "[doRespLdMem]");
+        let {t, d, mte} = memRespLdQ.first;
+        doRespLd(t, d, mte, "[doRespLdMem]");
     endrule
 
     (* descending_urgency = "doRespLdMem, doRespLdForward" *) // prioritize mem resp
     rule doRespLdForward;
         forwardQ.deq;
         let {t, d} = forwardQ.first;
-        doRespLd(t, d, "[doRespLdForward]");
+        doRespLd(t, d, 8'h0, "[doRespLdForward]");
     endrule
 
     // deqStQ

@@ -586,9 +586,10 @@ endfunction
             Ld: begin
                 if (!cRqIsPrefetch[n]) begin
                     if (req.loadTags) begin
-                        procResp.respLd(req.id, getTagsAt(curLine));
+                        procResp.respLd(req.id, getTagsAt(curLine), 8'h0);
                     end else begin
-                        procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel));
+                        Bit#(8) mem_mte = getMTEAt(curLine, req.tloc);
+                        procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel), mem_mte);
                     end
                 end
             end
