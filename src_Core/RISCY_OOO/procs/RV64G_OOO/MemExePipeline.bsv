@@ -275,7 +275,7 @@ interface MemExePipeline;
 endinterface
 
 module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
-    Bool verbose = False;
+    Bool verbose = True;
 
     // we change cache request in case of single core, becaues our MSI protocol
     // is not good with single core
@@ -872,6 +872,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     rule triggerMTEException(mteExceptionFIFO.notEmpty);
+        /*
         inIfc.rob_setExecuted_deqLSQ(mteExceptionFIFO.first, Valid(Exception(excLoadAccessFault)), Invalid
                     
 `ifdef RVFI
@@ -880,7 +881,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 memByteEn: replicate(False)
             }
 `endif
-        ); 
+        );*/
         mteExceptionFIFO.deq;
     endrule 
 
@@ -908,9 +909,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     action
         LSQRespLdResult res <- lsq.respLd(tag, data);
         if(verbose) $display("%t : ", $time, rule_name, " ", fshow(tag), "; ", fshow(data), "; ", fshow(res));
+        if(res.mte !=0 )
+            $display("mte check on load: ", fshow(res.mte), fshow(mte));
         if(res.dst matches tagged Valid .dst) begin
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
-            if((res.mte != mte) && (mte != 8'h0) &&(res.mte !=0) ) begin 
+            if((res.mte != mte) && (mte != 8'h0) && (res.mte != 8'h0) ) begin 
                 $display("%t illegal mte: ", $time, rule_name, " ", fshow(tag), "; ", fshow(dataUnpacked), "; ", fshow(res), fshow(mte));
                 mteExceptionFIFO.enq(res.instTag);
             end 
@@ -952,7 +955,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doRespLdForward;
         forwardQ.deq;
         let {t, d} = forwardQ.first;
-        doRespLd(t, d, 8'h0, "[doRespLdForward]");
+        doRespLd(t, d, 8'h12, "[doRespLdForward]");
     endrule
 
     // deqStQ
