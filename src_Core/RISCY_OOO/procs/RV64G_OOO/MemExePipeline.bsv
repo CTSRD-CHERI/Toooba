@@ -917,10 +917,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 $display("%t illegal mte: ", $time, rule_name, " ", fshow(tag), "; ", fshow(dataUnpacked), "; ", fshow(res), fshow(mte));
                 mteExceptionFIFO.enq(res.instTag);
             end 
-            else begin 
-                dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
-                inIfc.writeRegFile(dst.indx, dataUnpacked);
-            end 
+            //else begin 
+            dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
+            inIfc.writeRegFile(dst.indx, dataUnpacked);
+            //end 
 
 `ifdef INCLUDE_TANDEM_VERIF
             inIfc.rob_setExecuted_doFinishMem_RegData (res.instTag, res.data);
