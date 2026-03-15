@@ -913,7 +913,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             $display("mte check on load: ", fshow(res.mte), fshow(mte));
         if(res.dst matches tagged Valid .dst) begin
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
-            if((res.mte < mte) && (mte != 8'h0) && (res.mte != 8'h0) ) begin 
+            if((res.mte == mte) && (mte != 8'h0) && (res.mte != 8'h0) ) begin 
                 $display("%t illegal mte: ", $time, rule_name, " ", fshow(tag), "; ", fshow(dataUnpacked), "; ", fshow(res), fshow(mte));
                 mteExceptionFIFO.enq(res.instTag);
             end 
