@@ -92,12 +92,12 @@ endfunction
 function MemTaggedData getTaggedDataAt(CLine line, CLineMemTaggedDataSel sel) =
   MemTaggedData { tag: line.tag[sel], data: line.data[sel] };
 
-function Bit#(8) getMTEAt(CLine line, Bit#(4) tloc);
+function Bit#(8) getMTEAt(CLine line, Bit#(4) tloc, Bit#(2) line_offset);
     Bit#(512) data = pack(line.data);
     if(tloc !=0 ) begin 
         Bit#(8) mte = 8'h0;
-        Int#(10) top = (zeroExtend(unpack(tloc))*128);
-        Int#(10) base = (zeroExtend(unpack(tloc))*128-8);
+        Int#(14) top = ((zeroExtend(unpack(tloc)) + zeroExtend(unpack(line_offset)))*128);
+        Int#(14) base = ((zeroExtend(unpack(tloc)) + zeroExtend(unpack(line_offset)))*128-8);
         mte = data[top-1: base];
         return mte;
     end 
