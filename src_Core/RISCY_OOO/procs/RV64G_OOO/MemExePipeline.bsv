@@ -955,7 +955,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doRespLdForward;
         forwardQ.deq;
         let {t, d} = forwardQ.first;
-        doRespLd(t, d, 8'h12, "[doRespLdForward]");
+        doRespLd(t, d, 8'h0, "[doRespLdForward]");
     endrule
 
     // deqStQ
