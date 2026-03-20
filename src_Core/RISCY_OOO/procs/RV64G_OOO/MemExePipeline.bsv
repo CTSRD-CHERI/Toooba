@@ -125,6 +125,7 @@ typedef struct {
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
     Bit#(8) mte;
+    Bit#(10) base;
     Bit#(4) tloc;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
@@ -162,6 +163,7 @@ typedef struct {
     MemDataByteEn shiftedBE;
     MemTaggedData shiftedData;
     Bit#(8) mte;
+    Bit#(10) base;
     Bit#(4) tloc;
 } WaitStResp deriving(Bits, Eq, FShow);
 
@@ -352,10 +354,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, WaitStResp) waitStRespQ <- mkCFFifo;
 `endif
     // fifo for req mem
-    Fifo#(1, Tuple6#(LdQTag, Addr, Bool, Bit#(16), Bit#(8), Bit#(4))) reqLdQ <- mkBypassFifo;
+    Fifo#(1, Tuple7#(LdQTag, Addr, Bool, Bit#(16), Bit#(8), Bit#(10), Bit#(4))) reqLdQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
-    Fifo#(1, Tuple4#(Addr, Bit#(16), Bit#(8), Bit#(4))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple5#(Addr, Bit#(16), Bit#(8), Bit#(10), Bit#(4))) reqStQ <- mkBypassFifo;
 `else
     Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(16), Bit#(8), Bit#(4))) reqStQ <- mkBypassFifo;
 `endif
@@ -634,6 +636,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 shiftedBE: shiftBE,
                 vaddr: x.vaddr,
                 mte: getMTE(x.rVal1),
+                base: pack(getBase(x.rVal1))[9:0],
                 tloc: getTloc(x.rVal1),
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.rVal2,
@@ -763,7 +766,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.tloc
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.base, x.tloc
         );
 
         // issue non-MMIO Ld which has no exception and is not waiting for
@@ -784,6 +787,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 shiftedBE: x.shiftedBE,
                 pcHash: hash(getAddr(pc)),
                 mte: x.mte,
+                base: x.base,
                 tloc: x.tloc
             });
         end
@@ -840,7 +844,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         end
         else if(issRes == ToCache) begin
-            reqLdQ.enq(tuple6(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash, info.mte, info.tloc));
+            reqLdQ.enq(tuple7(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash, info.mte, info.base, info.tloc));
             // perf: load mem latency
             ldMemLatTimer.start(info.tag);
         end
@@ -920,12 +924,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             else begin 
                 dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
                 inIfc.writeRegFile(dst.indx, dataUnpacked);
-            end 
-
 `ifdef INCLUDE_TANDEM_VERIF
             inIfc.rob_setExecuted_doFinishMem_RegData (res.instTag, res.data);
 `endif
-
+            end 
 `ifdef PERF_COUNT
             // perf: load to use latency
             let lat <- ldToUseLatTimer.done(tag);
@@ -1039,6 +1041,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             amoInst: ?,
             loadTags: False,
             mte: lsqDeqLd.mte,
+            base: lsqDeqLd.base,
             tloc: lsqDeqLd.tloc,
             pcHash: ?
         };
@@ -1257,13 +1260,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
         // send to mem
         Addr addr = lsqDeqSt.paddr;
-        reqStQ.enq(tuple4(addr, lsqDeqSt.pcHash, lsqDeqSt.mte, lsqDeqSt.tloc));
+        reqStQ.enq(tuple5(addr, lsqDeqSt.pcHash, lsqDeqSt.mte, lsqDeqSt.base, lsqDeqSt.tloc));
         // record waiting for store resp
         waitStRespQ.enq(WaitStResp {
             offset: getLineMemDataOffset(addr),
             shiftedBE: lsqDeqSt.shiftedBE,
             shiftedData: lsqDeqSt.stData,
             mte:  lsqDeqSt.mte,
+            base:  lsqDeqSt.base,
             tloc: lsqDeqSt.tloc
         });
         // we leave deq to resp time
@@ -1389,6 +1393,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             },
             loadTags: False,
             mte: lsqDeqSt.mte,
+            base: lsqDeqSt.base,
             tloc: lsqDeqSt.tloc,
             pcHash: ?
         };
@@ -1604,7 +1609,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     // send req to D$
     rule sendLdToMem;
-        let {lsqTag, addr, loadTags, pcHash, mte, tloc} <- toGet(reqLdQ).get;
+        let {lsqTag, addr, loadTags, pcHash, mte, base, tloc} <- toGet(reqLdQ).get;
         dMem.procReq.req(ProcRq {
             id: zeroExtend(lsqTag),
             addr: addr,
@@ -1616,13 +1621,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             loadTags: loadTags,
             pcHash: pcHash,
             mte: mte,
+            base: base,
             tloc: tloc
         });
     endrule
     (* descending_urgency = "sendLdToMem, sendStToMem" *) // prioritize Ld over St
     rule sendStToMem;
 `ifdef TSO_MM
-        let {addr, pcHash, mte, tloc} <- toGet(reqStQ).get;
+        let {addr, pcHash, mte, base, tloc} <- toGet(reqStQ).get;
         DProcReqId id = 0;
 `else
         let {sbIdx, addr, pcHash} <- toGet(reqStQ).get;
@@ -1639,6 +1645,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             loadTags: False,
             pcHash: pcHash,
             mte: mte,
+            base: base,
             tloc: tloc
         });
     endrule

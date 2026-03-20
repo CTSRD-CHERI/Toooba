@@ -297,6 +297,7 @@ typedef struct {
     ByteOrTagEn shiftedBE;
     Bit#(16) pcHash;
     Bit#(8)  mte;
+    Bit#(10) base;
     Bit#(4)  tloc;
 } LSQIssueLdInfo deriving(Bits, Eq, FShow);
 
@@ -309,6 +310,7 @@ typedef struct {
 //`endif
     MemTaggedData data;
     Bit#(8) mte;
+    Bit#(10) base;
     Bit#(4) tloc;
 } LSQRespLdResult deriving(Bits, Eq, FShow);
 
@@ -333,6 +335,7 @@ typedef struct {
     Bool               allowCap;
     Maybe#(LdKilledBy) killed;
     Bit#(8)            mte;
+    Bit#(10)           base; 
     Bit#(4)            tloc;
 } LdQDeqEntry deriving (Bits, Eq, FShow);
 
@@ -351,6 +354,7 @@ typedef struct {
     Maybe#(Trap)      fault;
     Bit#(16)          pcHash;
     Bit#(8)           mte;
+    Bit#(10)          base; 
     Bit#(4)           tloc;
 } StQDeqEntry deriving (Bits, Eq, FShow);
 
@@ -384,7 +388,7 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(8) mte, Bit#(4) tloc
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(8) mte, Bit#(10) base, Bit#(4) tloc
     );
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
@@ -670,6 +674,8 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_unsigned        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(ByteOrTagEn))             ld_byteOrTagEn     <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bit#(8)))                 ld_mte            <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Reg#(Bit#(10)))                 ld_base            <- replicateM(mkConfigRegU);
+
     Vector#(LdQSize, Reg#(Bit#(4)))                 ld_tloc            <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_allowCap        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_acq             <- replicateM(mkConfigRegU);
@@ -866,6 +872,8 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bit#(8)))              st_mte       <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, Bit#(10)))             st_base       <- replicateM(mkEhr(?));
+
     Vector#(StQSize, Ehr#(2, Bit#(4)))              st_tloc      <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Trap)))         st_fault     <- replicateM(mkEhr(?));
@@ -916,6 +924,9 @@ module mkSplitLSQ(SplitLSQ);
     let st_mte_updAddr = getVEhrPort(st_mte, 0); // write
     let st_mte_deqSt   = getVEhrPort(st_mte, 1);
     let st_mte_enq     = getVEhrPort(st_mte, 1); // write
+    let st_base_updAddr = getVEhrPort(st_base, 0); // write
+    let st_base_deqSt   = getVEhrPort(st_base, 1);
+    let st_base_enq     = getVEhrPort(st_base, 1); // write
     let st_tloc_updAddr = getVEhrPort(st_tloc, 0); // write
     let st_tloc_deqSt   = getVEhrPort(st_tloc, 1);
     let st_tloc_enq     = getVEhrPort(st_tloc, 1); // write
@@ -1140,6 +1151,7 @@ module mkSplitLSQ(SplitLSQ);
                 paddr: ld_paddr_findIss[tag],
                 shiftedBE: ld_shiftedBE_findIss[tag],
                 mte: ld_mte[tag],
+                base: ld_base[tag],
                 tloc: ld_tloc[tag],
                 pcHash: ld_pcHash[tag]
             };
@@ -1450,6 +1462,7 @@ module mkSplitLSQ(SplitLSQ);
         ld_unsigned[ld_enqP] <= mem_inst.unsignedLd;
         ld_byteOrTagEn[ld_enqP] <= mem_inst.byteOrTagEn;
         ld_mte[ld_enqP] <= 8'h0;
+        ld_base[ld_enqP] <= 10'h0;
         ld_tloc[ld_enqP] <= 4'h0;
         ld_acq[ld_enqP] <= mem_inst.aq;
         ld_rel[ld_enqP] <= mem_inst.rl;
@@ -1516,6 +1529,7 @@ module mkSplitLSQ(SplitLSQ);
         st_pcHash[st_enqP] <= pcHash;
         st_allowCapAmoLd_enq[st_enqP] <= False;
         st_mte_enq[st_enqP]     <= 8'h0;
+        st_base_enq[st_enqP]     <= 10'h0;
         st_tloc_enq[st_enqP]     <= 4'h0;
         st_computed_enq[st_enqP] <= False;
         st_verified_enq[st_enqP] <= False;
@@ -1534,7 +1548,7 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bit#(8) mte, Bit#(4) tloc
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bit#(8) mte, Bit#(10) base, Bit#(4) tloc
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1580,6 +1594,7 @@ module mkSplitLSQ(SplitLSQ);
             ld_isMMIO_updAddr[tag] <= mmio;
             ld_shiftedBE_updAddr[tag] <= shift_be;
             ld_mte[tag] <= mte;
+            ld_base[tag] <= base;
             ld_tloc[tag] <= tloc;
             delayIssue = isValid(ld_olderSt_updAddr[tag]) && ld_waitForOlderSt[tag];
 
@@ -1612,6 +1627,7 @@ module mkSplitLSQ(SplitLSQ);
             st_isMMIO_updAddr[tag] <= mmio;
             st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
             st_mte_updAddr[tag] <= mte;
+            st_base_updAddr[tag] <= base;
             st_tloc_updAddr[tag] <= tloc;
             // A store always try to kill younger loads
             doKill = True;
@@ -1998,6 +2014,7 @@ module mkSplitLSQ(SplitLSQ);
             dst: Invalid,
             allowCap: False,
             mte: 8'h0,
+            base: 10'h0,
             tloc: 4'h0,
 //`ifdef INCLUDE_TANDEM_VERIF
             instTag: ld_instTag [t],    // For recording Ld data in ROB
@@ -2032,6 +2049,7 @@ module mkSplitLSQ(SplitLSQ);
             res.allowCap = allowCap;
             res.dst = ld_dst[t];
             res.mte = ld_mte[t];
+            res.base = ld_base[t];
             res.tloc = ld_tloc[t];
             if (dst.Valid.isFpuReg && is32BitLd)
                res.data = fv_nanbox_MemTaggedData(
@@ -2061,6 +2079,7 @@ module mkSplitLSQ(SplitLSQ);
             rel: ld_rel[deqP],
             dst: ld_dst[deqP],
             mte: ld_mte[deqP],
+            base: ld_base[deqP],
             tloc: ld_tloc[deqP],
             paddr: ld_paddr_deqLd[deqP],
             isMMIO: ld_isMMIO_deqLd[deqP],
@@ -2125,6 +2144,7 @@ module mkSplitLSQ(SplitLSQ);
             isMMIO: st_isMMIO_deqSt[deqP],
             shiftedBE: st_shiftedBE_deqSt[deqP],
             mte : st_mte_deqSt[deqP],
+            base : st_base_deqSt[deqP],
             tloc : st_tloc_deqSt[deqP],
             stData: st_stData_deqSt[deqP],
             allowCapAmoLd: st_allowCapAmoLd_deqSt[deqP],
