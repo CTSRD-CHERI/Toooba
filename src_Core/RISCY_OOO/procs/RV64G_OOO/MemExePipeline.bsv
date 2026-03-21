@@ -877,7 +877,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     rule triggerMTEException(mteExceptionFIFO.notEmpty);
         
-        inIfc.rob_setExecuted_deqLSQ(mteExceptionFIFO.first, Valid(Exception(excLoadAccessFault)), Invalid
+        //inIfc.rob_setExecuted_deqLSQ(mteExceptionFIFO.first, Valid(Exception(excLoadAccessFault)), Invalid
                     
 `ifdef RVFI
             , ExtraTraceBundle{
