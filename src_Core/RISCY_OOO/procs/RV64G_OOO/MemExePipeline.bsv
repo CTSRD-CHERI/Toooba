@@ -877,7 +877,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     rule triggerMTEException(mteExceptionFIFO.notEmpty);
         
-        //inIfc.rob_setExecuted_deqLSQ(mteExceptionFIFO.first, Valid(Exception(excLoadAccessFault)), Invalid
+        inIfc.rob_setExecuted_deqLSQ(mteExceptionFIFO.first, Valid(Exception(excLoadAccessFault)), Invalid
                     
 `ifdef RVFI
             , ExtraTraceBundle{
@@ -919,7 +919,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
             if((res.mte == mte) && (mte != 8'h0) && (res.mte != 8'h0) ) begin 
                 $display("%t illegal mte: ", $time, rule_name, " ", fshow(tag), "; ", fshow(dataUnpacked), "; ", fshow(res), fshow(mte));
-                mteExceptionFIFO.enq(res.instTag);
+                //mteExceptionFIFO.enq(res.instTag);
+                inIfc.writeRegFile(dst.indx, unpack(0));
             end 
             else begin 
                 dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
