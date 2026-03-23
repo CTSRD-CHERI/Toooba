@@ -953,7 +953,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                        $display("%t poison load mismatch return 0: ", $time, rule_name, " ", fshow(data));
                     end else begin 
                        $display("%t poison load exception: ", $time, rule_name, " ", fshow(data));
-                       poisonExceptionFIFO.enq(res.instTag);
+                       //poisonExceptionFIFO.enq(res.instTag);
+		       inIfc.writeRegFile(dst.indx, unpack(0));
                        /*
                        inIfc.rob_setExecuted_deqLSQ(res.instTag, Valid(Exception(excLoadAccessFault)), Invalid
                     
