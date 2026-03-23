@@ -21,7 +21,7 @@ ARCH ?= RV64ACDFIMSUxCHERI
 
 # Set number of cores for RISCY config
 CORE_NUM = 2
-
+CACHE_SIZE=SMALL
 # Set X and Y
 include $(REPO)/builds/Resources/Include_RISCY_Config.mk
 
