@@ -209,6 +209,7 @@ typedef struct {
     Bit#(8) mte;
     Bit#(10) base;
     Bit#(4) tloc;
+    Bool mteLoad;
 } ProcRq#(type idT) deriving(Bits, Eq, FShow);
 
 interface L1ProcReq#(type idT);
@@ -216,7 +217,7 @@ interface L1ProcReq#(type idT);
 endinterface
 
 interface L1ProcResp#(type idT);
-    method Action respLd(idT id, MemTaggedData resp, Bit#(8) mte);
+    method Action respLd(idT id, Bool mteLoad, MemTaggedData resp, Bit#(8) mte);
     method Action respLrScAmo(idT id, MemTaggedData resp);
     method ActionValue#(Tuple2#(LineByteEn, Line)) respSt(idT id);
     method Action evict(LineAddr a); // called when cache line is evicted

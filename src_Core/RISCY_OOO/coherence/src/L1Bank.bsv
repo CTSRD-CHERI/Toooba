@@ -381,7 +381,8 @@ endfunction
             pcHash: ?,
             mte: 8'h0,
             base: 10'h0,
-            tloc: 4'h0
+            tloc: 4'h0,
+            mteLoad: False
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
         // send to pipeline
@@ -587,7 +588,7 @@ endfunction
             Ld: begin
                 if (!cRqIsPrefetch[n]) begin
                     if (req.loadTags) begin
-                        procResp.respLd(req.id, getTagsAt(curLine), 8'h0);
+                        procResp.respLd(req.id, False, getTagsAt(curLine), 8'h0);
                     end else begin
                         Bit#(8) mem_mte = getMTEAt(curLine, req.tloc, req.base);
                     
@@ -599,7 +600,7 @@ endfunction
                             mte = data[top-1: base];
                             $display("L1Bank MTE", fshow(req.addr), fshow(req.addr[5:4]), fshow(req.tloc), fshow(top), fshow(base), fshow(curLine), fshow(getTaggedDataAt(curLine, dataSel)), fshow(data), fshow(mte));
                         end
-                        procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel), mem_mte);
+                        procResp.respLd(req.id, req.mteLoad, getTaggedDataAt(curLine, dataSel), mem_mte);
                     end
                 end
             end

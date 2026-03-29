@@ -355,6 +355,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     // fifo for req mem
     Fifo#(1, Tuple7#(LdQTag, Addr, Bool, Bit#(16), Bit#(8), Bit#(10), Bit#(4))) reqLdQ <- mkBypassFifo;
+    Fifo#(1, Tuple7#(LdQTag, Addr, Bool, Bit#(16), Bit#(8), Bit#(10), Bit#(4)))  mteLdQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
     Fifo#(1, Tuple5#(Addr, Bit#(16), Bit#(8), Bit#(10), Bit#(4))) reqStQ <- mkBypassFifo;
@@ -364,35 +365,44 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
     Fifo#(2, Tuple3#(LdQTag, MemResp,  Bit#(8))) memRespLdQ <- mkCFFifo;
+    Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) mteRespLdQ <- mkCFFifo;
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
     // resp ifc to D$
     L1ProcResp#(DProcReqId) procRespIfc = (interface L1ProcResp;
-        method Action respLd(DProcReqId id, MemTaggedData d, Bit#(8) mte);
-            LdQTag tag = truncate(id);
-            memRespLdQ.enq(tuple3(tag, d, mte));
-            // early wake up RS and set SB
-            // this is done only when the resp is not wrong path
-            LSQHitInfo info <- lsq.getHit(Ld (tag));
-            if(info.dst matches tagged Valid .dst &&& !info.waitWPResp) begin
-                inIfc.setRegReadyAggr_mem(dst.indx);
-            end
-            if(verbose) begin
-                $display("%t : [Ld resp] ", $time, fshow(id), "; ", fshow(d), "; ", fshow(info));
-            end
-            // perf: load mem latency
-            let lat <- ldMemLatTimer.done(tag);
-`ifdef PERF_COUNT
-            if(inIfc.doStats) begin
-                exeLdMemLat.incr(zeroExtend(lat));
-            end
-`endif
-`ifdef PERFORMANCE_MONITORING
-            EventsCore events = unpack(0);
-            events.evt_LOAD_WAIT = saturating_truncate(lat);
-            events.evt_MEM_CAP_LOAD_TAG_SET = (d.tag) ? 1 : 0;
-            events_reg[1] <= events;
-`endif
+        method Action respLd(DProcReqId id, Bool mteLoad, MemTaggedData d, Bit#(8) mte);
+            if(mteLoad != True) begin
+                LdQTag tag = truncate(id);
+                memRespLdQ.enq(tuple3(tag, d, mte));
+                // early wake up RS and set SB
+                // this is done only when the resp is not wrong path
+                LSQHitInfo info <- lsq.getHit(Ld (tag));
+                if(info.dst matches tagged Valid .dst &&& !info.waitWPResp) begin
+                    inIfc.setRegReadyAggr_mem(dst.indx);
+                end
+                if(verbose) begin
+                    $display("%t : [Ld resp] ", $time, fshow(id), "; ", fshow(d), "; ", fshow(info));
+                end
+                if(mteLoad) begin 
+                    $display("mte load resp", fshow(d));
+                end 
+                // perf: load mem latency
+                let lat <- ldMemLatTimer.done(tag);
+    `ifdef PERF_COUNT
+                if(inIfc.doStats) begin
+                    exeLdMemLat.incr(zeroExtend(lat));
+                end
+    `endif
+    `ifdef PERFORMANCE_MONITORING
+                EventsCore events = unpack(0);
+                events.evt_LOAD_WAIT = saturating_truncate(lat);
+                events.evt_MEM_CAP_LOAD_TAG_SET = (d.tag) ? 1 : 0;
+                events_reg[1] <= events;
+    `endif
+            end else begin 
+                mteRespLdQ.enq(tuple2(truncate(id), d));
+
+            end 
         endmethod
         method Action respLrScAmo(DProcReqId id, MemTaggedData d);
             respLrScAmoQ.enq(d);
@@ -845,6 +855,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
         else if(issRes == ToCache) begin
             reqLdQ.enq(tuple7(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash, info.mte, info.base, info.tloc));
+            if(info.mte!=0 && info.tloc >= 5 ) begin 
+                Bit#(64) mteAddr = pack(zeroExtend(info.tloc)*(16) + zeroExtend(info.base) + {pack(info.paddr)[64-1:10],10'h0}-1);
+                mteLdQ.enq(tuple7(zeroExtend(info.tag), unpack(mteAddr), info.shiftedBE == TagMemAccess, info.pcHash, info.mte, info.base, info.tloc));
+                $display("mte load Q", fshow(info.paddr), fshow(mteAddr));
+            end 
             // perf: load mem latency
             ldMemLatTimer.start(info.tag);
         end
@@ -917,7 +932,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             $display("mte check on load: ", fshow(res.mte), fshow(mte));
         if(res.dst matches tagged Valid .dst) begin
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
-            if((res.mte == mte) && (mte != 8'h0) && (res.mte != 8'h0) && (res.tloc != 4'h0) ) begin 
+            if((res.mte != mte) && (mte != 8'h0) && (res.mte != 8'h0) && (res.tloc != 4'h0) ) begin 
                 $display("%t illegal mte: ", $time, rule_name, " ", fshow(tag), "; ", fshow(dataUnpacked), "; ", fshow(res), fshow(mte));
                 //mteExceptionFIFO.enq(res.instTag);
                 inIfc.writeRegFile(dst.indx, unpack(0));
@@ -947,6 +962,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
     endaction
     endfunction
+
+    rule doObjIdRespLdMem;
+        mteRespLdQ.deq;
+        let {t, d} = mteRespLdQ.first;
+        lsq.updateLdMTE(t, d);
+        if (verbose) $display("[doLdUpdateMTE] ", fshow(t), "; ", fshow(d));
+    endrule
 
     rule doRespLdMem;
         memRespLdQ.deq;
@@ -1044,7 +1066,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             mte: lsqDeqLd.mte,
             base: lsqDeqLd.base,
             tloc: lsqDeqLd.tloc,
-            pcHash: ?
+            pcHash: ?,
+            mteLoad: False
         };
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqLdQ_Lr_issue] ", fshow(lsqDeqLd), "; ", fshow(req));
@@ -1396,7 +1419,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             mte: lsqDeqSt.mte,
             base: lsqDeqSt.base,
             tloc: lsqDeqSt.tloc,
-            pcHash: ?
+            pcHash: ?,
+            mteLoad: False
         };
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqStQ_ScAmo_issue] ", fshow(lsqDeqSt), "; ", fshow(req));
@@ -1608,7 +1632,29 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doAssert(!isValid(lsqDeqSt.fault), "no fault");
     endrule
 
+    rule sendLdMTEToMem;
+        let {lsqTag, addr, loadTags, pcHash, mte, base, tloc} <- toGet(mteLdQ).get;
+        DProcReqId dId = zeroExtend(lsqTag);
+        dMem.procReq.req(ProcRq {
+            id: dId,
+            addr: addr,
+            toState: S,
+            op: Ld,
+            byteEn: ?,
+            data: ?,
+            amoInst: ?,
+            loadTags: False,
+            pcHash: ?,
+            mteLoad: True,
+            tloc: tloc,
+            base: base,
+            mte: mte
+        });
+        if(verbose) $display("[sendLdMTEToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
+    endrule
+    
     // send req to D$
+    (* descending_urgency = "sendLdMTEToMem, sendLdToMem" *)
     rule sendLdToMem;
         let {lsqTag, addr, loadTags, pcHash, mte, base, tloc} <- toGet(reqLdQ).get;
         dMem.procReq.req(ProcRq {
@@ -1623,7 +1669,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             pcHash: pcHash,
             mte: mte,
             base: base,
-            tloc: tloc
+            tloc: tloc,
+            mteLoad: False
         });
     endrule
     (* descending_urgency = "sendLdToMem, sendStToMem" *) // prioritize Ld over St
@@ -1647,7 +1694,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             pcHash: pcHash,
             mte: mte,
             base: base,
-            tloc: tloc
+            tloc: tloc,
+            mteLoad: False
         });
     endrule
     (* descending_urgency = "sendLrScAmoToMem, sendStToMem" *) // prioritize Lr/Sc/Amo over St

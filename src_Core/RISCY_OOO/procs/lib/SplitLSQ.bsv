@@ -53,6 +53,7 @@ import Exec::*;
 import FP_Utils::*;
 import CacheUtils::*; // For CLoadTags alignment
 import RegFile::*; // Just for the interface
+import ISA_Decls_CHERI::*;
 
 // I don't want to export auxiliary functions, so manually export all types
 export LdQMemFunc(..);
@@ -390,6 +391,8 @@ interface SplitLSQ;
         // below are only meaningful wen fault is Invalid
         Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(8) mte, Bit#(10) base, Bit#(4) tloc
     );
+
+    method Action updateLdMTE(LdQTag tag, MemTaggedData d);
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, ByteOrTagEn shiftedBE, SBSearchRes sbRes
@@ -674,7 +677,8 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_unsigned        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(ByteOrTagEn))             ld_byteOrTagEn     <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bit#(8)))                 ld_mte            <- replicateM(mkConfigRegU);
-    Vector#(LdQSize, Reg#(Bit#(10)))                 ld_base            <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Reg#(Bit#(10)))                ld_base            <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Ehr#(2, Bool))                 ld_memMTEMisMatch           <- replicateM(mkEhr(?));
 
     Vector#(LdQSize, Reg#(Bit#(4)))                 ld_tloc            <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_allowCap        <- replicateM(mkConfigRegU);
@@ -739,6 +743,14 @@ module mkSplitLSQ(SplitLSQ);
     let ld_isMMIO_issue   = getVEhrPort(ld_isMMIO, 1); // assert
     let ld_isMMIO_enqIss  = getVEhrPort(ld_isMMIO, 1); // assert
 
+    let ld_MemMTEMisMatch_wrongSpec    = getVEhrPort(ld_memMTEMisMatch, 0);
+    let ld_MemMTEMisMatch_deqLd        = getVEhrPort(ld_memMTEMisMatch, 0);
+    let ld_MemMTEMisMatch_findIss      = getVEhrPort(ld_memMTEMisMatch, 0);
+    let ld_MemMTEMisMatch_issue        = getVEhrPort(ld_memMTEMisMatch, 0); // assert
+    let ld_MemMTEMisMatch_updMemMTE    = getVEhrPort(ld_memMTEMisMatch, 0); // write
+    let ld_MemMTEMisMatch_enq          = getVEhrPort(ld_memMTEMisMatch, 1); // write
+
+
     let ld_shiftedBE_findIss = getVEhrPort(ld_shiftedBE, 0);
     let ld_shiftedBE_deqLd   = getVEhrPort(ld_shiftedBE, 0);
     let ld_shiftedBE_updAddr = getVEhrPort(ld_shiftedBE, 0); // write
@@ -749,6 +761,7 @@ module mkSplitLSQ(SplitLSQ);
     let ld_fault_updAddr = getVEhrPort(ld_fault, 0); // write
     let ld_fault_issue   = getVEhrPort(ld_fault, 1); // assert
     let ld_fault_enqIss  = getVEhrPort(ld_fault, 1); // assert
+    let ld_fault_MTEMismatch = getVEhrPort(ld_fault, 1); // assert
     let ld_fault_enq     = getVEhrPort(ld_fault, 1); // write
 
     let ld_computed_findIss = getVEhrPort(ld_computed, 0);
@@ -851,6 +864,8 @@ module mkSplitLSQ(SplitLSQ);
     let ld_waitWPResp_enqIss    = getVEhrPort(ld_waitWPResp, 0); // assert
     let ld_waitWPResp_resp      = getVEhrPort(ld_waitWPResp, 0); // write
     let ld_waitWPResp_wrongSpec = getVEhrPort(ld_waitWPResp, 0); // write
+
+
 
     Reg#(LdQTag) ld_deqP_deqLd  = ld_deqP[0]; // write
     Reg#(LdQTag) ld_deqP_verify = ld_deqP[0]; // in TSO, C with deqLd
@@ -1729,6 +1744,23 @@ module mkSplitLSQ(SplitLSQ);
         };
     endmethod
 
+    method Action updateLdMTE(LdQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
+        if(ld_MemMTEMisMatch_updMemMTE[tag] == False) begin
+            
+            // get objId seal bit using offset
+            Bit#(8) memMTE = pack(d)[128-1:128-8];
+            Bit#(8) cap_mte = ld_mte[tag];
+            $display("LSQ update memMTE", fshow(pack(d)), fshow(memMTE), fshow(cap_mte));
+
+            if(cap_mte != memMTE) 
+                ld_MemMTEMisMatch_updMemMTE[tag] <= True;
+                
+        end
+        else begin
+            ld_MemMTEMisMatch_updMemMTE[tag] <= False;
+        end
+    endmethod
+
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,
                                                   Addr pa,
                                                   ByteOrTagEn shift_be,
@@ -2069,6 +2101,11 @@ module mkSplitLSQ(SplitLSQ);
 
     method LdQDeqEntry firstLd if(deqLdGuard);
         LdQTag deqP = ld_deqP_deqLd;
+        let fault = ld_fault_deqLd[deqP];
+        if (!isValid(fault) &&& ld_MemMTEMisMatch_deqLd[deqP] ) begin
+            fault = Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}));
+        end
+
         return LdQDeqEntry {
             tag: deqP,
             instTag: ld_instTag[deqP],
@@ -2084,7 +2121,7 @@ module mkSplitLSQ(SplitLSQ);
             paddr: ld_paddr_deqLd[deqP],
             isMMIO: ld_isMMIO_deqLd[deqP],
             shiftedBE: ld_shiftedBE_deqLd[deqP],
-            fault: ld_fault_deqLd[deqP],
+            fault: fault,
             allowCap: ld_allowCap[deqP],
             killed: ld_killed_deqLd[deqP]
         };
