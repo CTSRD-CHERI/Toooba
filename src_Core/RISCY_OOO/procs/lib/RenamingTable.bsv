@@ -470,9 +470,53 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
 
     Vector#(SupSize, RTMove) moveIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-        Bool guard = !valid[renamingsClaimIndex[i]][valid_get_port];
+        // dummy move interface, guard set to false
+        Bool guard = False;
+        PhyRIndx claim_phy_reg = get_dst_renaming(i);
         moveIfc[i] = (interface RTMove;
-            // todo
+            method RenameResult getMoveResult(Move m, ArchRegs r) if(guard);
+                // get renamings
+                PhyRegs phy_regs = PhyRegs {
+                    src1: tagged Invalid,
+                    src2: tagged Invalid,
+                    src3: tagged Invalid,
+                    dst: tagged Invalid
+                };
+                if (r.src1 matches tagged Valid .valid_src1) begin
+                    phy_regs.src1 = Valid (get_src_renaming(i, valid_src1));
+                end
+                if (r.src2 matches tagged Valid .valid_src2) begin
+                    phy_regs.src2 = Valid (get_src_renaming(i, valid_src2));
+                end
+                if (r.src3 matches tagged Valid .valid_src3) begin
+                    phy_regs.src3 = tagged Valid (get_src_renaming(i, tagged Fpu valid_src3));
+                end
+                if (r.dst matches tagged Valid .valid_dst) begin
+                    phy_regs.dst = Valid (PhyDst {
+                        indx: get_src_renaming(i, m.src),
+                        isFpuReg: isFpuReg(valid_dst)
+                    });
+                end
+
+                return RenameResult {
+                    phy_regs: phy_regs
+                };
+            endmethod
+
+            method Action claimMove(Move m, SpecBits sb) if(guard);
+                // record the claim
+                claimEn[i].wset(RenameClaim {
+                    arch: tagged Valid m.dst,
+                    phy: get_src_renaming(i, m.src),
+                    specBits: sb
+                });
+                // conflict with wrong spec
+                wrongSpec_rename_conflict[i].wset(?);
+                // ordering with commit
+                commit_SB_rename[i] <= False;
+            endmethod
+            
+            method canMove = guard;
         endinterface);
     end
 
