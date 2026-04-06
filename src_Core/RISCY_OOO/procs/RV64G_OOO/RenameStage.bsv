@@ -974,7 +974,12 @@ module mkRenameStage#(RenameInput inIfc)(RenameStage);
 
                 CapMem fallthrough_pc = addPc(pc, ((orig_inst[1:0] == 2'b11) ? 4 : 2));
 
+                // detect if instruction is a move and extract source/destination if so
                 Maybe#(Move) move = getMove(dInst, arch_regs);
+                // attempt fallback to normal rename and functional unit enqueue if move not available
+                if(!regRenamingTable.move[i].canMove) begin 
+                    move = tagged Invalid;
+                end
 
                 // check for wrong path, if wrong path, don't process it, leave to the other rule in next cycle
                 if(!epochManager.checkEpoch[i].check(main_epoch)) begin
