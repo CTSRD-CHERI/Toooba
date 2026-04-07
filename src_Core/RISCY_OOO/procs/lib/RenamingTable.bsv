@@ -36,6 +36,7 @@ import Types::*;
 import ProcTypes::*;
 import HasSpecBits::*;
 import Ehr::*;
+import MoveTable::*;
 
 typedef struct {
     PhyRegs phy_regs;
