@@ -4,24 +4,24 @@ import HasSpecBits::*;
 import Ehr::*;
 import Types::*;
 
-interface Lookup;
+interface Commit;
     method Bool contains(PhyRIndx phy);
-endinterface
-
-interface Update;
-    method Bool canAdd; // guard of add
-    method Action add(PhyRIndx phy, SpecBits sb);
     // remove is left unguarded, but we do do not expect to call it 
     // when phy is not in table, and assume that it suceeds
     method Action remove(PhyRIndx phy);
+endinterface
+
+interface Rename;
+    method Bool canAdd; // guard of add
+    method Action add(PhyRIndx phy, SpecBits sb);
 endinterface
 
 interface MoveTable;
     // used to record source phy regs so we know to free/not free
     // MoveTable is functionally a multiset with limited capacity
     // we expose add, remove, and contains methods
-    interface Vector#(SupSize, Lookup) lookup;
-    interface Vector#(SupSize, Update) update;
+    interface Vector#(SupSize, Commit) commit; // commit port
+    interface Vector#(SupSize, Rename) rename; // rename port
 
     // This subinterface contains the methods specifying correct and incorrect
     // speculation. If the speculation is correct, the dependencies on that
@@ -38,9 +38,8 @@ module mkMoveTable(MoveTable) provisos (
     Alias#(slotCountT, Bit#(TLog#(moveTableSize)))
 );
 
-    // ordering: commit < rename < correctSpec
-    // commit < wrongSpec
-    // wrongSpec C rename
+    // ordering: pre-rename < commit < rename
+    // rename need not see the freed slots from commit or pre-rename
 
     Integer sb_correctSpec_port = valueof(SupSize);
     Integer sb_wrongSpec_port = 1;
@@ -51,9 +50,9 @@ module mkMoveTable(MoveTable) provisos (
     Vector#(moveTableSize, Ehr#(TAdd#(1, SupSize), SpecBits)) specBits <- replicateM(mkEhr(0));
     Ehr#(TAdd#(1, SupSize), slotCountT) numFreeSlots <- mkEhr(fromInteger(valueof(moveTableSize)));
 
-    Vector#(SupSize, Lookup) lookupIfc;
+    Vector#(SupSize, Commit) commitIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
-        lookupIfc[i] = (interface Lookup;
+        commitIfc[i] = (interface Commit;
             method Bool contains(PhyRIndx phy);
                 Bool doesContain = False;
                 for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
@@ -61,13 +60,26 @@ module mkMoveTable(MoveTable) provisos (
                 end
                 return doesContain;
             endmethod
+
+            // we assume it will succeed
+            method Action remove(PhyRIndx phy);
+                numFreeSlots[i] <= numFreeSlots[i] + 1;
+                Bool removeSuccess = False;
+                for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
+                    if(!removeSuccess && valid[i][j] && moveSources[i][j] == phy) begin 
+                        valid[i][j] <= False;
+                        removeSuccess = True;
+                    end
+                end
+                doAssert(removeSuccess, "removing from the move table must succeed");
+            endmethod
         endinterface);
     end
 
-    Vector#(SupSize, Update) updateIfc;
+    Vector#(SupSize, Rename) renameIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
         Bool addGuard = !(numFreeSlots[i] == 0);
-        updateIfc[i] = (interface Update;
+        renameIfc[i] = (interface Rename;
             method canAdd = addGuard;
 
             method Action add(PhyRIndx phy, SpecBits sb) if(addGuard);
@@ -83,24 +95,11 @@ module mkMoveTable(MoveTable) provisos (
                 end
                 doAssert(addSuccess, "adding to the move table must succeed");
             endmethod
-
-            // we assume it will suceed
-            method Action remove(PhyRIndx phy);
-                numFreeSlots[i] <= numFreeSlots[i] + 1;
-                Bool removeSuccess = False;
-                for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
-                    if(!removeSuccess && valid[i][j] && moveSources[i][j] == phy) begin 
-                        valid[i][j] <= False;
-                        removeSuccess = True;
-                    end
-                end
-                doAssert(removeSuccess, "removing from the move table must succeed");
-            endmethod
         endinterface);
     end
 
-    interface lookup = lookupIfc;
-    interface update = updateIfc;
+    interface commit = commitIfc;
+    interface rename = renameIfc;
 
     interface SpeculationUpdate specUpdate;
         method Action incorrectSpeculation(Bool killAll, SpecTag specTag);
