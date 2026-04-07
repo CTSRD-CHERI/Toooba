@@ -1,6 +1,5 @@
 import Vector::*;
 import ProcTypes::*;
-import HasSpecBits::*;
 import Ehr::*;
 import Types::*;
 
@@ -13,7 +12,7 @@ endinterface
 
 interface Rename;
     method Bool canAdd; // guard of add
-    method Action add(PhyRIndx phy, SpecBits sb);
+    method Action add(PhyRIndx phy);
 endinterface
 
 interface MoveTable;
@@ -22,15 +21,6 @@ interface MoveTable;
     // we expose add, remove, and contains methods
     interface Vector#(SupSize, Commit) commit; // commit port
     interface Vector#(SupSize, Rename) rename; // rename port
-
-    // This subinterface contains the methods specifying correct and incorrect
-    // speculation. If the speculation is correct, the dependencies on that
-    // SpecTag should be removed from all SpecBits. If the speculation is
-    // incorrect, then all renamings that depended on the SpecTag should be
-    // reverted.
-    interface SpeculationUpdate specUpdate;
-    // methods: method Action incorrectSpeculation(SpecTag tag);
-    //          method Action correctSpeculation(SpecTag tag);
 endinterface
 
 module mkMoveTable(MoveTable) provisos ( 
@@ -47,7 +37,6 @@ module mkMoveTable(MoveTable) provisos (
 
     Vector#(moveTableSize, Ehr#(SupSize, PhyRIndx)) moveSources <- replicateM(mkEhr(0));
     Vector#(moveTableSize, Ehr#(SupSize, Bool)) valid <- replicateM(mkEhr(False));
-    Vector#(moveTableSize, Ehr#(TAdd#(1, SupSize), SpecBits)) specBits <- replicateM(mkEhr(0));
     Ehr#(TAdd#(1, SupSize), slotCountT) numFreeSlots <- mkEhr(fromInteger(valueof(moveTableSize)));
 
     Vector#(SupSize, Commit) commitIfc;
@@ -82,14 +71,13 @@ module mkMoveTable(MoveTable) provisos (
         renameIfc[i] = (interface Rename;
             method canAdd = addGuard;
 
-            method Action add(PhyRIndx phy, SpecBits sb) if(addGuard);
+            method Action add(PhyRIndx phy) if(addGuard);
                 numFreeSlots[i] <= numFreeSlots[i] - 1;
                 Bool addSuccess = False;
                 for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
                     if(!addSuccess && !valid[i][j]) begin 
                         valid[i][j] <= True;
                         moveSources[i][j] <= phy;
-                        specBits[i][j] <= sb;
                         addSuccess = True;
                     end
                 end
@@ -100,23 +88,4 @@ module mkMoveTable(MoveTable) provisos (
 
     interface commit = commitIfc;
     interface rename = renameIfc;
-
-    interface SpeculationUpdate specUpdate;
-        method Action incorrectSpeculation(Bool killAll, SpecTag specTag);
-            function Bool needKill(Integer i);
-                return killAll || specBits[i][sb_wrongSpec_port][specTag] == 1;
-            endfunction
-
-            for(Integer i = 0; i < valueof(moveTableSize); i = i+1) begin 
-                if(needKill(i)) begin 
-                    valid[i][valid_wrongSpec_port] <= False;
-                end
-            end
-        endmethod
-        method Action correctSpeculation(SpecBits mask);
-            for(Integer i = 0; i < valueof(moveTableSize); i = i+1) begin 
-                specBits[i][sb_correctSpec_port] <= specBits[i][sb_correctSpec_port] & mask;
-            end
-        endmethod
-    endinterface
 endmodule
