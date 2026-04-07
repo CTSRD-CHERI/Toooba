@@ -1,6 +1,7 @@
 import Vector::*;
 import ProcTypes::*;
 import Ehr::*;
+import Types::*;
 
 interface Lookup;
     method Bool contains(PhyRIndx phy);
@@ -35,7 +36,11 @@ module mkMoveTable(MoveTable) provisos (
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
         lookupIfc[i] = (interface Lookup;
             method Bool contains(PhyRIndx phy);
-                return False;
+                Bool doesContain = False;
+                for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
+                    doesContain = doesContain || (valid[i][j] && moveSources[i][j] == phy);
+                end
+                return doesContain;
             endmethod
         endinterface);
     end
@@ -48,13 +53,28 @@ module mkMoveTable(MoveTable) provisos (
 
             method Action add(PhyRIndx phy) if(addGuard);
                 numFreeSlots[i] <= numFreeSlots[i] - 1;
-                noAction;
+                Bool addSuccess = False;
+                for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
+                    if(!addSuccess && !valid[i][j]) begin 
+                        valid[i][j] <= True;
+                        moveSources[i][j] <= phy;
+                        addSuccess = True;
+                    end
+                end
+                doAssert(addSuccess, "adding to the move table must succeed");
             endmethod
 
             // we assume it will suceed
             method Action remove(PhyRIndx phy);
                 numFreeSlots[i] <= numFreeSlots[i] + 1;
-                noAction;
+                Bool removeSuccess = False;
+                for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
+                    if(!removeSuccess && valid[i][j] && moveSources[i][j] == phy) begin 
+                        valid[i][j] <= False;
+                        removeSuccess = True;
+                    end
+                end
+                doAssert(removeSuccess, "removing from the move table must succeed");
             endmethod
         endinterface);
     end
