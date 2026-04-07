@@ -9,8 +9,8 @@ endinterface
 interface Update;
     method Bool canAdd; // guard of add
     method Action add(PhyRIndx phy);
-    // remove can be unguarded, but we do do not expect to call it 
-    // when phy is not in table
+    // remove is left unguarded, but we do do not expect to call it 
+    // when phy is not in table, and assume that it suceeds
     method Action remove(PhyRIndx phy);
 endinterface
 
@@ -23,8 +23,13 @@ interface MoveTable;
 endinterface
 
 module mkMoveTable(MoveTable) provisos ( 
-    NumAlias#(moveTableSize, 7)
+    NumAlias#(moveTableSize, 7),
+    Alias#(slotCountT, Bit#(TLog#(moveTableSize)))
 );
+
+    Vector#(moveTableSize, Ehr#(SupSize, PhyRIndx)) moveSources <- replicateM(mkEhr(0));
+    Vector#(moveTableSize, Ehr#(SupSize, Bool)) valid <- replicateM(mkEhr(False));
+    Ehr#(SupSize, slotCountT) numFreeSlots <- mkEhr(fromInteger(valueof(moveTableSize)));
 
     Vector#(SupSize, Lookup) lookupIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
@@ -37,16 +42,18 @@ module mkMoveTable(MoveTable) provisos (
 
     Vector#(SupSize, Update) updateIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
-        Bool addGuard = False;
+        Bool addGuard = !(numFreeSlots[i] == 0);
         updateIfc[i] = (interface Update;
             method canAdd = addGuard;
 
             method Action add(PhyRIndx phy) if(addGuard);
+                numFreeSlots[i] <= numFreeSlots[i] - 1;
                 noAction;
             endmethod
 
-            // unguarded
+            // we assume it will suceed
             method Action remove(PhyRIndx phy);
+                numFreeSlots[i] <= numFreeSlots[i] + 1;
                 noAction;
             endmethod
         endinterface);
