@@ -70,6 +70,22 @@ module mkMoveTable(MoveTable) provisos (
         end
     endrule
 
+    rule applyRemove;
+        Vector#(moveTableSize, Bool) removed = replicate(False);
+        for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
+            if(removeEn[i].wget() matches tagged Valid .phy) begin 
+                Bool removeComplete = False;
+                for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
+                    if(!removeComplete && !removed[j] && valid[j] && moveSources[j] == phy) begin 
+                        removeComplete = True;
+                        removed[j] = True;
+                        valid[j] <= False;
+                    end
+                end
+            end
+        end
+    endrule
+
     Vector#(removeLanes, Commit) commitIfc;
     for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
         commitIfc[i] = (interface Commit;
