@@ -42,6 +42,34 @@ module mkMoveTable(MoveTable) provisos (
     Vector#(removeLanes, RWire#(PhyRIndx)) removeEn <- replicateM(mkUnsafeRWire);
     Vector#(SupSize, RWire#(PhyRIndx)) addEn <- replicateM(mkUnsafeRWire);
 
+    function Action fillNthFree(Integer n, PhyRIndx phy);
+        action 
+            Integer slotsSkipped = 0;
+            for(Integer i = 0; i < valueof(moveTableSize); i = i+1) begin 
+                if(!valid[i]) begin 
+                    if(n == slotsSkipped) begin 
+                        moveSources[i] <= phy;
+                        valid[i] <= True;
+                        slotsSkipped = slotsSkipped + 1;
+                    end else begin 
+                        slotsSkipped = slotsSkipped + 1;
+                    end
+                end
+            end
+        endaction
+    endfunction
+
+
+    rule applyAdd;
+        Integer addsAdded = 0;
+        for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
+            if(addEn[i].wget() matches tagged Valid .phy) begin 
+                fillNthFree(addsAdded, phy);
+                addsAdded = addsAdded + 1;
+            end
+        end
+    endrule
+
     Vector#(removeLanes, Commit) commitIfc;
     for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
         commitIfc[i] = (interface Commit;
