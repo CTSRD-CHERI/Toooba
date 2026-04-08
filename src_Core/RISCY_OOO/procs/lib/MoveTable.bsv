@@ -42,30 +42,21 @@ module mkMoveTable(MoveTable) provisos (
     Vector#(removeLanes, RWire#(PhyRIndx)) removeEn <- replicateM(mkUnsafeRWire);
     Vector#(SupSize, RWire#(PhyRIndx)) addEn <- replicateM(mkUnsafeRWire);
 
-    function Action fillNthFree(Integer n, PhyRIndx phy);
-        action 
-            Integer slotsSkipped = 0;
-            for(Integer i = 0; i < valueof(moveTableSize); i = i+1) begin 
-                if(!valid[i]) begin 
-                    if(n == slotsSkipped) begin 
-                        moveSources[i] <= phy;
-                        valid[i] <= True;
-                        slotsSkipped = slotsSkipped + 1;
-                    end else begin 
-                        slotsSkipped = slotsSkipped + 1;
-                    end
-                end
-            end
-        endaction
-    endfunction
-
-
     rule applyAdd;
-        Integer addsAdded = 0;
+        Vector#(moveTableSize, Bool) slotUsed = replicate(False);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
             if(addEn[i].wget() matches tagged Valid .phy) begin 
-                fillNthFree(addsAdded, phy);
-                addsAdded = addsAdded + 1;
+                Bool addComplete = False;
+                for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
+                    if(!addComplete && !slotUsed[j] && !valid[j]) begin 
+                        addComplete = True;
+                        slotUsed[j] = True;
+                        valid[j] <= False;
+                        moveSources[j] <= phy;
+                    end
+                end
+                // sanity check
+                doAssert(addComplete, "free slot must exist in order to add to move table");
             end
         end
     endrule
@@ -82,6 +73,8 @@ module mkMoveTable(MoveTable) provisos (
                         valid[j] <= False;
                     end
                 end
+                // sanity check
+                doAssert(removeComplete, "phy reg must exist in move table to be removed");
             end
         end
     endrule
