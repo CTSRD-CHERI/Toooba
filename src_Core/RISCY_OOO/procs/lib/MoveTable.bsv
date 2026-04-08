@@ -42,6 +42,22 @@ module mkMoveTable(MoveTable) provisos (
     Vector#(removeLanes, RWire#(PhyRIndx)) removeEn <- replicateM(mkUnsafeRWire);
     Vector#(SupSize, RWire#(PhyRIndx)) addEn <- replicateM(mkUnsafeRWire);
 
+    rule updateNumFreeSlots;
+        slotCountT numRemoves = 0;
+        slotCountT numAdds = 0;
+        for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
+            if(addEn[i].wget() matches tagged Valid .phy) begin 
+                numAdds = numAdds + 1;
+            end
+        end
+        for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
+            if(removeEn[i].wget() matches tagged Valid .phy) begin 
+                numRemoves = numRemoves + 1;
+            end
+        end
+        numFreeSlots <= numFreeSlots + numRemoves - numAdds;
+    endrule
+
     rule applyAdd;
         Vector#(moveTableSize, Bool) slotUsed = replicate(False);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
