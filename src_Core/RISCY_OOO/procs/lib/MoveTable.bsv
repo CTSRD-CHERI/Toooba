@@ -95,13 +95,30 @@ module mkMoveTable(MoveTable) provisos (
         end
     endrule
 
+    function Bool isPhyContained(Integer lane, PhyRIndx phy);
+        slotCountT numPriorRemoves = 0;
+        slotCountT numOccurances = 0;
+        for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
+            if(removeEn[i].wget() == Valid(phy)) begin 
+                numPriorRemoves = numPriorRemoves + 1;
+            end
+        end
+        for(Integer i = 0; i < valueof(moveTableSize); i = i+1) begin 
+            if(valid[i] && moveSources[i] == phy) begin 
+                numOccurances = numOccurances + 1;
+            end
+        end
+        return !(numPriorRemoves == numOccurances);
+    endfunction
+
     Vector#(removeLanes, Commit) commitIfc;
     for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
         commitIfc[i] = (interface Commit;
             method Bool contains(PhyRIndx phy);
-                return False;
+                return isPhyContained(i, phy);
             endmethod
 
+            // unguarded, we assume it succeeds
             method Action remove(PhyRIndx phy);
                 removeEn[i].wset(phy);
             endmethod
