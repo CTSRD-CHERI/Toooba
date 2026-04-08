@@ -18,70 +18,51 @@ endinterface
 interface MoveTable;
     // used to record source phy regs so we know to free/not free
     // MoveTable is functionally a multiset with limited capacity
-    // we expose add, remove, and contains methods
-    interface Vector#(SupSize, Commit) commit; // commit port
+    // we expose add, remove, and contains methods, pre-rename uses
+    // first SupSize ports on commit interface, commit uses latter
+    interface Vector#(TAdd#(SupSize, SupSize), Commit) commit; // commit and pre-rename port
     interface Vector#(SupSize, Rename) rename; // rename port
 endinterface
 
 module mkMoveTable(MoveTable) provisos ( 
     NumAlias#(moveTableSize, 7),
-    Alias#(slotCountT, Bit#(TLog#(moveTableSize)))
+    NumAlias#(removeLanes, TAdd#(SupSize, SupSize)),
+    Alias#(slotIndexT, Bit#(TLog#(TAdd#(1, moveTableSize)))),
+    Alias#(slotCountT, Bit#(TLog#(TAdd#(1, moveTableSize))))
 );
 
     // ordering: pre-rename < commit < rename
     // rename need not see the freed slots from commit or pre-rename
 
-    Integer sb_correctSpec_port = valueof(SupSize);
-    Integer sb_wrongSpec_port = 1;
-    Integer valid_wrongSpec_port = 1;
+    Vector#(moveTableSize, Reg#(PhyRIndx)) moveSources <- replicateM(mkRegU);
+    Vector#(moveTableSize, Reg#(Bool)) valid <- replicateM(mkReg(False));
+    Reg#(slotCountT) numFreeSlots <- mkReg(fromInteger(valueof(moveTableSize)));
 
-    Vector#(moveTableSize, Ehr#(SupSize, PhyRIndx)) moveSources <- replicateM(mkEhr(0));
-    Vector#(moveTableSize, Ehr#(SupSize, Bool)) valid <- replicateM(mkEhr(False));
-    Ehr#(TAdd#(1, SupSize), slotCountT) numFreeSlots <- mkEhr(fromInteger(valueof(moveTableSize)));
+    // wires for recording actions
+    Vector#(removeLanes, RWire#(PhyRIndx)) removeEn <- replicateM(mkUnsafeRWire);
+    Vector#(SupSize, RWire#(PhyRIndx)) addEn <- replicateM(mkUnsafeRWire);
 
-    Vector#(SupSize, Commit) commitIfc;
-    for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
+    Vector#(removeLanes, Commit) commitIfc;
+    for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
         commitIfc[i] = (interface Commit;
             method Bool contains(PhyRIndx phy);
-                Bool doesContain = False;
-                for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
-                    doesContain = doesContain || (valid[i][j] && moveSources[i][j] == phy);
-                end
-                return doesContain;
+                return False;
             endmethod
 
-            // we assume it will succeed
             method Action remove(PhyRIndx phy);
-                numFreeSlots[i] <= numFreeSlots[i] + 1;
-                Bool removeSuccess = False;
-                for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
-                    if(!removeSuccess && valid[i][j] && moveSources[i][j] == phy) begin 
-                        valid[i][j] <= False;
-                        removeSuccess = True;
-                    end
-                end
-                doAssert(removeSuccess, "removing from the move table must succeed");
+                removeEn[i].wset(phy);
             endmethod
         endinterface);
     end
 
     Vector#(SupSize, Rename) renameIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
-        Bool addGuard = !(numFreeSlots[i] == 0);
+        Bool addGuard = False;
         renameIfc[i] = (interface Rename;
             method canAdd = addGuard;
 
             method Action add(PhyRIndx phy) if(addGuard);
-                numFreeSlots[i] <= numFreeSlots[i] - 1;
-                Bool addSuccess = False;
-                for(Integer j = 0; j < valueof(moveTableSize); j = j+1) begin 
-                    if(!addSuccess && !valid[i][j]) begin 
-                        valid[i][j] <= True;
-                        moveSources[i][j] <= phy;
-                        addSuccess = True;
-                    end
-                end
-                doAssert(addSuccess, "adding to the move table must succeed");
+                addEn[i].wset(phy);
             endmethod
         endinterface);
     end
