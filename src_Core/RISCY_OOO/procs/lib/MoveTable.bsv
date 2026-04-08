@@ -46,12 +46,12 @@ module mkMoveTable(MoveTable) provisos (
         slotCountT numRemoves = 0;
         slotCountT numAdds = 0;
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
-            if(addEn[i].wget() matches tagged Valid .phy) begin 
+            if(addEn[i].wget() matches tagged Valid .*) begin 
                 numAdds = numAdds + 1;
             end
         end
         for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
-            if(removeEn[i].wget() matches tagged Valid .phy) begin 
+            if(removeEn[i].wget() matches tagged Valid .*) begin 
                 numRemoves = numRemoves + 1;
             end
         end
@@ -108,9 +108,21 @@ module mkMoveTable(MoveTable) provisos (
         endinterface);
     end
 
+    function Bool isSlotAvailable(Integer lane);
+        slotCountT numPriorAdds = 0;
+        for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
+            if(i < lane) begin
+                if(addEn[i].wget() matches tagged Valid .*) begin 
+                    numPriorAdds = numPriorAdds + 1;
+                end
+            end
+        end
+        return !(numPriorAdds == numFreeSlots);
+    endfunction
+
     Vector#(SupSize, Rename) renameIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
-        Bool addGuard = False;
+        Bool addGuard = isSlotAvailable(i);
         renameIfc[i] = (interface Rename;
             method canAdd = addGuard;
 
