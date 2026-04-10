@@ -43,6 +43,8 @@ module mkMoveTable(MoveTable) provisos (
     // wires for recording actions
     Vector#(removeLanes, RWire#(PhyRIndx)) removeEn <- replicateM(mkUnsafeRWire);
     Vector#(SupSize, RWire#(PhyRIndx)) addEn <- replicateM(mkUnsafeRWire);
+    Vector#(removeLanes, PulseWire) takeFreeRegEn <- replicateM(mkUnsafePulseWire);
+    Vector#(SupSize, RWire#(PhyRIndx)) freeRegEn <- replicateM(mkUnsafeRWire);
 
     rule updateNumFreeSlots;
         slotCountT numRemoves = 0;
@@ -126,6 +128,7 @@ module mkMoveTable(MoveTable) provisos (
             endmethod
 
             method ActionValue#(PhyRIndx) takeFreeReg();
+                takeFreeRegEn[i].send();
                 return 0;
             endmethod
         endinterface);
@@ -154,6 +157,7 @@ module mkMoveTable(MoveTable) provisos (
             endmethod
 
             method Action freeReg(PhyRIndx phy);
+                freeRegEn[i].wset(phy);
             endmethod
         endinterface);
     end
