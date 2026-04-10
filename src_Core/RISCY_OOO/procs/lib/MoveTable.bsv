@@ -8,11 +8,13 @@ interface Commit;
     // remove is left unguarded, but we do do not expect to call it 
     // when phy is not in table, and assume that it suceeds
     method Action remove(PhyRIndx phy);
+    method ActionValue#(PhyRIndx) takeFreeReg; // take from auxiliary free list
 endinterface
 
 interface Rename;
     method Bool canAdd; // guard of add
     method Action add(PhyRIndx phy);
+    method Action freeReg(PhyRIndx phy); // add to auxiliary free list
 endinterface
 
 interface MoveTable;
@@ -122,6 +124,10 @@ module mkMoveTable(MoveTable) provisos (
             method Action remove(PhyRIndx phy);
                 removeEn[i].wset(phy);
             endmethod
+
+            method ActionValue#(PhyRIndx) takeFreeReg();
+                return 0;
+            endmethod
         endinterface);
     end
 
@@ -145,6 +151,9 @@ module mkMoveTable(MoveTable) provisos (
 
             method Action add(PhyRIndx phy) if(addGuard);
                 addEn[i].wset(phy);
+            endmethod
+
+            method Action freeReg(PhyRIndx phy);
             endmethod
         endinterface);
     end
