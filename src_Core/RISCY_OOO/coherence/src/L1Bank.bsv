@@ -384,7 +384,8 @@ endfunction
             pcHash: ?,
             alloc_policy: 3'b000,
             permitPoison: False, 
-            pver: 8'h0
+            pver: 8'h0,
+            length: 64'h0
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
         // send to pipeline

@@ -300,6 +300,7 @@ typedef struct {
     Bool permitPoison;
     Bit#(8) pver;
     Bit#(3) alloc_policy;
+    Bit#(64) length;
 } LSQIssueLdInfo deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -313,6 +314,7 @@ typedef struct {
     Bool permitPoison;
     Bit#(8) pver;
     Bit#(3) alloc_policy;
+    Bit#(64) length;
 } LSQRespLdResult deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -338,6 +340,7 @@ typedef struct {
     Bool               permitPoison;
     Bit#(8)            pver;
     Bit#(3)            alloc_policy;
+    Bit#(64) length;
 } LdQDeqEntry deriving (Bits, Eq, FShow);
 
 typedef struct {
@@ -357,6 +360,7 @@ typedef struct {
     Bit#(16)          pcHash;
     Bool              permitPoison;
     Bit#(8)           pver;
+    Bit#(64) length;
 } StQDeqEntry deriving (Bits, Eq, FShow);
 
 interface SplitLSQ;
@@ -390,7 +394,7 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bool permitPoison, Bit#(3) alloc_policy, Bit#(8) pver
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bool permitPoison, Bit#(3) alloc_policy, Bit#(8) pver, Bit#(64) length
     );
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQIssueLdResult) issueLd(
@@ -676,6 +680,8 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(Bool))                    ld_unsigned        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(ByteOrTagEn))             ld_byteOrTagEn     <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_permitPoison    <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Reg#(Bit#(64)))                      ld_length    <- replicateM(mkConfigRegU);
+
     Vector#(LdQSize, Reg#(Bit#(8)))                 ld_pver            <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bit#(3)))                 ld_alloc_policy    <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_allowCap        <- replicateM(mkConfigRegU);
@@ -874,6 +880,8 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_permitPoison <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, Bit#(64)))             st_length <- replicateM(mkEhr(?));
+
     Vector#(StQSize, Ehr#(2, Bit#(8)))              st_pver      <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bit#(3)))              st_alloc_policy_ehr <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
@@ -930,6 +938,11 @@ module mkSplitLSQ(SplitLSQ);
     let st_permitPoison_updAddr  = getVEhrPort(st_permitPoison, 0); // write
     let st_permitPoison_deqSt   = getVEhrPort(st_permitPoison, 1);
     let st_permitPoison_enq     = getVEhrPort(st_permitPoison, 1); // write
+
+
+    let st_length_updAddr = getVEhrPort(st_length, 0); // write
+    let st_length_deqSt   = getVEhrPort(st_length, 1);
+    let st_length_enq     = getVEhrPort(st_length, 1); // write
 
     let st_pver_updAddr = getVEhrPort(st_pver, 0); // write
     let st_pver_deqSt   = getVEhrPort(st_pver, 1);
@@ -1156,6 +1169,7 @@ module mkSplitLSQ(SplitLSQ);
                 shiftedBE: ld_shiftedBE_findIss[tag],
                 pcHash: ld_pcHash[tag],
                 permitPoison: ld_permitPoison[tag],
+                length: ld_length[tag],
                 pver: ld_pver[tag],
                 alloc_policy: ld_alloc_policy[tag]
             };
@@ -1472,6 +1486,7 @@ module mkSplitLSQ(SplitLSQ);
         ld_unsigned[ld_enqP] <= mem_inst.unsignedLd;
         ld_byteOrTagEn[ld_enqP] <= mem_inst.byteOrTagEn;
         ld_permitPoison[ld_enqP] <= False;
+        ld_length[ld_enqP] <= 64'h0;
         ld_pver[ld_enqP] <= 8'h0;
         ld_alloc_policy[ld_enqP] <= mem_inst.alloc_policy;
         ld_acq[ld_enqP] <= mem_inst.aq;
@@ -1558,7 +1573,7 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bool permitPoison, Bit#(3) alloc_policy, Bit#(8) pver
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bool permitPoison, Bit#(3) alloc_policy, Bit#(8) pver, Bit#(64) length
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1604,6 +1619,7 @@ module mkSplitLSQ(SplitLSQ);
             ld_isMMIO_updAddr[tag] <= mmio;
             ld_shiftedBE_updAddr[tag] <= shift_be;
             ld_permitPoison[tag]  <= permitPoison;
+            ld_length[tag] <= length;
             ld_pver[tag] <= pver;
             ld_alloc_policy[tag] <= alloc_policy;
             delayIssue = isValid(ld_olderSt_updAddr[tag]) && ld_waitForOlderSt[tag];
@@ -2033,7 +2049,8 @@ module mkSplitLSQ(SplitLSQ);
             data: ?,
             permitPoison: False, 
             pver: 8'h0,
-            alloc_policy: 3'h0
+            alloc_policy: 3'h0,
+            length: 64'h0
         };
         if(ld_waitWPResp_resp[t]) begin
             ld_waitWPResp_resp[t] <= False;
@@ -2059,10 +2076,12 @@ module mkSplitLSQ(SplitLSQ);
             let bEn = ld_byteOrTagEn[t];
             let allowCap = ld_allowCap[t];
             let permitPoison = ld_permitPoison[t];
+            let length = ld_length[t];
             let dst = ld_dst[t];
             let is32BitLd = bEn matches tagged DataMemAccess .bEnData &&& (bEnData[3] && !bEnData[7]) ? True : False;
             res.allowCap = allowCap;
             res.permitPoison = permitPoison;
+            res.length = length;
             res.dst = ld_dst[t];
             res.pver = ld_pver[t];
             res.alloc_policy = ld_alloc_policy[t];
@@ -2101,7 +2120,8 @@ module mkSplitLSQ(SplitLSQ);
             fault: ld_fault_deqLd[deqP],
             allowCap: ld_allowCap[deqP],
             killed: ld_killed_deqLd[deqP],
-            permitPoison: ld_permitPoison[deqP]
+            permitPoison: ld_permitPoison[deqP],
+            length: ld_length[deqP]
         };
     endmethod
 
@@ -2163,6 +2183,7 @@ module mkSplitLSQ(SplitLSQ);
             stData: st_stData_deqSt[deqP],
             allowCapAmoLd: st_allowCapAmoLd_deqSt[deqP],
             permitPoison : st_permitPoison_deqSt[deqP],
+            length: st_length_deqSt[deqP],
             fault: st_fault_deqSt[deqP],
             pcHash: st_pcHash[deqP]
         };

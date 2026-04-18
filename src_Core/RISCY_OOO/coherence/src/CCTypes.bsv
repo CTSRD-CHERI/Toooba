@@ -212,6 +212,7 @@ typedef struct {
     Bit#(16) pcHash; // hash of instruction pc sending the request
     Bool permitPoison;
     Bit#(8) pver;
+    Bit#(64) length;
 } ProcRq#(type idT) deriving(Bits, Eq, FShow);
 
 interface L1ProcReq#(type idT);
