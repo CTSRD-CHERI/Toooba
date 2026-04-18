@@ -1555,6 +1555,7 @@ module mkSplitLSQ(SplitLSQ);
         st_pcHash[st_enqP] <= pcHash;
         st_allowCapAmoLd_enq[st_enqP] <= False;
         st_permitPoison_enq[st_enqP] <= False;
+        st_length_enq[st_enqP] <= 64'h0;
         st_pver_enq[st_enqP]     <= 8'h0;
         st_computed_enq[st_enqP] <= False;
         st_verified_enq[st_enqP] <= False;
@@ -1653,6 +1654,7 @@ module mkSplitLSQ(SplitLSQ);
             st_isMMIO_updAddr[tag] <= mmio;
             st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
             st_permitPoison_updAddr[tag] <= permitPoison;
+            st_length_updAddr[tag] <= length;
             st_pver_updAddr[tag] <= pver;
 	        st_alloc_policy_updAddr[tag] <= alloc_policy;
             // A store always try to kill younger loads

@@ -644,6 +644,7 @@ endfunction
                     let taggedData = getTaggedDataAt(curLine, dataSel);
                     CapPipe loaded_dataUnpacked = fromMem(unpack(pack(taggedData)));
                     Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
+                    let poison_length = getLength(loaded_dataUnpacked);
                     //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
                     if(req.alloc_policy == 3'b001) begin 
                             //let newTaggedData =
@@ -654,7 +655,7 @@ endfunction
                                 fshow(curLine), fshow(newLine)
                             );
                     end else begin 
-                        if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked)  == 1'b1 && !req.permitPoison) begin 
+                        if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked)  == 1'b1 && !req.permitPoison && req.length <= poison_length) begin 
                         //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
                             if (req.pver >  poison_pver ) begin  
                                 let newTaggedData =
@@ -684,6 +685,8 @@ endfunction
                 MemTaggedData curData = getTaggedDataAt(curLine, dataSel);
                 //if(curData.tag == True && curData.data[1][46] == 1'b1 && !permitPoison) begin 
                 CapPipe loaded_dataUnpacked = fromMem(unpack(pack(curData)));
+
+                let poison_length = getLength(loaded_dataUnpacked);
                 Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
                 //if(isValidCap(loaded_dataUnpacked) && curData.data[1][46] == 1'b1 && !permitPoison ) begin
                 if(req.alloc_policy == 3'b001) begin 
@@ -695,8 +698,8 @@ endfunction
                         fshow(curLine), fshow(newLine)
                     );
                 end else begin 
-                    if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked) == 1'b1 && !req.permitPoison) begin
-                        if (req.pver > poison_pver || req.alloc_policy == 3'b001 ) begin  
+                    if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked) == 1'b1 && !req.permitPoison && req.length <= poison_length) begin
+                        if (req.pver > poison_pver || req.alloc_policy == 3'b001) begin  
                         //if(pver == pver) begin
                             let unpoisoned_curLine = setTaggedDataAt( curLine, dataSel, unpack(0));
                             newLine = getUpdatedLine(unpoisoned_curLine, be, wrLine);
