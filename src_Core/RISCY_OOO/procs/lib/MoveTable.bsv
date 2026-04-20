@@ -69,7 +69,7 @@ module mkMoveTable(MoveTable) provisos (
     endrule
 
     (* fire_when_enabled, no_implicit_conditions *)
-    rule applyAdd;
+    rule updateSources;
         Vector#(moveTableSize, Bool) slotUsed = replicate(False);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
             if(addEn[i].wget() matches tagged Valid .phy) begin 
@@ -78,7 +78,7 @@ module mkMoveTable(MoveTable) provisos (
                     if(!addComplete && !slotUsed[j] && !valid[j]) begin 
                         addComplete = True;
                         slotUsed[j] = True;
-                        valid[j] <= False;
+                        valid[j] <= True;
                         moveSources[j] <= phy;
                     end
                 end
@@ -86,10 +86,7 @@ module mkMoveTable(MoveTable) provisos (
                 doAssert(addComplete, "free slot must exist in order to add to move table");
             end
         end
-    endrule
 
-    (* fire_when_enabled, no_implicit_conditions *)
-    rule applyRemove;
         Vector#(moveTableSize, Bool) removed = replicate(False);
         for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
             if(removeEn[i].wget() matches tagged Valid .phy) begin 
