@@ -29,7 +29,7 @@ endinterface
 module mkMoveTable(MoveTable) provisos ( 
     NumAlias#(moveTableSize, 7),
     NumAlias#(removeLanes, TAdd#(SupSize, SupSize)),
-    Alias#(slotIndexT, Bit#(TLog#(TAdd#(1, moveTableSize)))),
+    Alias#(slotIndexT, Bit#(TLog#(moveTableSize))),
     Alias#(slotCountT, Bit#(TLog#(TAdd#(1, moveTableSize))))
 );
 
@@ -40,12 +40,18 @@ module mkMoveTable(MoveTable) provisos (
     Vector#(moveTableSize, Reg#(Bool)) valid <- replicateM(mkReg(False));
     Reg#(slotCountT) numFreeSlots <- mkReg(fromInteger(valueof(moveTableSize)));
 
+    // aux free list
+    Vector#(moveTableSize, Reg#(PhyRIndx)) auxFreeList <- replicateM(mkRegU);
+    Reg#(slotIndexT) auxEnq <- mkReg(0);
+    Reg#(slotIndexT) auxDeq <- mkReg(0);
+
     // wires for recording actions
     Vector#(removeLanes, RWire#(PhyRIndx)) removeEn <- replicateM(mkUnsafeRWire);
     Vector#(SupSize, RWire#(PhyRIndx)) addEn <- replicateM(mkUnsafeRWire);
     Vector#(removeLanes, PulseWire) takeFreeRegEn <- replicateM(mkUnsafePulseWire);
     Vector#(SupSize, RWire#(PhyRIndx)) freeRegEn <- replicateM(mkUnsafeRWire);
 
+    (* fire_when_enabled, no_implicit_conditions *)
     rule updateNumFreeSlots;
         slotCountT numRemoves = 0;
         slotCountT numAdds = 0;
@@ -62,6 +68,7 @@ module mkMoveTable(MoveTable) provisos (
         numFreeSlots <= numFreeSlots + numRemoves - numAdds;
     endrule
 
+    (* fire_when_enabled, no_implicit_conditions *)
     rule applyAdd;
         Vector#(moveTableSize, Bool) slotUsed = replicate(False);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
@@ -81,6 +88,7 @@ module mkMoveTable(MoveTable) provisos (
         end
     endrule
 
+    (* fire_when_enabled, no_implicit_conditions *)
     rule applyRemove;
         Vector#(moveTableSize, Bool) removed = replicate(False);
         for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
@@ -99,11 +107,48 @@ module mkMoveTable(MoveTable) provisos (
         end
     endrule
 
+    function incrementIndex(slotIndexT index);
+        slotIndexT newIndex;
+        if(index == fromInteger(valueof(moveTableSize) - 1)) begin 
+            newIndex = 0;
+        end else begin 
+            newIndex = index + 1;
+        end
+        return newIndex;
+    endfunction
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule updateAuxFreeList;
+        slotIndexT newEnq = auxEnq;
+        slotIndexT newDeq = auxDeq;
+
+        // add new registers to aux free list and update enqueue pointer
+        for(Integer i = 0; i < valueof(SupSize); i = i + 1) begin 
+            if(freeRegEn[i].wget() matches tagged Valid .phy) begin 
+                auxFreeList[newEnq] <= phy;
+                newEnq = incrementIndex(newEnq);
+            end
+        end
+        auxEnq <= newEnq;
+
+        // move dequeue pointer (removes registers from free list, no need to update list)
+        Bool emptied = (auxEnq == auxDeq); // for sanity check
+        for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
+            if(takeFreeRegEn[i]) begin 
+                newDeq = incrementIndex(newDeq);
+                // sanity check
+                doAssert(!emptied, "must not remove registers from empty aux free list");
+                emptied = (auxEnq == newDeq);
+            end
+        end
+        auxDeq <= newDeq;
+    endrule 
+
     function Bool isPhyContained(Integer lane, PhyRIndx phy);
         slotCountT numPriorRemoves = 0;
         slotCountT numOccurances = 0;
         for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
-            if(removeEn[i].wget() == Valid(phy)) begin 
+            if(i < lane && removeEn[i].wget() == Valid(phy)) begin 
                 numPriorRemoves = numPriorRemoves + 1;
             end
         end
@@ -113,6 +158,16 @@ module mkMoveTable(MoveTable) provisos (
             end
         end
         return !(numPriorRemoves == numOccurances);
+    endfunction
+
+    function PhyRIndx getFreeReg(Integer lane);
+        Integer numPriorFrees = 0;
+        for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
+            if(i < lane && takeFreeRegEn[i]) begin 
+                numPriorFrees = numPriorFrees + 1;
+            end
+        end
+        return auxFreeList[auxDeq + fromInteger(numPriorFrees)];
     endfunction
 
     Vector#(removeLanes, Commit) commitIfc;
@@ -129,7 +184,7 @@ module mkMoveTable(MoveTable) provisos (
 
             method ActionValue#(PhyRIndx) takeFreeReg();
                 takeFreeRegEn[i].send();
-                return 0;
+                return getFreeReg(i);
             endmethod
         endinterface);
     end
