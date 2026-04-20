@@ -87,6 +87,7 @@ typedef struct {
     Maybe#(ArchRIndx) arch;
     PhyRIndx phy;
     SpecBits specBits;
+    Bool isMove;
 } RenameClaim deriving(Bits, Eq, FShow);
 
 // actions in case of wrongSpec
@@ -151,6 +152,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Vector#(size, Ehr#(2, SpecBits)) spec_bits <- replicateM(mkEhr(0));
     Reg#(indexT) enqP <- mkReg(0); // point to claim free phy reg
     Reg#(indexT) deqP <- mkReg(0); // point to commit renaming and make phy reg free
+
+    // move table
+    MoveTable moveTable <- mkMoveTable();
 
     // wires/EHRs to record actions
     Vector#(SupSize, RWire#(RenameClaim)) claimEn <- replicateM(mkUnsafeRWire);
@@ -250,7 +254,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     let rtIdx = getRTIndex(arch);
                     // free phy reg being overwritten in the renaming_table (arch reg is don't care)
                     PhyRIndx freed_phy_reg = renaming_table[rtIdx][rt_commit_port(i)];
-                    new_renamings_phy[curDeqP] <= freed_phy_reg;
+                    if(valid[curDeqP][valid_commit_port]) begin // needed to prove single write per cycle - relies on valid_commit_port = valid_get_port = 0
+                        new_renamings_phy[curDeqP] <= freed_phy_reg;
+                    end
                     valid[curDeqP][valid_commit_port] <= False;
                     // update renaming_table
                     renaming_table[rtIdx][rt_commit_port(i)] <= commit_phy_reg;
@@ -310,11 +316,18 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 if(claimEn[i].wget matches tagged Valid .claim) begin
                     indexT curEnqP = claimIndex[i];
                     new_renamings_arch[curEnqP] <= claim.arch; // keep phy reg unchanged
+                    // handle remaining move actions - move evicted phy reg to aux free list and record source
+                    if(claim.isMove) begin 
+                        moveTable.rename[i].freeReg(new_renamings_phy[curEnqP]);
+                        if(!valid[curEnqP][valid_get_port]) begin // needed to prove single write per cycle
+                            new_renamings_phy[curEnqP] <= claim.phy;
+                        end
+                    end
                     valid[curEnqP][valid_claim_port] <= True;
                     spec_bits[curEnqP][sb_claim_port] <= claim.specBits;
                     // sanity check
                     doAssert(!valid[curEnqP][valid_get_port], "claiming entry must be invalid");
-                    doAssert(claim.phy == new_renamings_phy[curEnqP], "phy reg should match");
+                    doAssert(claim.isMove || claim.phy == new_renamings_phy[curEnqP], "phy reg should match if not move");
                 end
             end
             // move enqP: find the first non-claim port
@@ -457,7 +470,8 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 claimEn[i].wset(RenameClaim {
                     arch: r.dst,
                     phy: claim_phy_reg,
-                    specBits: sb
+                    specBits: sb,
+                    isMove: False
                 });
                 // conflict with wrong spec
                 wrongSpec_rename_conflict[i].wset(?);
@@ -471,8 +485,7 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
 
     Vector#(SupSize, RTMove) moveIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
-        // dummy move interface, guard set to false
-        Bool guard = False;
+        Bool guard = !valid[claimIndex[i]][valid_get_port] && moveTable.rename[i].canAdd();
         PhyRIndx claim_phy_reg = get_dst_renaming(i);
         moveIfc[i] = (interface RTMove;
             method RenameResult getMoveResult(Move m, ArchRegs r) if(guard);
@@ -505,12 +518,16 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
             endmethod
 
             method Action claimMove(Move m, SpecBits sb) if(guard);
-                // record the claim
+                PhyRIndx src_phy = get_src_renaming(i, m.src);
+                // record the claim in in-flight renamings
                 claimEn[i].wset(RenameClaim {
                     arch: tagged Valid m.dst,
-                    phy: get_src_renaming(i, m.src),
-                    specBits: sb
+                    phy: src_phy,
+                    specBits: sb,
+                    isMove: True
                 });
+                // record the claim in moveTable
+                moveTable.rename[i].add(src_phy);
                 // conflict with wrong spec
                 wrongSpec_rename_conflict[i].wset(?);
                 // ordering with commit
