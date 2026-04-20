@@ -39,6 +39,7 @@ module mkMoveTable(MoveTable) provisos (
     Vector#(moveTableSize, Reg#(PhyRIndx)) moveSources <- replicateM(mkRegU);
     Vector#(moveTableSize, Reg#(Bool)) valid <- replicateM(mkReg(False));
     Reg#(slotCountT) numFreeSlots <- mkReg(fromInteger(valueof(moveTableSize)));
+    Reg#(slotCountT) numFreeAuxSlots <- mkReg(fromInteger(valueof(moveTableSize))); // sanity check, should match
 
     // aux free list
     Vector#(moveTableSize, Reg#(PhyRIndx)) auxFreeList <- replicateM(mkRegU);
@@ -116,12 +117,18 @@ module mkMoveTable(MoveTable) provisos (
 
     (* fire_when_enabled, no_implicit_conditions *)
     rule updateAuxFreeList;
+        // sanity check existing slot counts
+        doAssert(numFreeAuxSlots == numFreeSlots, "number of slots in the aux free list and move source table must match");
+
         slotIndexT newEnq = auxEnq;
         slotIndexT newDeq = auxDeq;
+
+        slotCountT newNumFreeAuxSlots = numFreeAuxSlots;
 
         // add new registers to aux free list and update enqueue pointer
         for(Integer i = 0; i < valueof(SupSize); i = i + 1) begin 
             if(freeRegEn[i].wget() matches tagged Valid .phy) begin 
+                newNumFreeAuxSlots = newNumFreeAuxSlots + 1;
                 auxFreeList[newEnq] <= phy;
                 newEnq = incrementIndex(newEnq);
             end
@@ -129,16 +136,19 @@ module mkMoveTable(MoveTable) provisos (
         auxEnq <= newEnq;
 
         // move dequeue pointer (removes registers from free list, no need to update list)
-        Bool emptied = (auxEnq == auxDeq); // for sanity check
+        Bool emptied = (newNumFreeAuxSlots == 0);
         for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
             if(takeFreeRegEn[i]) begin 
+                newNumFreeAuxSlots = newNumFreeAuxSlots - 1;
                 newDeq = incrementIndex(newDeq);
                 // sanity check
                 doAssert(!emptied, "must not remove registers from empty aux free list");
-                emptied = (auxEnq == newDeq);
+                emptied = (newNumFreeAuxSlots == 0);
             end
         end
         auxDeq <= newDeq;
+
+        numFreeAuxSlots <= newNumFreeAuxSlots;
     endrule 
 
     function Bool isPhyContained(Integer lane, PhyRIndx phy);
