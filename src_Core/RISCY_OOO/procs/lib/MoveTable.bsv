@@ -187,15 +187,8 @@ module mkMoveTable(MoveTable) provisos (
     end
 
     function Bool isSlotAvailable(Integer lane);
-        slotCountT numPriorAdds = 0;
-        for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
-            if(i < lane) begin
-                if(addEn[i].wget() matches tagged Valid .*) begin 
-                    numPriorAdds = numPriorAdds + 1;
-                end
-            end
-        end
-        return !(numPriorAdds == numFreeSlots);
+        // conservative, full check introduces a will_fire -> can_fire depency in rename stage
+        return fromInteger(lane) < numFreeSlots;
     endfunction
 
     Vector#(SupSize, Rename) renameIfc;
