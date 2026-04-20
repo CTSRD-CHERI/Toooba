@@ -200,11 +200,10 @@ module mkMoveTable(MoveTable) provisos (
 
     Vector#(SupSize, Rename) renameIfc;
     for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
-        Bool addGuard = isSlotAvailable(i);
         renameIfc[i] = (interface Rename;
-            method canAdd = addGuard;
+            method canAdd = isSlotAvailable(i);
 
-            method Action add(PhyRIndx phy) if(addGuard);
+            method Action add(PhyRIndx phy);
                 addEn[i].wset(phy);
             endmethod
 
