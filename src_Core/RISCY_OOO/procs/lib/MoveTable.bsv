@@ -22,15 +22,12 @@ interface MoveTable;
 endinterface
 
 module mkMoveTable(MoveTable) provisos ( 
-    NumAlias#(moveTableSize, 7), // must be at least as large as removeLanes, i.e., 2 * SupSize
+    NumAlias#(moveTableSize, 7),
     NumAlias#(removeLanes, TAdd#(SupSize, SupSize)),
     Alias#(slotIndexT, Bit#(TLog#(moveTableSize))),
     Alias#(slotCountT, Bit#(TLog#(TAdd#(1, moveTableSize)))),
     Alias#(removeLaneCnt, Bit#(TLog#(TAdd#(1, removeLanes))))
 );
-
-    // enforce minimum move table size
-    staticAssert(valueof(moveTableSize) >= valueof(removeLanes), "move table size must be at least 2 * SupSize");
 
     // ordering: commit < cleanup < rename
     // rename need not see the freed slots from commit or cleanup
@@ -137,10 +134,13 @@ module mkMoveTable(MoveTable) provisos (
 
         // add new registers to aux free list and update enqueue pointer
         for(Integer i = 0; i < valueof(SupSize); i = i + 1) begin 
-            if(freeRegEn[i].wget() matches tagged Valid .phy) begin 
-                newNumFreeAuxSlots = newNumFreeAuxSlots - 1;
-                auxFreeList[newEnq] <= phy;
-                newEnq = incrementIndex(newEnq);
+            if(i < valueof(moveTableSize)) begin // check needed to support moveTableSize < SupSize
+                // if lane adds register then store it and increment enqueue pointer
+                if(freeRegEn[i].wget() matches tagged Valid .phy) begin 
+                    newNumFreeAuxSlots = newNumFreeAuxSlots - 1;
+                    auxFreeList[newEnq] <= phy;
+                    newEnq = incrementIndex(newEnq);
+                end
             end
         end
         auxEnq <= newEnq;
@@ -179,13 +179,24 @@ module mkMoveTable(MoveTable) provisos (
         return !(numPriorRemoves == numOccurances);
     endfunction
 
-    // only valid if moveTableSize >= 2 * SupSize, enforced by staticAssert
     function slotIndexT indexAdd(slotIndexT idx, removeLaneCnt incr);
-        Bit#(TLog#(TAdd#(moveTableSize, removeLanes))) newIdx = zeroExtend(idx) + zeroExtend(incr);
-        if(newIdx >= fromInteger(valueof(moveTableSize))) begin
-            newIdx = newIdx - fromInteger(valueof(moveTableSize));
+        slotIndexT out;
+        if(valueof(moveTableSize) < valueof(removeLanes)) begin 
+            out = idx;
+            for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin
+                if(!(incr == 0)) begin 
+                    out = incrementIndex(out);
+                    incr = incr - 1;
+                end
+            end
+        end else begin 
+            Bit#(TLog#(TAdd#(moveTableSize, removeLanes))) newIdx = zeroExtend(idx) + zeroExtend(incr);
+            if(newIdx >= fromInteger(valueof(moveTableSize))) begin
+                newIdx = newIdx - fromInteger(valueof(moveTableSize));
+            end 
+            out = truncate(newIdx);
         end
-        return truncate(newIdx);
+        return out;
     endfunction
 
     // read from the head of the aux free list
