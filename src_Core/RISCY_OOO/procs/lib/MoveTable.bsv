@@ -181,7 +181,7 @@ module mkMoveTable(MoveTable) provisos (
         return !(numPriorRemoves == numOccurances);
     endfunction
 
-    // only valid if moveTableSize >= 2 * SupSize
+    // only valid if moveTableSize >= 2 * SupSize, enforced by staticAssert
     function slotIndexT indexAdd(slotIndexT idx, removeLaneCnt incr);
         Bit#(TLog#(TAdd#(moveTableSize, removeLanes))) newIdx = zeroExtend(idx) + zeroExtend(incr);
         if(newIdx >= fromInteger(valueof(moveTableSize))) begin
