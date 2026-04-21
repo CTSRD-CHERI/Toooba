@@ -5,25 +5,19 @@ import Types::*;
 import Assert::*;
 
 interface Commit;
-    method Bool contains(PhyRIndx phy);
-    // remove is left unguarded, but we do do not expect to call it 
-    // when phy is not in table, and assume that it suceeds
-    method Action remove(PhyRIndx phy);
+    method Bool contains(PhyRIndx phy); // check if phy reg in use as a move (i.e., in source table)
+    method Action remove(PhyRIndx phy); // remove from source table
     method ActionValue#(PhyRIndx) takeFreeReg; // take from auxiliary free list
 endinterface
 
 interface Rename;
-    method Bool canAdd; // guard of add
-    method Action add(PhyRIndx phy);
+    method Bool canAdd; // check if capacity in source table/auxiliary free list to add new move
+    method Action add(PhyRIndx phy); // add to source table
     method Action freeReg(PhyRIndx phy); // add to auxiliary free list
 endinterface
 
 interface MoveTable;
-    // used to record source phy regs so we know to free/not free
-    // MoveTable is functionally a multiset with limited capacity
-    // we expose add, remove, and contains methods, pre-rename uses
-    // first SupSize ports on commit interface, commit uses latter
-    interface Vector#(TAdd#(SupSize, SupSize), Commit) commit; // commit and pre-rename port
+    interface Vector#(TAdd#(SupSize, SupSize), Commit) commit; // commit and cleanup port
     interface Vector#(SupSize, Rename) rename; // rename port
 endinterface
 
@@ -39,7 +33,11 @@ module mkMoveTable(MoveTable) provisos (
     staticAssert(valueof(moveTableSize) >= valueof(removeLanes), "move table size must be at least 2 * SupSize");
 
     // ordering: commit < cleanup < rename
-    // rename need not see the freed slots from commit or pre-rename
+    // rename need not see the freed slots from commit or cleanup
+    // wrongSpec abandons moves in the combined free list so we don't have to remove them all at once
+    // cleanup used to remove these from combined free list and from the move table before ingestion
+    // we do this to prevent a new independent instruction being assigned an in-use register
+    // commit and cleanup share commit interface on different sets of ports
 
     // move source table
     Vector#(moveTableSize, Reg#(PhyRIndx)) moveSources <- replicateM(mkRegU);
