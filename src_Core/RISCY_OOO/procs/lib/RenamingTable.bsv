@@ -127,11 +127,16 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     Integer valid_commit_port = 0;
     Integer valid_wrongSpec_port = 1;
     Integer valid_claim_port = 1;
+    Integer valid_cleanup_port = 0;
 
     // EHR ports for spec_bits
     Integer sb_wrongSpec_port = 0;
     Integer sb_claim_port = 0;
     Integer sb_correctSpec_port = 1;
+
+    // Ports for move table commit/cleanup interface
+    function Integer mt_commit_port(Integer i) = i;
+    function Integer mt_cleanup_port(Integer i) = i + valueof(SupSize);
 
     // non-speculative renaming table at commit port
     // initially arch reg i --> phy reg i
@@ -183,9 +188,9 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     // get the index to query renaming_table
     function Bit#(TLog#(NumArchReg)) getRTIndex(ArchRIndx arch) = pack(arch);
 
-    // vector of index to claim free phy regs for each rename port
-    Vector#(SupSize, indexT) claimIndex;
-    for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+    // vector of index to claim free phy regs for each rename and cleanup port
+    Vector#(TMul#(2, SupSize), indexT) claimIndex;
+    for(Integer i = 0; i < (2 * valueof(SupSize)); i = i+1) begin
         claimIndex[i] = incrIndex(enqP, fromInteger(i));
     end
 
@@ -243,6 +248,8 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
     (* fire_when_enabled, no_implicit_conditions *)
     rule canon;
         Vector#(SupSize, SupWaySel) supIdxVec = genWith(fromInteger);
+        // needed to prove single writer
+        Vector#(size, Bool) commitFreed = replicate(False);
 
         // apply commit actions
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
@@ -254,8 +261,14 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                     let rtIdx = getRTIndex(arch);
                     // free phy reg being overwritten in the renaming_table (arch reg is don't care)
                     PhyRIndx freed_phy_reg = renaming_table[rtIdx][rt_commit_port(i)];
+                    // if phy reg is a move source, i.e., used elsewhere, remove its entry from move table and free from aux free list instead
+                    if(moveTable.commit[mt_commit_port(i)].contains(freed_phy_reg)) begin 
+                        moveTable.commit[mt_commit_port(i)].remove(freed_phy_reg);
+                        freed_phy_reg <- moveTable.commit[mt_commit_port(i)].takeFreeReg();
+                    end
                     if(valid[curDeqP][valid_commit_port]) begin // needed to prove single write per cycle - relies on valid_commit_port = valid_get_port = 0
                         new_renamings_phy[curDeqP] <= freed_phy_reg;
+                        commitFreed[curDeqP] = True;
                     end
                     valid[curDeqP][valid_commit_port] <= False;
                     // update renaming_table
@@ -309,16 +322,34 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 nextEnqP = idx;
             end
             enqP <= nextEnqP;
+            // cleanup first SupSize slots of potentially abandoned moves prior to use next cycle
+            indexT curP = nextEnqP;
+            for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+                PhyRIndx phy = new_renamings_phy[curP];
+                // only need to clean up if freed by this wrongspec
+                if(killValid[curP] && moveTable.commit[mt_cleanup_port(i)].contains(phy)) begin 
+                    moveTable.commit[mt_cleanup_port(i)].remove(phy);
+                    let freeReg <- moveTable.commit[mt_cleanup_port(i)].takeFreeReg();
+                    if(!commitFreed[curP]) begin // needed to prove single writer
+                        new_renamings_phy[curP] <= freeReg;
+                    end 
+                    doAssert(!commitFreed[curP], "an entry must not be freed by both commit and wrongSpec");
+                end
+                curP = incrIndex(curP, 1);
+            end
         end
         else begin
             // claim phy reg
             for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
                 if(claimEn[i].wget matches tagged Valid .claim) begin
                     indexT curEnqP = claimIndex[i];
+                    PhyRIndx claimIndexPhy = new_renamings_phy[curEnqP];
+                    // sanity check
+                    doAssert(!moveTable.commit[0].contains(claimIndexPhy), "move sources must be cleared from combined free list before possible use");
                     new_renamings_arch[curEnqP] <= claim.arch; // keep phy reg unchanged
                     // handle remaining move actions - move evicted phy reg to aux free list and record source
                     if(claim.isMove) begin 
-                        moveTable.rename[i].freeReg(new_renamings_phy[curEnqP]);
+                        moveTable.rename[i].freeReg(claimIndexPhy);
                         if(!valid[curEnqP][valid_get_port]) begin // needed to prove single write per cycle
                             new_renamings_phy[curEnqP] <= claim.phy;
                         end
@@ -344,6 +375,17 @@ module mkRegRenamingTable(RegRenamingTable) provisos (
                 nextEnqP = incrIndex(enqP, fromInteger(valueof(SupSize)));
             end
             enqP <= nextEnqP;
+            // cleanup potential abandoned moves prior to use next cycle
+            for(Integer i = 0; i < valueof(SupSize); i = i+1) begin
+                indexT curP = claimIndex[valueOf(SupSize) + i];
+                PhyRIndx phy = new_renamings_phy[curP];
+                // must only clean up if freed, do not need to see effects of commit as commit does not abandon moves
+                if(!valid[curP][valid_cleanup_port] && moveTable.commit[mt_cleanup_port(i)].contains(phy)) begin 
+                    moveTable.commit[mt_cleanup_port(i)].remove(phy);
+                    let freeReg <- moveTable.commit[mt_cleanup_port(i)].takeFreeReg();
+                    new_renamings_phy[curP] <= freeReg;
+                end
+            end
         end
     endrule
 
