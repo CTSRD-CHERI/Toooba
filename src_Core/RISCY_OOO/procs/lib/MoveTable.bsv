@@ -22,7 +22,7 @@ interface MoveTable;
 endinterface
 
 module mkMoveTable(MoveTable) provisos ( 
-    NumAlias#(moveTableSize, 7),
+    NumAlias#(moveTableSize, 1),
     NumAlias#(removeLanes, TAdd#(SupSize, SupSize)),
     Alias#(slotIndexT, Bit#(TLog#(moveTableSize))),
     Alias#(slotCountT, Bit#(TLog#(TAdd#(1, moveTableSize)))),
