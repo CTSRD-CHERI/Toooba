@@ -2,6 +2,7 @@ import Vector::*;
 import ProcTypes::*;
 import Ehr::*;
 import Types::*;
+import Assert::*;
 
 interface Commit;
     method Bool contains(PhyRIndx phy);
@@ -27,21 +28,28 @@ interface MoveTable;
 endinterface
 
 module mkMoveTable(MoveTable) provisos ( 
-    NumAlias#(moveTableSize, 7),
+    NumAlias#(moveTableSize, 7), // must be at least as large as removeLanes, i.e., 2 * SupSize
     NumAlias#(removeLanes, TAdd#(SupSize, SupSize)),
     Alias#(slotIndexT, Bit#(TLog#(moveTableSize))),
-    Alias#(slotCountT, Bit#(TLog#(TAdd#(1, moveTableSize))))
+    Alias#(slotCountT, Bit#(TLog#(TAdd#(1, moveTableSize)))),
+    Alias#(removeLaneCnt, Bit#(TLog#(TAdd#(1, removeLanes))))
 );
 
-    // ordering: pre-rename < commit < rename
+    // enforce minimum move table size
+    staticAssert(valueof(moveTableSize) >= valueof(removeLanes), "move table size must be at least 2 * SupSize");
+
+    // ordering: commit < cleanup < rename
     // rename need not see the freed slots from commit or pre-rename
 
+    // move source table
     Vector#(moveTableSize, Reg#(PhyRIndx)) moveSources <- replicateM(mkRegU);
     Vector#(moveTableSize, Reg#(Bool)) valid <- replicateM(mkReg(False));
+
+    // free slot count
     Reg#(slotCountT) numFreeSlots <- mkReg(fromInteger(valueof(moveTableSize)));
     Reg#(slotCountT) numFreeAuxSlots <- mkReg(fromInteger(valueof(moveTableSize))); // sanity check, should match
 
-    // aux free list
+    // auxiliary free list
     Vector#(moveTableSize, Reg#(PhyRIndx)) auxFreeList <- replicateM(mkRegU);
     Reg#(slotIndexT) auxEnq <- mkReg(0);
     Reg#(slotIndexT) auxDeq <- mkReg(0);
@@ -69,8 +77,10 @@ module mkMoveTable(MoveTable) provisos (
         numFreeSlots <= numFreeSlots + numRemoves - numAdds;
     endrule
 
+    // save new move sources to source table and free removed ones
     (* fire_when_enabled, no_implicit_conditions *)
     rule updateSources;
+        // add
         Vector#(moveTableSize, Bool) slotUsed = replicate(False);
         for(Integer i = 0; i < valueof(SupSize); i = i+1) begin 
             if(addEn[i].wget() matches tagged Valid .phy) begin 
@@ -88,6 +98,7 @@ module mkMoveTable(MoveTable) provisos (
             end
         end
 
+        // remove
         Vector#(moveTableSize, Bool) removed = replicate(False);
         for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
             if(removeEn[i].wget() matches tagged Valid .phy) begin 
@@ -115,6 +126,7 @@ module mkMoveTable(MoveTable) provisos (
         return newIndex;
     endfunction
 
+    // add and remove claims this cycle from aux free list
     (* fire_when_enabled, no_implicit_conditions *)
     rule updateAuxFreeList;
         // sanity check existing slot counts
@@ -128,22 +140,22 @@ module mkMoveTable(MoveTable) provisos (
         // add new registers to aux free list and update enqueue pointer
         for(Integer i = 0; i < valueof(SupSize); i = i + 1) begin 
             if(freeRegEn[i].wget() matches tagged Valid .phy) begin 
-                newNumFreeAuxSlots = newNumFreeAuxSlots + 1;
+                newNumFreeAuxSlots = newNumFreeAuxSlots - 1;
                 auxFreeList[newEnq] <= phy;
                 newEnq = incrementIndex(newEnq);
             end
         end
         auxEnq <= newEnq;
 
-        // move dequeue pointer (removes registers from free list, no need to update list)
-        Bool emptied = (newNumFreeAuxSlots == 0);
+        // move dequeue pointer (removes registers from the head of the free list, no need to update list)
+        Bool emptied = (newNumFreeAuxSlots == fromInteger(valueof(moveTableSize)));
         for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
             if(takeFreeRegEn[i]) begin 
-                newNumFreeAuxSlots = newNumFreeAuxSlots - 1;
+                newNumFreeAuxSlots = newNumFreeAuxSlots + 1;
                 newDeq = incrementIndex(newDeq);
                 // sanity check
                 doAssert(!emptied, "must not remove registers from empty aux free list");
-                emptied = (newNumFreeAuxSlots == 0);
+                emptied = (newNumFreeAuxSlots == fromInteger(valueof(moveTableSize)));
             end
         end
         auxDeq <= newDeq;
@@ -151,6 +163,7 @@ module mkMoveTable(MoveTable) provisos (
         numFreeAuxSlots <= newNumFreeAuxSlots;
     endrule 
 
+    // check if phy reg will still be contained in source table after prior removals
     function Bool isPhyContained(Integer lane, PhyRIndx phy);
         slotCountT numPriorRemoves = 0;
         slotCountT numOccurances = 0;
@@ -164,9 +177,20 @@ module mkMoveTable(MoveTable) provisos (
                 numOccurances = numOccurances + 1;
             end
         end
+        // we forbid removal when phy reg no longer present, so only need check for equality
         return !(numPriorRemoves == numOccurances);
     endfunction
 
+    // only valid if moveTableSize >= 2 * SupSize
+    function slotIndexT indexAdd(slotIndexT idx, removeLaneCnt incr);
+        Bit#(TLog#(TAdd#(moveTableSize, removeLanes))) newIdx = zeroExtend(idx) + zeroExtend(incr);
+        if(newIdx >= fromInteger(valueof(moveTableSize))) begin
+            newIdx = newIdx - fromInteger(valueof(moveTableSize));
+        end
+        return truncate(newIdx);
+    endfunction
+
+    // read from the head of the aux free list
     function PhyRIndx getFreeReg(Integer lane);
         Integer numPriorFrees = 0;
         for(Integer i = 0; i < valueof(removeLanes); i = i+1) begin 
@@ -174,7 +198,7 @@ module mkMoveTable(MoveTable) provisos (
                 numPriorFrees = numPriorFrees + 1;
             end
         end
-        return auxFreeList[auxDeq + fromInteger(numPriorFrees)];
+        return auxFreeList[indexAdd(auxDeq, fromInteger(numPriorFrees))];
     endfunction
 
     Vector#(removeLanes, Commit) commitIfc;
@@ -184,7 +208,6 @@ module mkMoveTable(MoveTable) provisos (
                 return isPhyContained(i, phy);
             endmethod
 
-            // unguarded, we assume it succeeds
             method Action remove(PhyRIndx phy);
                 removeEn[i].wset(phy);
             endmethod
