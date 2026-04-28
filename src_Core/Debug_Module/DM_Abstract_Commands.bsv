@@ -563,7 +563,7 @@ module mkDM_Abstract_Commands (DM_Abstract_Commands_IFC);
    method Action reset;
       rg_start_reg_access <= False;
 
-      function proj_clear (x) = x.clear();
+      function Action proj_clear (FIFOF#(t) x) = x.clear();
 
       mapM_(proj_clear, f_harts_gpr_reqs);
       mapM_(proj_clear, f_harts_gpr_rsps);

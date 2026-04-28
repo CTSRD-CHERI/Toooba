@@ -613,7 +613,7 @@ endfunction
 
 function MemTaggedData gatherLoad( Addr addr, ByteOrTagEn byteOrTagEn
                                  , Bool unsignedLd, MemTaggedData data);
-    function extend = unsignedLd ? zeroExtend : signExtend;
+    function Bit#(n) extend(Bit#(m) x) provisos (Add#(m, _x, n)) = unsignedLd ? zeroExtend(x) : signExtend(x);
     Bit#(IndxShamt) offset = truncate(addr);
 
     MemDataByteEn byteEn = byteOrTagEn.DataMemAccess;

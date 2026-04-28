@@ -44,7 +44,7 @@ function MemTaggedData amoExec( AmoInst amo_inst, Bit#(2) wordIdx
   Vector#(2, Bit#(64)) dwordOld = current.data;
   Vector#(4, Bit#(32))  wordOld = unpack(pack(current.data));
 
-  function doOp (vOld, vIn) = case (amo_inst.func)
+  function Bit#(n) doOp (Bit#(n) vOld, Bit#(n) vIn) = case (amo_inst.func)
     Swap: return vIn;
     Add:  return vOld + vIn;
     Xor:  return vOld ^ vIn;

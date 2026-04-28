@@ -390,8 +390,8 @@ module mkCsrFile #(Data hartid)(CsrFile);
     RiscVISASubset isa = defaultValue;
 
     // To save from bypassing logic, CSR reads will get stale value
-    let mkCsrReg = mkConfigReg;
-    let mkCsrEhr = mkConfigEhr;
+    function module#(Reg#(t)) mkCsrReg(t i) provisos (Bits#(t, a__)) = mkConfigReg(i);
+    function module#(Ehr#(2, Bit#(n))) mkCsrEhr(Bit#(n) i) = mkConfigEhr(i);
 
     // current prv level (this is not a csr...)
     Reg#(Bit#(2)) prv_reg <- mkCsrReg(prvM);
