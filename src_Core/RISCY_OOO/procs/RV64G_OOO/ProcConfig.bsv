@@ -238,7 +238,7 @@
     `define sizeSup 2
 
     // ROB
-    `define ROB_SIZE 64
+    `define ROB_SIZE 16
 
     // speculation
     `define NUM_EPOCHS 12
