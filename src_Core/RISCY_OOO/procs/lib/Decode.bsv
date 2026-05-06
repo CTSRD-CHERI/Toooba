@@ -1405,8 +1405,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                         mem_func: Ld,
                                         amo_func: None,
                                         unsignedLd: False,
-					                    alloc_policy: 3'b100,
-                                        byteOrTagEn: DataMemAccess(unpack(16'hffff)),
+					                    alloc_policy: 3'b010,
+                                        byteOrTagEn: DataMemAccess(unpack(16'h1)),
                                         aq: False,
                                         rl: False,
                                         reg_bounds: True };

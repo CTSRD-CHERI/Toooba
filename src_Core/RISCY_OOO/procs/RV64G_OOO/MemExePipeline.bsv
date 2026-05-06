@@ -542,7 +542,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (x.ddc_offset) rVal1 = setAddr(ddc, getAddr(rVal1)).value;
         Bit#(3) alloc_policy = lsq.getAllocPolicy(x.ldstq_tag);
         Bit#(TlocW) cap_tloc = getTloc(rVal1);
-        if(alloc_policy == 3'h1) 
+        if(alloc_policy == 3'h1 || alloc_policy == 3'h2) 
             rVal1 = setAddr(rVal1, unpack(zeroExtend(getAddr(rVal1)) - zeroExtend(getAddr(rVal1)[6:0]) + zeroExtend(cap_tloc) * 4 -1)).value;
         // get rVal2 (check bypass)
         CapPipe rVal2 = nullCap;
