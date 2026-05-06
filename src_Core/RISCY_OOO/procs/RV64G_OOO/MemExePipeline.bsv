@@ -126,7 +126,7 @@ typedef struct {
     CapPipe vaddr;         // virtual addr
     Bit#(8) mte;
     Bit#(10) base;
-    Bit#(4) tloc;
+    Bit#(TlocW) tloc;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
     Data    store_data;
@@ -164,7 +164,7 @@ typedef struct {
     MemTaggedData shiftedData;
     Bit#(8) mte;
     Bit#(10) base;
-    Bit#(4) tloc;
+    Bit#(TlocW) tloc;
 } WaitStResp deriving(Bits, Eq, FShow);
 
 //SpecFifo#(2,IncorrectSpec,1,1) incorrectSpec_ff <- mkSpecFifoCF(True);
@@ -354,10 +354,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, WaitStResp) waitStRespQ <- mkCFFifo;
 `endif
     // fifo for req mem
-    Fifo#(1, Tuple7#(LdQTag, Addr, Bool, Bit#(16), Bit#(8), Bit#(10), Bit#(4))) reqLdQ <- mkBypassFifo;
+    Fifo#(1, Tuple7#(LdQTag, Addr, Bool, Bit#(16), Bit#(8), Bit#(10), Bit#(TlocW))) reqLdQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
-    Fifo#(1, Tuple5#(Addr, Bit#(16), Bit#(8), Bit#(10), Bit#(4))) reqStQ <- mkBypassFifo;
+    Fifo#(1, Tuple5#(Addr, Bit#(16), Bit#(8), Bit#(10), Bit#(TlocW))) reqStQ <- mkBypassFifo;
 `else
     Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(16), Bit#(8), Bit#(4))) reqStQ <- mkBypassFifo;
 `endif
@@ -917,7 +917,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             $display("mte check on load: ", fshow(res.mte), fshow(mte));
         if(res.dst matches tagged Valid .dst) begin
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
-            if((res.mte == mte) && (mte != 8'h0) && (res.mte != 8'h0) && (res.tloc != 4'h0) ) begin 
+            if((res.mte != mte) && (res.mte != 8'h0) && (res.tloc != 'h0) ) begin 
                 $display("%t illegal mte: ", $time, rule_name, " ", fshow(tag), "; ", fshow(dataUnpacked), "; ", fshow(res), fshow(mte));
                 //mteExceptionFIFO.enq(res.instTag);
                 inIfc.writeRegFile(dst.indx, unpack(0));

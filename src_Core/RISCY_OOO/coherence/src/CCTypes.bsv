@@ -44,6 +44,7 @@ import Assert::*;
 import Connectable::*;
 import GetPut::*;
 import ClientServer::*;
+import CHERICC_Fat::*;
 
 typedef enum {
     I = 3'd0,
@@ -208,7 +209,7 @@ typedef struct {
     Bit#(16) pcHash; // hash of instruction pc sending the request
     Bit#(8) mte;
     Bit#(10) base;
-    Bit#(4) tloc;
+    Bit#(TlocW) tloc;
 } ProcRq#(type idT) deriving(Bits, Eq, FShow);
 
 interface L1ProcReq#(type idT);

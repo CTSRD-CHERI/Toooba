@@ -50,6 +50,7 @@ import FIFOF::*;
 import Performance::*;
 import FShow::*;
 import MsgFifo::*;
+import CHERICC_Fat::*;
 
 // 64B cache line
 typedef 4 CLineNumMemTaggedData;
@@ -92,7 +93,7 @@ endfunction
 function MemTaggedData getTaggedDataAt(CLine line, CLineMemTaggedDataSel sel) =
   MemTaggedData { tag: line.tag[sel], data: line.data[sel] };
 
-function Bit#(8) getMTEAt(CLine line, Bit#(4) tloc, Bit#(10) base);
+function Bit#(8) getMTEAt(CLine line, Bit#(TlocW) tloc, Bit#(10) base);
     Bit#(512) data = pack(line.data);
     if(tloc !=0 ) begin 
         Bit#(8) mte = 8'h0;

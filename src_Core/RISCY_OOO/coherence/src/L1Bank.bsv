@@ -381,7 +381,7 @@ endfunction
             pcHash: ?,
             mte: 8'h0,
             base: 10'h0,
-            tloc: 4'h0
+            tloc: 'h0
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
         // send to pipeline
