@@ -97,8 +97,8 @@ function Bit#(8) getMTEAt(CLine line, Bit#(TlocW) tloc, Bit#(10) base);
     Bit#(512) data = pack(line.data);
     if(tloc !=0 ) begin 
         Bit#(8) mte = 8'h0;
-        Int#(16) top = zeroExtend(unpack(tloc))*128 + zeroExtend(unpack(base))*8;
-        Int#(16) base = zeroExtend(unpack(tloc))*128 + zeroExtend(unpack(base))*8 - 8;
+        Int#(16) top = zeroExtend(unpack(tloc))*4 + zeroExtend(unpack(base))*8;
+        Int#(16) base = zeroExtend(unpack(tloc))*4 + zeroExtend(unpack(base))*8 - 8;
         mte = data[top-1: base];
         return mte;
     end 
