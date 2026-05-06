@@ -381,7 +381,8 @@ endfunction
             pcHash: ?,
             mte: 8'h0,
             base: 10'h0,
-            tloc: 'h0
+            tloc: 'h0,
+            alloc_policy: 'h0
         };
         cRqIdxT n <- cRqMshr.cRqTransfer.getEmptyEntryInit(r);
         // send to pipeline
@@ -632,6 +633,9 @@ endfunction
                 let {be, wrLine} <- procResp.respSt(req.id);
                 // calculate new data to write
                 newLine = getUpdatedLine(curLine, be, wrLine);
+                $display("MTE CurLine", fshow(curLine));
+                $display("MTE newLine", fshow(newLine));
+
             end
             default: begin
                 doAssert(False, "unknown mem op");

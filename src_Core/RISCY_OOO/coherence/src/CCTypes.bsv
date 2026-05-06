@@ -210,6 +210,7 @@ typedef struct {
     Bit#(8) mte;
     Bit#(10) base;
     Bit#(TlocW) tloc;
+    Bit#(3) alloc_policy;
 } ProcRq#(type idT) deriving(Bits, Eq, FShow);
 
 interface L1ProcReq#(type idT);

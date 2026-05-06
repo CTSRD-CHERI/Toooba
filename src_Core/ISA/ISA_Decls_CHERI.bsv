@@ -142,7 +142,7 @@ Bit #(7) f7_cap_CSub            = 7'h14;
 Bit #(7) f7_cap_CSetHigh        = 7'h16;
 Bit #(7) f7_cap_CSetMTE         = 7'h17;
 Bit #(7) f7_cap_CSetTloc        = 7'h18;
-
+Bit #(7) f7_cap_CSetMemMTE      = 7'h19;
 // 7'h17-7'h1c unused
 Bit #(7) f7_cap_CBuildCap       = 7'h1d;
 Bit #(7) f7_cap_CCopyType       = 7'h1e;
@@ -195,6 +195,7 @@ Bit #(5) f5rs2_cap_JALR_PCC    = 5'h14;
 Bit #(5) f5rs2_cap_CGetHigh    = 5'h17;
 Bit #(5) f5rs2_cap_CGetMTE     = 5'h18;
 Bit #(5) f5rs2_cap_CGetTloc    = 5'h19;
+Bit #(5) f5rs2_cap_CGetMemMTE  = 5'h1a;
 
 // 5'h18-5'h1f unused (5'h1f reserved for 1-reg instructions)
 
