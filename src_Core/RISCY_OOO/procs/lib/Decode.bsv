@@ -1196,14 +1196,15 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                 mem_func: St,
                                 amo_func: None,
                                 unsignedLd: False,
-					            alloc_policy: 3'b001,
                                 byteOrTagEn: DataMemAccess(unpack(16'h1)),
-                                aq: False,
-                                rl: False,
+                                alloc_policy: 3'h001,
+                                aq: aq,
+                                rl: rl,
                                 reg_bounds: True };
+                                
                             regs.src2 = Valid(tagged Gpr rs2);
                             regs.src1 = Valid(tagged Gpr rs1);
-                            dInst.capChecks = memCapChecks(True);
+                            dInst.capChecks = memCapChecks(False);
                         end 
                         f7_cap_CBuildCap: begin
                             legalInst = True;
@@ -1412,7 +1413,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                         reg_bounds: True };
                                     regs.dst  = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
-                                    dInst.capChecks = memCapChecks(True);
+                                    dInst.capChecks = memCapChecks(False);
                                 end 
                                 f5rs2_cap_CLoadTags: begin
                                     legalInst = True;

@@ -541,9 +541,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
         if (x.ddc_offset) rVal1 = setAddr(ddc, getAddr(rVal1)).value;
         Bit#(3) alloc_policy = lsq.getAllocPolicy(x.ldstq_tag);
-        Bit#(TlocW) cap_tloc = getTloc(rVal1);
-        if(alloc_policy == 3'h1 || alloc_policy == 3'h2) 
-            rVal1 = setAddr(rVal1, unpack(zeroExtend(getAddr(rVal1)) - zeroExtend(getAddr(rVal1)[6:0]) + zeroExtend(cap_tloc) * 4 -1)).value;
         // get rVal2 (check bypass)
         CapPipe rVal2 = nullCap;
         if(x.regs.src2 matches tagged Valid .src2 &&& src2 != 0) begin
@@ -773,6 +770,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         // update LSQ
+        if( x.alloc_policy == 3'h1 || x.alloc_policy == 3'h2) 
+            paddr =  unpack(zeroExtend(pack(paddr)) - zeroExtend(pack(paddr)[6:0]) + zeroExtend(x.tloc) * 4 -1);
+            //rVal1 = setAddr(rVal1, unpack(zeroExtend(getAddr(rVal1)) - zeroExtend(getAddr(rVal1)[6:0]) + zeroExtend(cap_tloc) * 4 -1)).value;
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.base, x.tloc, x.alloc_policy
         );
