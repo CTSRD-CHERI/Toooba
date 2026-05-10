@@ -1198,8 +1198,8 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                 unsignedLd: False,
                                 byteOrTagEn: DataMemAccess(unpack(16'h1)),
                                 alloc_policy: 3'h001,
-                                aq: aq,
-                                rl: rl,
+                                aq: False,
+                                rl: False,
                                 reg_bounds: True };
                                 
                             regs.src2 = Valid(tagged Gpr rs2);
