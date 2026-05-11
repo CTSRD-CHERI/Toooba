@@ -549,7 +549,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         // get virtual addr & St/Sc/Amo data
         CapPipe vaddr = modifyOffset(rVal1, signExtend(x.imm), True).value;
-
+        if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin 
+            //paddr =  unpack(zeroExtend(pack(paddr)) + zeroExtend(x.tloc * 4 -1));
+            Bit#(7) vaddr_raw = getAddr(vaddr)[6:0];
+            vaddr = modifyOffset(rVal1, unpack( zeroExtend(getTloc(rVal1) * 4 - zeroExtend(vaddr_raw) -1)), True).value;
+            //$display("update vaddr", fshow(x), fshow(getTloc(x.rVal1))); 
+        end 
         CapPipe data = rVal2;
         MemTaggedData toMemData = unpack(pack(toMem(data)));
 
@@ -625,6 +630,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (x.origBE == TagMemAccess) begin
             accessByteCount = fromInteger(valueOf(CacheUtils::CLineNumMemDataBytes));
         end
+        let vaddr = x.vaddr ;
 
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
@@ -639,7 +645,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 ldstq_tag: x.ldstq_tag,
                 shiftedBE: shiftBE,
                 alloc_policy: x.alloc_policy,
-                vaddr: x.vaddr,
+                vaddr: vaddr,
                 mte: getMTE(x.rVal1),
                 base: pack(getBase(x.rVal1))[9:0],
                 tloc: getTloc(x.rVal1),
@@ -647,12 +653,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 store_data: x.rVal2,
                 store_data_BE: origBE,
 `endif
-                misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE, x.alloc_policy),
+                misaligned: memAddrMisaligned(getAddr(vaddr), x.origBE, x.alloc_policy),
                 capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
                 allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
                 capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
                 check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                          ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
+                                          ddc, getAddr(vaddr), accessByteCount, x.cap_checks)
 `ifdef KONATA
                 , u_id: x.u_id
 `endif
@@ -770,8 +776,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         // update LSQ
-        if( x.alloc_policy == 3'h1 || x.alloc_policy == 3'h2) 
-            paddr =  unpack(zeroExtend(pack(paddr)) - zeroExtend(pack(paddr)[6:0]) + zeroExtend(x.tloc) * 4 -1);
             //rVal1 = setAddr(rVal1, unpack(zeroExtend(getAddr(rVal1)) - zeroExtend(getAddr(rVal1)[6:0]) + zeroExtend(cap_tloc) * 4 -1)).value;
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.base, x.tloc, x.alloc_policy
