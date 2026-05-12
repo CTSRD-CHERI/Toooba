@@ -74,6 +74,8 @@ typedef struct {
 typedef 16 OutstandingWrites;
 typedef 16 WriteAddressHashW;
 
+Bit#(LogCLineNumMemDataBytes) zeroOffset = 0;
+
 module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
                           (LLC_AXI4_Adapter_IFC)
    provisos(Bits#(idT, idSz),
@@ -143,7 +145,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          $display ("    ", fshow (ld));
       end
 
-      Addr  line_addr = {ld.addr [63:6], 6'h0 };                      // Addr of containing cache line
+      Addr  line_addr = {truncateLSB(ld.addr), zeroOffset }; // Addr of containing cache line
       fa_fabric_send_read_req (line_addr, LLC_AXI_ID{tag_req: ld.tag_req, id: ld.id, child: ld.child});
       f_pending_reads.enq (ld);
       llc.toM.deq;
@@ -194,8 +196,11 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
    // Each beat handles 512-bits; e.g. 512b cache line takes 1 beat.
    Reg #(Bit #(6)) rg_wr_req_beat <- mkReg (0);
    Reg#(Bit#(Wd_MId)) wid_reg <- mkRegU;
+   Addr wAddr = ?;
+   if (llc.toM.first matches tagged Wb .wb) wAddr = {truncateLSB(wb.addr), zeroOffset};
+
    rule rl_handle_write_req (llc.toM.first matches tagged Wb .wb &&&
-                             ((!outstandingWrites.isMember(wid_reg).v && !outstandingWrites.dataMatch(hash(wb.addr[63:6])))
+                             ((!outstandingWrites.isMember(wid_reg).v && !outstandingWrites.dataMatch(hash(wAddr)))
                               || (rg_wr_req_beat != 0)
                              )
                             );
@@ -204,13 +209,15 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          $display ("    ", fshow (wb));
       end
 
+
       // on first flit...
       // ================
       if (rg_wr_req_beat == 0) begin
+
          // send AXI4 AW flit
          masterPortShim.slave.aw.put (AXI4_AWFlit {
            awid:     wid_reg,
-           awaddr:   { wb.addr [63:6], 6'h0 },
+           awaddr:   wAddr,
            awlen:    (fromInteger(valueOf(CLineDataNumBytes)/64))-1, // burst len = awlen+1
            awsize:   64,
            awburst:  INCR,
@@ -222,7 +229,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
            awuser:   0});
          // Expect a fabric response
          ctr_wr_rsps_pending.incr;
-         outstandingWrites.insert(wid_reg, hash(wb.addr[63:6]));
+         outstandingWrites.insert(wid_reg, hash(wAddr));
          wid_reg <= wid_reg + 1;
       end
 
