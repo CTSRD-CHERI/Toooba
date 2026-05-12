@@ -145,6 +145,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
 
       Addr  line_addr = {ld.addr [63:6], 6'h0 };                      // Addr of containing cache line
       fa_fabric_send_read_req (line_addr, LLC_AXI_ID{tag_req: ld.tag_req, id: ld.id, child: ld.child});
+      f_pending_reads.enq (ld);
       llc.toM.deq;
    endrule
 
@@ -193,7 +194,10 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
    Reg #(Bit #(6)) rg_wr_req_beat <- mkReg (0);
    Reg#(Bit#(Wd_MId)) wid_reg <- mkRegU;
    rule rl_handle_write_req (llc.toM.first matches tagged Wb .wb &&&
-                             !outstandingWrites.isMember(wid_reg).v && !outstandingWrites.dataMatch(hash(wb.addr[63:6])));
+                             ((!outstandingWrites.isMember(wid_reg).v && !outstandingWrites.dataMatch(hash(wb.addr[63:6])))
+                              || (rg_wr_req_beat != 0)
+                             )
+                            );
       if ((cfg_verbosity > 0) && (rg_wr_req_beat == 0)) begin
          $display ("%d: LLC_AXI4_Adapter.rl_handle_write_req: Wb request from LLC to memory:", cur_cycle);
          $display ("    ", fshow (wb));
