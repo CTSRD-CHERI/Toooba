@@ -414,8 +414,10 @@ module mkTargetTable(TargetTable#(narrowTableSize, wideTableSize)) provisos
     Alias#(wideTargetEntryT, WideTargetEntry#(wideTableTagBits)),
     Add#(a__, TLog#(narrowTableSize), 32),
     Add#(b__, TLog#(narrowTableSize), 58),
-    Add#(c__, TLog#(wideTableSize), 32),
-    Add#(d__, TLog#(wideTableSize), 58)
+    Add#(c__, TLog#(narrowTableSize), 57),
+    Add#(d__, TLog#(wideTableSize), 32),
+    Add#(e__, TLog#(wideTableSize), 58),
+    Add#(f__, TLog#(wideTableSize), 57)
 );
     Bool verbose = False;
     Vector#(narrowTableSize, Ehr#(2, Maybe#(narrowTargetEntryT))) narrowTable <- replicateM(mkEhr(Invalid));

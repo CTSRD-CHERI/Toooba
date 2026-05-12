@@ -51,7 +51,7 @@ import Performance::*;
 import FShow::*;
 import MsgFifo::*;
 
-// 64B cache line
+// 128B cache line
 typedef 8 CLineNumMemTaggedData;
 typedef TMul#(CLineNumMemTaggedData, 2) CLineNumData;
 typedef TLog#(CLineNumMemTaggedData) LogCLineNumMemTaggedData;

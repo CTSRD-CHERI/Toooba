@@ -184,9 +184,6 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          rg_rd_rsp_beat <= rg_rd_rsp_beat + 1;
          rg_cline <= new_cline;
       end
-      llc.rsFromM.enq (resp);
-      if (cfg_verbosity > 1)
-        $display ("    Response to LLC: ", fshow (resp));
    endrule
 
    // ================================================================
@@ -194,8 +191,9 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
 
    // Each beat handles 512-bits; e.g. 512b cache line takes 1 beat.
    Reg #(Bit #(6)) rg_wr_req_beat <- mkReg (0);
-
-   rule rl_handle_write_req (llc.toM.first matches tagged Wb .wb);
+   Reg#(Bit#(Wd_MId)) wid_reg <- mkRegU;
+   rule rl_handle_write_req (llc.toM.first matches tagged Wb .wb &&&
+                             !outstandingWrites.isMember(wid_reg).v && !outstandingWrites.dataMatch(hash(wb.addr[63:6])));
       if ((cfg_verbosity > 0) && (rg_wr_req_beat == 0)) begin
          $display ("%d: LLC_AXI4_Adapter.rl_handle_write_req: Wb request from LLC to memory:", cur_cycle);
          $display ("    ", fshow (wb));
@@ -206,7 +204,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       if (rg_wr_req_beat == 0) begin
          // send AXI4 AW flit
          masterPortShim.slave.aw.put (AXI4_AWFlit {
-           awid:     fabric_default_mid,
+           awid:     wid_reg,
            awaddr:   { wb.addr [63:6], 6'h0 },
            awlen:    (fromInteger(valueOf(CLineDataNumBytes)/64))-1, // burst len = awlen+1
            awsize:   64,
@@ -219,11 +217,13 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
            awuser:   0});
          // Expect a fabric response
          ctr_wr_rsps_pending.incr;
+         outstandingWrites.insert(wid_reg, hash(wb.addr[63:6]));
+         wid_reg <= wid_reg + 1;
       end
 
       // on last flit...
       // ===============
-      if (rg_wr_req_beat == (fromInteger(valueOf(CLineDataNumBytes)/8))-1) begin
+      if (rg_wr_req_beat == (fromInteger(valueOf(CLineDataNumBytes)/64))-1) begin
          llc.toM.deq;
          rg_wr_req_beat <= 0;
       end else // increment flit counter
@@ -231,14 +231,23 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
 
       // on each flit ...
       // ================
-      Vector #(TDiv#(CLineDataNumBytes,64), Bit #(8)) line_strb = unpack(pack(wb.byteEn));
+      Vector #(TDiv#(CLineDataNumBytes,64), Bit #(64)) line_strb = unpack(pack(wb.byteEn));
       Vector #(CLineNumMemTaggedData, MemTaggedData) line_data = clineToMemTaggedDataVector(wb.data);
       // send AXI4 W flit
       masterPortShim.slave.w.put(AXI4_WFlit {
-        wdata:  line_data[rg_wr_req_beat[2:1]].data[rg_wr_req_beat[0]],
+        wdata:  {pack(line_data[{rg_wr_req_beat,2'd0}].data),
+                 pack(line_data[{rg_wr_req_beat,2'd1}].data),
+                 pack(line_data[{rg_wr_req_beat,2'd2}].data),
+                 pack(line_data[{rg_wr_req_beat,2'd3}].data)
+                },
         wstrb:  line_strb[rg_wr_req_beat],
-        wlast:  rg_wr_req_beat == (fromInteger(valueOf(CLineDataNumBytes)/8))-1,
-        wuser:  pack(line_data[rg_wr_req_beat[2:1]].tag)});
+        wlast:  rg_wr_req_beat == (fromInteger(valueOf(CLineDataNumBytes)/64))-1,
+        wuser:  {pack(line_data[{rg_wr_req_beat,2'd0}].tag),
+                 pack(line_data[{rg_wr_req_beat,2'd1}].tag),
+                 pack(line_data[{rg_wr_req_beat,2'd2}].tag),
+                 pack(line_data[{rg_wr_req_beat,2'd3}].tag)
+                }
+      });
    endrule
 
    // ----------------
