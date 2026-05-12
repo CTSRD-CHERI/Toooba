@@ -85,7 +85,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
            );
 
    // Verbosity: 0: quiet; 1: LLC transactions; 2: loop detail
-   Integer verbosity = 0;
+   Integer verbosity = 3;
    Reg #(Bit #(4)) cfg_verbosity <- mkConfigReg (fromInteger (verbosity));
 
    // ================================================================
@@ -167,6 +167,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       let new_cline_data = { mem_rsp.rdata, truncateLSB(pack(rg_cline.data)) };
       let new_cline = CLine { tag: rg_rd_rsp_beat[0] == 0 ? unpack(new_cline_tag) : rg_cline.tag
                             , data: unpack(new_cline_data) };
+      //let new_cline = shiftOutFrom0(mem_rsp.rdata, rg_cline, 1);
 
       if (mem_rsp.rlast) begin
          let ldreq <- pop (f_pending_reads);
@@ -239,17 +240,17 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       Vector #(CLineNumMemTaggedData, MemTaggedData) line_data = clineToMemTaggedDataVector(wb.data);
       // send AXI4 W flit
       masterPortShim.slave.w.put(AXI4_WFlit {
-        wdata:  {pack(line_data[{rg_wr_req_beat,2'd0}].data),
-                 pack(line_data[{rg_wr_req_beat,2'd1}].data),
+        wdata:  {pack(line_data[{rg_wr_req_beat,2'd3}].data),
                  pack(line_data[{rg_wr_req_beat,2'd2}].data),
-                 pack(line_data[{rg_wr_req_beat,2'd3}].data)
+                 pack(line_data[{rg_wr_req_beat,2'd1}].data),
+                 pack(line_data[{rg_wr_req_beat,2'd0}].data)
                 },
         wstrb:  line_strb[rg_wr_req_beat],
         wlast:  rg_wr_req_beat == (fromInteger(valueOf(CLineDataNumBytes)/64))-1,
-        wuser:  {pack(line_data[{rg_wr_req_beat,2'd0}].tag),
-                 pack(line_data[{rg_wr_req_beat,2'd1}].tag),
+        wuser:  {pack(line_data[{rg_wr_req_beat,2'd3}].tag),
                  pack(line_data[{rg_wr_req_beat,2'd2}].tag),
-                 pack(line_data[{rg_wr_req_beat,2'd3}].tag)
+                 pack(line_data[{rg_wr_req_beat,2'd1}].tag),
+                 pack(line_data[{rg_wr_req_beat,2'd0}].tag)
                 }
       });
    endrule
