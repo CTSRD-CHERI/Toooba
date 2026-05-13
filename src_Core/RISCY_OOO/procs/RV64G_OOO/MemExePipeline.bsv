@@ -552,7 +552,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin 
             //paddr =  unpack(zeroExtend(pack(paddr)) + zeroExtend(x.tloc * 4 -1));
             Bit#(8) vaddr_raw = zeroExtend(getAddr(vaddr)[6:0]);
-            vaddr = modifyOffset(rVal1, unpack( zeroExtend(getTloc(rVal1) * 4 - vaddr_raw -1)), True).value;
+            vaddr = modifyOffset(rVal1, zeroExtend(getTloc(rVal1) * 4  -1) - zeroExtend(vaddr_raw), True).value;
             //$display("update vaddr", fshow(x), fshow(getTloc(x.rVal1))); 
         end 
         CapPipe data = rVal2;
