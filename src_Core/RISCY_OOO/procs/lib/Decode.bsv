@@ -1405,7 +1405,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     dInst.execFunc = tagged Mem MemInst{
                                         mem_func: Ld,
                                         amo_func: None,
-                                        unsignedLd: False,
+                                        unsignedLd: True,
 					                    alloc_policy: 3'b010,
                                         byteOrTagEn: DataMemAccess(unpack(16'h1)),
                                         aq: False,

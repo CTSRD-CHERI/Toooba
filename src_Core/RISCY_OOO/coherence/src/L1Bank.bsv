@@ -595,10 +595,11 @@ endfunction
                         Bit#(512) data = pack(curLine.data);
                         if(req.tloc !=0 ) begin 
                             Bit#(8) mte = 8'h0;
-                            Int#(16) top = zeroExtend(unpack(req.tloc))*4*8;
-                            Int#(16) base = zeroExtend(unpack(req.tloc))*4*8-8;
+                            Bit#(64) tag_addr = unpack(pack(req.addr) -  zeroExtend(pack(req.addr)[6:0]) + zeroExtend(req.tloc * 4-1 )) ; //zeroExtend(unpack(req.tloc))*4*8 + zeroExtend ;
+                            Int#(16) top =  zeroExtend(unpack(tag_addr[5:0]))*8 + 8 ; 
+                            Int#(16) base = zeroExtend(unpack(tag_addr[5:0]))*8  ; 
                             mte = data[top-1: base];
-                            $display("L1Bank MTE", fshow(req.addr), fshow(req.addr[5:4]), fshow(req.tloc), fshow(top), fshow(base), fshow(mte), fshow(curLine), fshow(getTaggedDataAt(curLine, dataSel)), fshow(data), fshow(mte));
+                            $display("L1Bank MTE", fshow(req.addr), fshow(tag_addr), fshow(req.tloc), fshow(top), fshow(base), fshow(mte), fshow(curLine), fshow(getTaggedDataAt(curLine, dataSel)), fshow(data), fshow(mte));
                         end
                         procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel), mem_mte);
                     end
