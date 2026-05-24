@@ -928,18 +928,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             $display("mte check on load: ", fshow(res.mte), fshow(mte));
         if(res.dst matches tagged Valid .dst) begin
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
-            if((res.mte != mte) && (res.mte != 8'h0) && (res.tloc != 'h0) ) begin 
-                $display("%t illegal mte: ", $time, rule_name, " ", fshow(tag), "; ", fshow(dataUnpacked), "; ", fshow(res), fshow(mte));
-                //mteExceptionFIFO.enq(res.instTag);
-                inIfc.writeRegFile(dst.indx, unpack(0));
-            end 
-            else begin 
+            //if((res.mte != mte) && (res.mte != 8'h0) && (res.tloc != 'h0) ) begin 
+            //    $display("%t illegal mte: ", $time, rule_name, " ", fshow(tag), "; ", fshow(dataUnpacked), "; ", fshow(res), fshow(mte));
+            //    //mteExceptionFIFO.enq(res.instTag);
+            //    inIfc.writeRegFile(dst.indx, unpack(0));
+            //end 
+            //else begin 
                 dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
                 inIfc.writeRegFile(dst.indx, dataUnpacked);
 `ifdef INCLUDE_TANDEM_VERIF
             inIfc.rob_setExecuted_doFinishMem_RegData (res.instTag, res.data);
 `endif
-            end 
+            //end 
 `ifdef PERF_COUNT
             // perf: load to use latency
             let lat <- ldToUseLatTimer.done(tag);
