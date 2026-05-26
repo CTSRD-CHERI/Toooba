@@ -14,6 +14,12 @@ import RWBramCore::*;
 import RWSetAssocBramCore::*;
 import Prefetcher_intf::*;
 import Cur_Cycle::*;
+import MMIOAddrs::*;
+
+function Bool isMMIOAddr(Addr addr);
+    let a = getDataAlignedAddr(addr);
+    return (a < mainMemBaseAddr) || (a >= mainMemBoundAddr);
+endfunction
 
 typedef struct {
     reqT req;
@@ -56,7 +62,9 @@ Add#(a__, matchBits, 27)
         Integer enqIdx = 0;
         for (Integer i = 0; i < 8; i = i + 1) begin
             Bit#(matchBits) candUpper = truncateLSB(getVpn(x.line[i]));
-            if (candUpper == missUpper &&& getReqOp(x.req) == Ld) begin
+            // Skip candidates whose value points into MMIO/device space: a
+            // prefetch there is pointless and can disturb memory-mapped devices.
+            if (candUpper == missUpper &&& getReqOp(x.req) == Ld &&& !isMMIOAddr(x.line[i])) begin
                 candFIFO.enqS[enqIdx].enq(x.line[i]);
                 $display("%t AlexLog: CDP Naive candidate vaddr offset: %d candVaddr: %h crossPage: %b",
                     cur_cycle, i, x.line[i], getVpn(x.line[i]) != getReqVpn(x.req));
