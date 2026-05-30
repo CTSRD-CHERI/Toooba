@@ -355,6 +355,7 @@ typedef struct {
     Bool              isMMIO;
     MemDataByteEn     shiftedBE;
     MemTaggedData     stData;
+    Bit#(8)           mte;
     Bool              allowCapAmoLd;
     Maybe#(Trap)      fault;
     Bool              objIdSealOk;
@@ -391,7 +392,7 @@ interface SplitLSQ;
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
-        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE,
+        Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(8) mte,
         Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset
     );
     // update objSeal. Called when ld resp is received for objId bitmap read
@@ -926,6 +927,8 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(StQMemFunc))              st_memFunc   <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(AmoFunc))                 st_amoFunc   <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(MemDataByteEn))           st_byteEn    <- replicateM(mkRegU);
+    Vector#(StQSize, Ehr#(2, Bit#(8)))              st_mte       <- replicateM(mkEhr(?));
+
     Vector#(StQSize, Reg#(Bool))                    st_acq       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Bool))                    st_rel       <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(Maybe#(PhyDst)))          st_dst       <- replicateM(mkRegU);
@@ -998,6 +1001,10 @@ module mkSplitLSQ(SplitLSQ);
     let st_allowCapAmoLd_updAddr = getVEhrPort(st_allowCapAmoLd, 0); // write
     let st_allowCapAmoLd_deqSt   = getVEhrPort(st_allowCapAmoLd, 1);
     let st_allowCapAmoLd_enq     = getVEhrPort(st_allowCapAmoLd, 1); // write
+
+    let st_mte_updAddr = getVEhrPort(st_mte, 0); // write
+    let st_mte_deqSt   = getVEhrPort(st_mte, 1);
+    let st_mte_enq     = getVEhrPort(st_mte, 1); // write
 
     let st_computed_verify  = getVEhrPort(st_computed, 0);
     let st_computed_wrongSpec  = getVEhrPort(st_computed, 0);
@@ -1606,6 +1613,8 @@ module mkSplitLSQ(SplitLSQ);
         st_fault_enq[st_enqP] <= Invalid;
         st_pcHash[st_enqP] <= pcHash;
         st_allowCapAmoLd_enq[st_enqP] <= False;
+        st_mte_enq[st_enqP]     <= 8'h0;
+
         st_computed_enq[st_enqP] <= False;
         st_verified_enq[st_enqP] <= False;
         st_specBits_enq[st_enqP] <= spec_bits;
@@ -1626,7 +1635,7 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
-        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be,
+        Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bit#(8) mte,
         Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
@@ -1707,6 +1716,7 @@ module mkSplitLSQ(SplitLSQ);
             st_objIdOffset_updAddr[tag] <= objIdOffset;
             st_isMMIO_updAddr[tag] <= mmio;
             st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
+            st_mte_updAddr[tag] <= mte;
 
             // A store always try to kill younger loads
             doKill = True;
@@ -1855,7 +1865,9 @@ module mkSplitLSQ(SplitLSQ);
             doAssert(st_valid_updObjIdSeal[tag], "entry must be valid");
 
             // Compute seal state and corresponding fault.
-            Bool isSealed = extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
+            Bit#(8) memMTE = extractMemMTE(d, st_objIdOffset_updObjIdSeal[tag]);
+            $display("store mte check", fshow(st_mte_deqSt[tag]), fshow(memMTE), fshow(st_objIdOffset_updObjIdSeal[tag]));
+            Bool isSealed =  (st_mte_deqSt[tag] != memMTE); //extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
              Maybe#(Trap) fault = isSealed
                  ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}))
                 : Invalid;
@@ -2348,6 +2360,7 @@ module mkSplitLSQ(SplitLSQ);
             dst: st_dst[deqP],
             paddr: st_paddr_deqSt[deqP],
             isMMIO: st_isMMIO_deqSt[deqP],
+            mte : st_mte_deqSt[deqP],
             shiftedBE: st_shiftedBE_deqSt[deqP],
             stData: st_stData_deqSt[deqP],
             allowCapAmoLd: st_allowCapAmoLd_deqSt[deqP],
