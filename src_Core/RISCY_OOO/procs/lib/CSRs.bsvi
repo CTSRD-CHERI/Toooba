@@ -1,0 +1,169 @@
+// user standard CSRs
+`CSR(FFLAGS,     12'h001)
+`CSR(FRM,        12'h002)
+`CSR(FCSR,       12'h003)
+`CSR(CYCLE,      12'hc00)
+`CSR(TIME,       12'hc01)
+`CSR(INSTRET,    12'hc02)
+// user non-standard CSRs (TODO)
+`CSR(TERMINATE,  12'h800) // terminate (used to exit Linux)
+`CSR(STATS,      12'h801) // turn on/off perf counters
+`CSR(CCP,       12'h12)
+`CSR(CCPT,      12'h13)
+// `CSR(UCCSR,      12'h8c0)
+// supervisor standard CSRs
+`CSR(SSTATUS,    12'h100)
+// no user trap handler, so no se/ideleg
+`CSR(SIE,        12'h104)
+`CSR(STVEC,      12'h105)
+`CSR(SCOUNTEREN, 12'h106)
+`CSR(SSCRATCH,   12'h140)
+`CSR(SEPC,       12'h141)
+`CSR(SCAUSE,     12'h142)
+`CSR(STVAL,      12'h143) // it's still called sbadaddr in spike
+`CSR(SIP,        12'h144)
+//`CSR(SCCP,       12'h145)
+//`CSR(SCCPT,      12'h145)
+`CSR(SATP,       12'h180) // it's still called sptbr in spike
+`CSR(SCCSR,      12'h9c0)
+// machine standard CSRs
+`CSR(MSTATUS,    12'h300)
+`CSR(MISA,       12'h301)
+`CSR(MEDELEG,    12'h302)
+`CSR(MIDELEG,    12'h303)
+`CSR(MIE,        12'h304)
+`CSR(MTVEC,      12'h305)
+`CSR(MCOUNTEREN, 12'h306)
+`CSR(MSCRATCH,   12'h340)
+`CSR(MEPC,       12'h341)
+`CSR(MCAUSE,     12'h342)
+`CSR(MTVAL,      12'h343) // it's still called mbadaddr in spike
+`CSR(MIP,        12'h344)
+`CSR(MCYCLE,     12'hb00)
+`CSR(MINSTRET,   12'hb02)
+
+`CSR(HPMCOUNTER3,   12'hc03)
+`CSR(HPMCOUNTER4,   12'hc04)
+`CSR(HPMCOUNTER5,   12'hc05)
+`CSR(HPMCOUNTER6,   12'hc06)
+`CSR(HPMCOUNTER7,   12'hc07)
+`CSR(HPMCOUNTER8,   12'hc08)
+`CSR(HPMCOUNTER9,   12'hc09)
+`CSR(HPMCOUNTER10,   12'hc0a)
+`CSR(HPMCOUNTER11,   12'hc0b)
+`CSR(HPMCOUNTER12,   12'hc0c)
+`CSR(HPMCOUNTER13,   12'hc0d)
+`CSR(HPMCOUNTER14,   12'hc0e)
+`CSR(HPMCOUNTER15,   12'hc0f)
+`CSR(HPMCOUNTER16,   12'hc10)
+`CSR(HPMCOUNTER17,   12'hc11)
+`CSR(HPMCOUNTER18,   12'hc12)
+`CSR(HPMCOUNTER19,   12'hc13)
+`CSR(HPMCOUNTER20,   12'hc14)
+`CSR(HPMCOUNTER21,   12'hc15)
+`CSR(HPMCOUNTER22,   12'hc16)
+`CSR(HPMCOUNTER23,   12'hc17)
+`CSR(HPMCOUNTER24,   12'hc18)
+`CSR(HPMCOUNTER25,   12'hc19)
+`CSR(HPMCOUNTER26,   12'hc1a)
+`CSR(HPMCOUNTER27,   12'hc1b)
+`CSR(HPMCOUNTER28,   12'hc1c)
+`CSR(HPMCOUNTER29,   12'hc1d)
+`CSR(HPMCOUNTER30,   12'hc1e)
+`CSR(HPMCOUNTER31,   12'hc1f)
+
+`CSR(MHPMCOUNTER3,    12'hb03)
+`CSR(MHPMCOUNTER4,    12'hb04)
+`CSR(MHPMCOUNTER5,    12'hb05)
+`CSR(MHPMCOUNTER6,    12'hb06)
+`CSR(MHPMCOUNTER7,    12'hb07)
+`CSR(MHPMCOUNTER8,    12'hb08)
+`CSR(MHPMCOUNTER9,    12'hb09)
+`CSR(MHPMCOUNTER10,   12'hb0a)
+`CSR(MHPMCOUNTER11,   12'hb0b)
+`CSR(MHPMCOUNTER12,   12'hb0c)
+`CSR(MHPMCOUNTER13,   12'hb0d)
+`CSR(MHPMCOUNTER14,   12'hb0e)
+`CSR(MHPMCOUNTER15,   12'hb0f)
+`CSR(MHPMCOUNTER16,   12'hb10)
+`CSR(MHPMCOUNTER17,   12'hb11)
+`CSR(MHPMCOUNTER18,   12'hb12)
+`CSR(MHPMCOUNTER19,   12'hb13)
+`CSR(MHPMCOUNTER20,   12'hb14)
+`CSR(MHPMCOUNTER21,   12'hb15)
+`CSR(MHPMCOUNTER22,   12'hb16)
+`CSR(MHPMCOUNTER23,   12'hb17)
+`CSR(MHPMCOUNTER24,   12'hb18)
+`CSR(MHPMCOUNTER25,   12'hb19)
+`CSR(MHPMCOUNTER26,   12'hb1a)
+`CSR(MHPMCOUNTER27,   12'hb1b)
+`CSR(MHPMCOUNTER28,   12'hb1c)
+`CSR(MHPMCOUNTER29,   12'hb1d)
+`CSR(MHPMCOUNTER30,   12'hb1e)
+`CSR(MHPMCOUNTER31,   12'hb1f)
+
+`CSR(MCOUNTERINHIBIT,     12'h320) // Machine Counter-Inhibit
+
+`CSR(MHPMEVENT3,    12'h323)
+`CSR(MHPMEVENT4,    12'h324)
+`CSR(MHPMEVENT5,    12'h325)
+`CSR(MHPMEVENT6,    12'h326)
+`CSR(MHPMEVENT7,    12'h327)
+`CSR(MHPMEVENT8,    12'h328)
+`CSR(MHPMEVENT9,    12'h329)
+`CSR(MHPMEVENT10,   12'h32a)
+`CSR(MHPMEVENT11,   12'h32b)
+`CSR(MHPMEVENT12,   12'h32c)
+`CSR(MHPMEVENT13,   12'h32d)
+`CSR(MHPMEVENT14,   12'h32e)
+`CSR(MHPMEVENT15,   12'h32f)
+`CSR(MHPMEVENT16,   12'h330)
+`CSR(MHPMEVENT17,   12'h331)
+`CSR(MHPMEVENT18,   12'h332)
+`CSR(MHPMEVENT19,   12'h333)
+`CSR(MHPMEVENT20,   12'h334)
+`CSR(MHPMEVENT21,   12'h335)
+`CSR(MHPMEVENT22,   12'h336)
+`CSR(MHPMEVENT23,   12'h337)
+`CSR(MHPMEVENT24,   12'h338)
+`CSR(MHPMEVENT25,   12'h339)
+`CSR(MHPMEVENT26,   12'h33a)
+`CSR(MHPMEVENT27,   12'h33b)
+`CSR(MHPMEVENT28,   12'h33c)
+`CSR(MHPMEVENT29,   12'h33d)
+`CSR(MHPMEVENT30,   12'h33e)
+`CSR(MHPMEVENT31,   12'h33f)
+
+`CSR(MVENDORID,  12'hf11)
+`CSR(MARCHID,    12'hf12)
+`CSR(MIMPID,     12'hf13)
+`CSR(MHARTID,    12'hf14)
+`CSR(MCCSR,      12'hbc0)
+`ifdef SECURITY
+// sanctum machine CSR
+`CSR(MEVBASE,    12'h7c0)
+`CSR(MEVMASK,    12'h7c1)
+`CSR(MEATP,      12'h7c2)
+`CSR(MMRBM,      12'h7c3)
+`CSR(MEMRBM,     12'h7c4)
+`CSR(MPARBASE,   12'h7c5)
+`CSR(MPARMASK,   12'h7c6)
+`CSR(MEPARBASE,  12'h7c7)
+`CSR(MEPARMASK,  12'h7c8)
+`CSR(MFLUSH,     12'h7c9) // flush pipeline + cache
+`CSR(MSPEC,      12'h7ca) // control speculation
+// sanctum user CSR
+`CSR(TRNG,       12'hcc0) // random number for secure boot
+`endif
+
+`CSR(TSELECT,     12'h7A0)    // Debug/trace tselect
+`CSR(TDATA1,      12'h7A1)    // Debug/trace tdata1
+`CSR(TDATA2,      12'h7A2)    // Debug/trace tdata2
+`CSR(TDATA3,      12'h7A3)    // Debug/trace tdata3
+
+`ifdef INCLUDE_GDB_CONTROL
+`CSR(DCSR,        12'h7B0)    // Debug control and status
+`CSR(DPC,         12'h7B1)    // Debug PC
+`CSR(DSCRATCH0,   12'h7B2)    // Debug scratch0
+`CSR(DSCRATCH1,   12'h7B3)    // Debug scratch1
+`endif

@@ -1,0 +1,167 @@
+---
+
+#-
+# SPDX-License-Identifier: BSD-2-Clause
+#
+# Copyright (c) 2021 Franz Fuchs
+# All rights reserved.
+#
+# This software was developed by SRI International and the University of
+# Cambridge Computer Laboratory (Department of Computer Science and
+# Technology) under DARPA contract HR0011-18-C-0016 ("ECATS"), as part of the
+# DARPA SSITH research programme.
+#
+# Redistribution and use in source and binary forms, with or without
+# modification, are permitted provided that the following conditions
+# are met:
+# 1. Redistributions of source code must retain the above copyright
+#    notice, this list of conditions and the following disclaimer.
+# 2. Redistributions in binary form must reproduce the above copyright
+#    notice, this list of conditions and the following disclaimer in the
+#    documentation and/or other materials provided with the distribution.
+#
+# THIS SOFTWARE IS PROVIDED BY THE AUTHOR AND CONTRIBUTORS ``AS IS'' AND
+# ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE
+# IMPLIED WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE
+# ARE DISCLAIMED.  IN NO EVENT SHALL THE AUTHOR OR CONTRIBUTORS BE LIABLE
+# FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL
+# DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS
+# OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION)
+# HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT
+# LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY
+# OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF
+# SUCH DAMAGE.
+
+  core_events:
+    struct_name: "EventsCore"
+    start_off: 0x00
+    end_off: 0x1f
+    events:
+      no_ev:    0x00
+      redirect: 0x01
+      trap:    0x02
+      branch:   0x03
+      jal:      0x04
+      jalr:     0x05
+      auipc:    0x06
+      load:     0x07
+      store:    0x08
+      lr:       0x09
+      sc:       0x0a
+      amo:      0x0b
+      serial_shift: 0x0c
+      int_mul_div_rem:  0x0d
+      fp:       0x0e
+      sc_success:  0x0f
+      load_wait:  0x10
+      store_wait:  0x11
+      fence:    0x12
+      f_busy_no_consume: 0x13
+      d_busy_no_consume: 0x14
+      1_busy_no_consume: 0x15
+      2_busy_no_consume: 0x16
+      3_busy_no_consume: 0x17
+      imprecise_setbound: 0x18
+      unrepresentable_cap: 0x19
+      mem_cap_load: 0x1a
+      mem_cap_store: 0x1b
+      mem_cap_load_tag_set: 0x1c
+      mem_cap_store_tag_set: 0x1d
+      interrupt: 0x1e
+
+  i_l1_events:
+    struct_name: "EventsL1I"
+    start_off: 0x20
+    end_off: 0x2d
+    events:
+      ld:       0x0
+      ld_miss:  0x1
+      ld_miss_lat: 0x02
+      tlb:      0x09
+      tlb_miss: 0x0a
+      tlb_miss_lat: 0x0b
+      tlb_flush: 0x0c
+
+  d_l1_events:
+    struct_name: "EventsL1D"
+    start_off: 0x30
+    end_off: 0x3e
+    events:
+      ld:       0x0
+      ld_miss:  0x1
+      ld_miss_lat: 0x02
+      st:       0x03
+      st_miss:  0x04
+      st_miss_lat: 0x05
+      amo:      0x06
+      amo_miss: 0x07
+      amo_miss_lat: 0x08
+      tlb:      0x09
+      tlb_miss: 0x0a
+      tlb_miss_lat: 0x0b
+      tlb_flush: 0x0c
+      evict: 0xd
+
+  ll_events:
+    struct_name: "EventsLL"
+    start_off: 0x60
+    end_off: 0x6e
+    events:
+      ld: 0x0
+      ld_miss:  0x1
+      ld_miss_lat: 0x02
+      st: 0x3
+      st_miss: 0x4
+      tlb:      0x9
+      tlb_miss: 0xa
+      tlb_flush: 0xc
+      evict: 0xd
+
+  tgc_events:
+    struct_name: "EventsTGC"
+    start_off: 0x40
+    end_off: 0x47
+    events:
+      write_miss: 0x01
+      write:      0x00
+      read:       0x02
+      read_miss:  0x03
+      evict:      0x04
+      set_tag_write:  0x05
+      set_tag_read:  0x06
+
+  trans_exe_events:
+    struct_name: "EventsTransExe"
+    start_off: 0x70
+    end_off: 0x73
+    events:
+      renamed_inst: 0x00
+      wild_jump: 0x01
+      wild_exception: 0x02
+
+  ext_slave_events:
+    struct_name: "AXI4_Slave_Events"
+    start_off: 0x47
+    end_off: 0x4e
+    events:
+      aw_flit: 0x0
+      w_flit: 0x1
+      w_flit_final: 0x2
+      b_flit: 0x3
+      ar_flit: 0x4
+      r_flit: 0x5
+      r_flit_final: 0x6
+
+  ext_master_events:
+    struct_name: "AXI4_Master_Events"
+    start_off: 0x4e
+    end_off: 0x55
+    events:
+      aw_flit: 0x0
+      w_flit: 0x1
+      w_flit_final: 0x2
+      b_flit: 0x3
+      ar_flit: 0x4
+      r_flit: 0x5
+      r_flit_final: 0x6
+

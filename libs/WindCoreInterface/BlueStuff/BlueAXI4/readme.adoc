@@ -1,0 +1,158 @@
+:toc: macro
+:toclevels: 4
+:toc-title:
+:toc-placement!:
+:source-highlighter:
+
+= BlueAXI4
+
+https://github.com/CTSRD-CHERI/BlueAXI4/[BlueAXI4] is a library for AXI4 communication.
+It aims to provide a set of BSV primitives to help in writing hardware using the AXI4 communication protocol, as well as a set of C primitives to help in writing host code to interface with a simulator exposing an AXI4 interface.
+Following is a description and documentation of some relevant subsets of the library.
+
+toc::[]
+
+:sectnums:
+
+= Types
+
+[source,bsv]
+------------
+typedef struct {
+  Bit#(id_)   awid;
+  Bit#(addr_) awaddr;
+  AXI4_Len    awlen;
+  AXI4_Size   awsize;
+  AXI4_Burst  awburst;
+  AXI4_Lock   awlock;
+  AXI4_Cache  awcache;
+  AXI4_Prot   awprot;
+  AXI4_QoS    awqos;
+  AXI4_Region awregion;
+  Bit#(user_) awuser;
+} AXI4_AWFlit#(numeric type id_, numeric type addr_, numeric type user_)
+deriving (Bits, FShow);
+------------
+
+[source,bsv]
+------------
+typedef struct {
+  Bit#(data_)           wdata;
+  Bit#(TDiv#(data_, 8)) wstrb;
+  Bool                  wlast;
+  Bit#(user_)           wuser;
+} AXI4_WFlit#(numeric type data_, numeric type user_) deriving (Bits, FShow);
+------------
+
+[source,bsv]
+------------
+typedef struct {
+  Bit#(id_)   bid;
+  AXI4_Resp   bresp;
+  Bit#(user_) buser;
+} AXI4_BFlit#(numeric type id_, numeric type user_) deriving (Bits, FShow);
+------------
+
+[source,bsv]
+------------
+typedef struct {
+  Bit#(id_)   arid;
+  Bit#(addr_) araddr;
+  AXI4_Len    arlen;
+  AXI4_Size   arsize;
+  AXI4_Burst  arburst;
+  AXI4_Lock   arlock;
+  AXI4_Cache  arcache;
+  AXI4_Prot   arprot;
+  AXI4_QoS    arqos;
+  AXI4_Region arregion;
+  Bit#(user_) aruser;
+} AXI4_ARFlit#(numeric type id_, numeric type addr_, numeric type user_)
+deriving (Bits, FShow);
+------------
+
+[source,bsv]
+------------
+typedef struct {
+  Bit#(id_)   rid;
+  Bit#(data_) rdata;
+  AXI4_Resp   rresp;
+  Bool        rlast;
+  Bit#(user_) ruser;
+} AXI4_RFlit#(numeric type id_, numeric type data_, numeric type user_)
+deriving (Bits, FShow);
+------------
+
+= Flit transformations
+
+== AXI4 Master transformations
+
+[source,bsv]
+------------
+function AXI4_Master #(id_out, b, c, d, e, f, g, h)
+  mapAXI4_Master_id ( function Bit #(id_out) fReq (Bit #(id_in)  x)
+                    , function Bit #(id_in)  fRsp (Bit #(id_out) x)
+                    , AXI4_Master #(id_in, b, c, d, e, f, g, h) m);
+------------
+
+[source,bsv]
+------------
+function AXI4_Master #(a, addr_out, c, d, e, f, g, h)
+  mapAXI4_Master_addr ( function Bit #(addr_out) fun (Bit #(addr_in) x)
+                      , AXI4_Master #(a, addr_in, c, d, e, f, g, h)  m);
+------------
+
+[source,bsv]
+------------
+function AXI4_Master #(a, b, c, d_, e_, f_, g_, h_)
+  mapAXI4_Master_user ( function Bit #(d_) fAW (Bit #(d)  x)
+                      , function Bit #(e_) fW  (Bit #(e)  x)
+                      , function Bit #(f)  fB  (Bit #(f_) x)
+                      , function Bit #(g_) fAR (Bit #(g)  x)
+                      , function Bit #(h)  fR  (Bit #(h_) x)
+                      , AXI4_Master #(a, b, c, d, e, f, g, h) m);
+------------
+
+== AXI4 Slave transformations
+
+[source,bsv]
+------------
+function AXI4_Slave #(a, addr_in, c, d, e, f, g, h)
+  mapAXI4_Slave_addr ( function Bit #(addr_out) fun (Bit #(addr_in) x)
+                     , AXI4_Slave #(a, addr_out, c, d, e, f, g, h) s);
+------------
+
+[source,bsv]
+------------
+function AXI4_Slave #(a, b, c, d_, e_, f_, g_, h_)
+  mapAXI4_Slave_user ( function Bit #(d)  fAW (Bit #(d_) x)
+                     , function Bit #(e)  fW  (Bit #(e_) x)
+                     , function Bit #(f_) fB  (Bit #(f)  x)
+                     , function Bit #(g)  fAR (Bit #(g_) x)
+                     , function Bit #(h_) fR  (Bit #(h)  x)
+                     , AXI4_Slave #(a, b, c, d, e, f, g, h) s);
+------------
+
+= Misc. utilites
+
+[source,bsv]
+------------
+module change_AXI4_Master_Id #( // received parameters
+                                parameter NumProxy #(nbEntries) proxyTableSz
+                              , parameter NumProxy #(regsCntSz) proxyRegsCntSz
+                                // received master port
+                              , AXI4_Master #(t_id_a,b,c,d,e,f,g,h) mstr_a )
+  // returned interface
+  (AXI4_Master #(t_id_b,b,c,d,e,f,g,h));
+------------
+
+[source,bsv]
+------------
+module change_AXI4_Slave_Id #( // received parameters
+                               parameter NumProxy #(nbEntries) proxyTableSz
+                             , parameter NumProxy #(regsCntSz) proxyRegsCntSz
+                               // received master port
+                             , AXI4_Slave #(t_id_a,b,c,d,e,f,g,h) slv_a )
+  // returned interface
+  (AXI4_Slave #(t_id_b,b,c,d,e,f,g,h));
+  ------------

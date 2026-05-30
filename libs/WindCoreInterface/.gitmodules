@@ -1,0 +1,3 @@
+[submodule "BlueStuff"]
+	path = BlueStuff
+	url = https://github.com/CTSRD-CHERI/BlueStuff.git

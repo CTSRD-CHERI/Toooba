@@ -1,0 +1,160 @@
+:toc: macro
+:toclevels: 4
+:toc-title:
+:toc-placement!:
+:source-highlighter:
+
+= BlueBasics
+
+`BlueBasics` is a https://github.com/B-Lang-org[Bluespec] library of basic helper types and utilities.
+The functionalities provided by `BlueBasics` should only rely on primitives already present in a standard Bluespec distribution or on other `BlueBasics`-provided primitives.
+
+toc::[]
+
+:sectnums:
+
+== link:SourceSink.bsv[SourceSink]
+
+The `Source` and `Sink` types are the most central types introduced by `BlueBasics`.
+They augment the standard `Get` and `Put` with explicit control flow signal (the way `FIFOF` augments `FIFO`).
+They are used virtually everywhere else in `BlueBasics` (and in Bluespec code that relies on `BlueBasics`).
+They are particulary usefull to design low latency interconnect components.
+
+=== Types
+
+==== `Source`
+[source,bsv]
+--------
+interface Source #(type t);
+  (* always_ready *) method Bool canPeek;
+  method t peek;
+  method Action drop;
+endinterface
+--------
+
+==== `Sink`
+[source,bsv]
+--------
+interface Sink #(type t);
+  (* always_ready *) method Bool canPut;
+  method Action put (t val);
+endinterface
+--------
+
+==== `SourceSinkShim`
+[source,bsv]
+--------
+interface SourceSinkShim #(type t);
+  interface Source #(t) source;
+  interface Sink   #(t) sink;
+endinterface
+--------
+
+== link:Primitives.bsv[Primitives]
+
+Miscelaneous primitives that get used throughout `BlueBasics` and outside.
+
+=== Proxy types
+
+Proxy types are provided to palliate the lack of type application in Bluespec.
+
+==== `Proxy`
+[source,bsv]
+--------
+typedef struct {} Proxy #(type t);
+--------
+
+==== `NumProxy`
+[source,bsv]
+--------
+typedef struct {} NumProxy #(numeric type n);
+--------
+
+== link:CreditBasedFlowControl.bsv[CreditBasedFlowControl]
+
+In addition to the previous `Source` and `Sink` interfaces, some credit-based `SourceWithCredit` and `SinkWithCredit` are also provided whose flow control is guarded on the presence of credit which is exchange through an extra `Sink` or `Source` interface.
+
+=== Types
+
+==== `SourceWithCredit`
+[source,bsv]
+--------
+typedef struct {
+  Source #(t) data;
+  Sink #(Bit #(0)) credit;
+} SourceWithCredit #(type t);
+--------
+
+==== `SinkWithCredit`
+[source,bsv]
+--------
+typedef struct {
+  Sink #(t) data;
+  Source #(Bit #(0)) credit;
+} SinkWithCredit #(type t);
+--------
+
+=== Helpers
+
+Some helper Bluespec modules are provided to augment `Source`s and `Sink`s with credit.
+
+==== `toSourceWithCredit`
+[source,bsv]
+--------
+module toSourceWithCredit #(parameter NumProxy #(t_max_credits) _proxy, t_src s)
+                           (SourceWithCredit #(t));
+--------
+
+==== `toSinkWithCredit`
+[source,bsv]
+--------
+module toSinkWithCredit #(parameter NumProxy #(t_max_credits) _proxy, t_snk s)
+                         (SinkWithCredit #(t));
+--------
+
+== link:MasterSlave.bsv[MasterSlave]
+
+A `Master` is a `Source` of requests and a `Sink` for responses.
+A `Slave` is a `Sink` for requests and a `Source` of responses.
+
+=== Types
+
+==== `Master`
+[source,bsv]
+--------
+interface Master #(type t_req, type t_rsp);
+  interface Source #(t_req) req;
+  interface Sink   #(t_rsp) rsp;
+endinterface
+--------
+
+==== `Slave`
+[source,bsv]
+--------
+interface Slave #(type t_req, type t_rsp);
+  interface Sink   #(t_req) req;
+  interface Source #(t_rsp) rsp;
+endinterface
+--------
+
+== link:Virtualizable.bsv[Virtualize]
+
+The `Virtualizable` typeclass provides a single method, `virtualize`, which receive an instance of an interface together with an integer `n`, and return an array of `n` virtualized interfaces to the initial interface.
+`Virtualizable` instances are also provided for `Reg`, `Server` and `Slave`.
+
+=== Types
+
+==== `Virtualizable`
+[source,bsv]
+--------
+typeclass Virtualizable #(type t);
+  module virtualize #(t x, Integer n)(Array #(t));
+endtypeclass
+--------
+
+== link:Interconnect.bsv[Interconnect]
+
+=== link:Routable.bsv[Routable]
+=== link:OneHotArbiter.bsv[OneHotArbiter]
+=== link:OneWayBus.bsv[OneWayBus]
+=== link:TwoWayBus.bsv[TwoWayBus]

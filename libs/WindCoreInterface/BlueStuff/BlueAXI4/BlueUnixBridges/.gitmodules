@@ -1,0 +1,3 @@
+[submodule "BlueBasics"]
+	path = BlueBasics
+	url = https://github.com/CTSRD-CHERI/BlueBasics.git

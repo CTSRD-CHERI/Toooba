@@ -1,0 +1,6 @@
+[submodule "BlueStuff"]
+	path = BlueStuff
+	url = https://github.com/CTSRD-CHERI/BlueStuff.git
+[submodule "Test/bluecheck"]
+	path = Test/bluecheck
+	url = https://github.com/CTSRD-CHERI/bluecheck.git
