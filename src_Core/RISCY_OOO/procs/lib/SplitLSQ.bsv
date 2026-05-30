@@ -309,12 +309,14 @@ typedef struct {
     ByteOrTagEn shiftedBE;
     Maybe#(Addr) objIdPAddr;
     Bit#(16) pcHash;
+    Bit#(8) mte;
 } LSQIssueLdInfo deriving(Bits, Eq, FShow);
 
 typedef struct {
     Bool wrongPath;
     Maybe#(PhyDst) dst;
     Bool allowCap;
+    Bit#(8) mte;
 `ifdef INCLUDE_TANDEM_VERIF
     InstTag instTag;    // For recording Ld data in ROB
 `endif
@@ -342,6 +344,7 @@ typedef struct {
     Bool               allowCap;
     Maybe#(LdKilledBy) killed;
     Maybe#(Addr)      objIdPAddr;
+    Bit#(8)            mte;
 } LdQDeqEntry deriving (Bits, Eq, FShow);
 
 typedef struct {
@@ -705,6 +708,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(LdQMemFunc))              ld_memFunc         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_unsigned        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(ByteOrTagEn))             ld_byteOrTagEn     <- replicateM(mkConfigRegU);
+    Vector#(LdQSize, Reg#(Bit#(8)))                 ld_mte            <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_allowCap        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_acq             <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_rel             <- replicateM(mkConfigRegU);
@@ -1233,6 +1237,7 @@ module mkSplitLSQ(SplitLSQ);
                 tag: tag,
                 paddr: ld_paddr_findIss[tag],
                 shiftedBE: ld_shiftedBE_findIss[tag],
+                mte: ld_mte[tag],
                 objIdPAddr: ld_objIdPAddr_findIss[tag],
                 pcHash: ld_pcHash[tag]
             };
@@ -1547,6 +1552,7 @@ module mkSplitLSQ(SplitLSQ);
         ld_memFunc[ld_enqP] <= getLdQMemFunc(mem_inst.mem_func);
         ld_unsigned[ld_enqP] <= mem_inst.unsignedLd;
         ld_byteOrTagEn[ld_enqP] <= mem_inst.byteOrTagEn;
+        ld_mte[ld_enqP] <= 8'h0;
         ld_acq[ld_enqP] <= mem_inst.aq;
         ld_rel[ld_enqP] <= mem_inst.rl;
         ld_dst[ld_enqP] <= dst;
@@ -1682,6 +1688,7 @@ module mkSplitLSQ(SplitLSQ);
             ld_objIdOffset_updAddr[tag] <= objIdOffset;
             ld_allowCap[tag] <= allowCap;
             ld_isMMIO_updAddr[tag] <= mmio;
+            ld_mte[tag] <= mte;
             ld_shiftedBE_updAddr[tag] <= shift_be;
 
             delayIssue = isValid(ld_olderSt_updAddr[tag]) && ld_waitForOlderSt[tag];
@@ -1842,7 +1849,9 @@ module mkSplitLSQ(SplitLSQ);
             doAssert(isValid(ld_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
             
             // get objId seal bit using offset
-            Bool isSealed = extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
+            Bit#(8) memMTE = extractMemMTE(d, ld_objIdOffset_updObjIdSeal[tag]);
+            Bool isSealed = (ld_mte[tag] != memMTE);//extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
+            $display("ld mte check", fshow(isSealed), fshow(ld_mte[tag]), fshow(memMTE) );
             Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcColorViolation})) :
                                             Invalid;
             
@@ -2222,6 +2231,7 @@ module mkSplitLSQ(SplitLSQ);
             wrongPath: False,
             dst: Invalid,
             allowCap: False,
+            mte: 'h0,
 `ifdef INCLUDE_TANDEM_VERIF
             instTag: ld_instTag [t],    // For recording Ld data in ROB
 `endif
@@ -2254,6 +2264,7 @@ module mkSplitLSQ(SplitLSQ);
             let is32BitLd = bEn matches tagged DataMemAccess .bEnData &&& (bEnData[3] && !bEnData[7]) ? True : False;
             res.allowCap = allowCap;
             res.dst = ld_dst[t];
+            res.mte = ld_mte[t];
             if (dst.Valid.isFpuReg && is32BitLd)
                res.data = fv_nanbox_MemTaggedData(
                  gatherLoad(ld_paddr_resp[t], ld_byteOrTagEn[t],
@@ -2287,6 +2298,7 @@ module mkSplitLSQ(SplitLSQ);
             acq: ld_acq[deqP],
             rel: ld_rel[deqP],
             dst: ld_dst[deqP],
+            mte: ld_mte[deqP],
             paddr: ld_paddr_deqLd[deqP],
             isMMIO: ld_isMMIO_deqLd[deqP],
             shiftedBE: ld_shiftedBE_deqLd[deqP],
