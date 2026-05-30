@@ -147,6 +147,8 @@ typedef struct {
     Bool allowCapLoad;
     Maybe#(CSR_XCapCause) capException;
     Maybe#(BoundsCheck) check;
+    Bit#(8) mte;
+
 `ifdef KONATA
     Bit#(64) u_id;
 `endif
@@ -753,6 +755,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     vaddr: x.vaddr,
                     objIdAddr: objIdVAddr, //Valid('h80010000),
                     objIdOffset: objIdOffset,
+                    mte: getMTE(x.rVal1),
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
                     store_data_BE: origBE,
@@ -781,6 +784,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     vaddr: x.vaddr,
                     objIdAddr: Invalid,
                     objIdOffset: objIdOffset,
+                    mte: getMTE(x.rVal1),
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
                     store_data_BE: origBE,
@@ -835,7 +839,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
                                             );
             LSQUpdateAddrResult updRes <- lsq.updateAddr(
-                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE,
+                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE, x.mte,
                 /*(((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)*/ Invalid, x.objIdOffset
         );
         end
@@ -851,6 +855,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
                     objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
                     objIdOffset: x.objIdOffset,
+                    mte: x.mte,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.store_data,
                     store_data_BE: x.store_data_BE,
@@ -1000,7 +1005,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE,
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte,
             (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? x.objIdAddr : Invalid), x.objIdOffset
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
