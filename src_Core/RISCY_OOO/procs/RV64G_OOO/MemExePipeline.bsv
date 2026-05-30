@@ -148,6 +148,7 @@ typedef struct {
     Maybe#(CSR_XCapCause) capException;
     Maybe#(BoundsCheck) check;
     Bit#(8) mte;
+    Bit#(3) alloc_policy;
 
 `ifdef KONATA
     Bit#(64) u_id;
@@ -624,6 +625,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         // get virtual addr & St/Sc/Amo data
         CapPipe vaddr = modifyOffset(rVal1, signExtend(x.imm), True).value;
+        Bit#(3) alloc_policy = lsq.getAllocPolicy(x.ldstq_tag);
+        if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin 
+            //vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
+            vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4096 -64 + zeroExtend(getTloc(rVal1) ))).value;
+            $display("sendmemmte", fshow(vaddr));
+        end 
         CapPipe data = rVal2;
         MemTaggedData toMemData = unpack(pack(toMem(data)));
 
@@ -666,13 +673,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 imm: x.imm,
                 tag: x.tag,
                 ldstq_tag: x.ldstq_tag,
+                alloc_policy: alloc_policy,
                 rVal1: rVal1,
                 rVal2: rVal2,
                 vaddr: vaddr,
                 cap_checks: x.cap_checks,
                 origBE: origBE,
-                shiftBEData: shiftBEData,
-                alloc_policy: 3'h0
+                shiftBEData: shiftBEData
 `ifdef KONATA
                 , u_id: x.u_id
 `endif
@@ -756,6 +763,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     objIdAddr: objIdVAddr, //Valid('h80010000),
                     objIdOffset: objIdOffset,
                     mte: getMTE(x.rVal1),
+                    alloc_policy: x.alloc_policy,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
                     store_data_BE: origBE,
@@ -785,6 +793,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     objIdAddr: Invalid,
                     objIdOffset: objIdOffset,
                     mte: getMTE(x.rVal1),
+                    alloc_policy: x.alloc_policy,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
                     store_data_BE: origBE,
@@ -839,7 +848,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
                                             );
             LSQUpdateAddrResult updRes <- lsq.updateAddr(
-                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE, x.mte,
+                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE, x.mte, x.alloc_policy,
                 /*(((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)*/ Invalid, x.objIdOffset
         );
         end
@@ -856,6 +865,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
                     objIdOffset: x.objIdOffset,
                     mte: x.mte,
+                    alloc_policy: x.alloc_policy,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.store_data,
                     store_data_BE: x.store_data_BE,
@@ -1005,7 +1015,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte,
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy, 
             (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? x.objIdAddr : Invalid), x.objIdOffset
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
@@ -1028,6 +1038,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 shiftedBE: x.shiftedBE,
                 objIdPAddr: x.objIdAddr,
                 mte: x.mte,
+                alloc_policy: x.alloc_policy,
                 pcHash: hash(getAddr(pc))
             });
         end
