@@ -1027,6 +1027,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
                 objIdPAddr: x.objIdAddr,
+                mte: x.mte,
                 pcHash: hash(getAddr(pc))
             });
         end
