@@ -1,0 +1,8 @@
+= BlueStuff
+
+**BlueStuff** is a https://github.com/B-Lang-org[Bluespec] library of miscellaneous components.
+It is mainly an umbrella package to redistribute other more fundamental components and libraries.
+It currently also provides a set of utility components in the link:BlueUtils[BlueUtils] directory, as well as a few AXI components leveraging the https://github.com/CTSRD-CHERI/BlueAXI4[BlueAXI4] library.
+
+== Get the submodules
+Submodules can be checked out by running  `git submodule update --init --recursive`.

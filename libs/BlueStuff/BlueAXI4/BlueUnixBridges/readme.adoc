@@ -1,0 +1,59 @@
+:toc: macro
+:toclevels: 4
+:toc-title:
+:toc-placement!:
+:source-highlighter:
+
+= BlueUnixBridges
+
+This repository provides a set of utilities to enable bluespec simulators to expose some of their I/O ports to their host systems via unix fifo or sockets (currently only fifos).
+It also provides some utility functions to enable writing host tools to communicate with simulators.
+See the https://github.com/gameboo/BlueUnixFifo/tree/main/examples[examples] for more details.
+
+toc::[]
+
+:sectnums:
+
+= APIs
+
+The BlueUnixBridges library provides a set of C and BSV functions. The C
+functions are prefixed by the initials of each word in the library name, `bub`,
+followed by one of `_fifo_` or `_socket_`, and then followed by the actual
+function name.
+
+== Unix fifos API
+
+=== "Simulator" Bluespec SystemVerilog API
+
+```bsv
+module mkUnixFifoSource #(String pathname) (Source #(t));
+```
+```bsv
+module mkUnixFifoSink #(String pathname) (Sink #(t))
+```
+
+=== "Host" C API
+
+```c
+fifo_desc_t* bub_fifo_OpenAsProducer (char* pathname, size_t bytesize, encoder_t encoder);
+```
+```c
+fifo_desc_t* bub_fifo_OpenAsConsumer (char* pathname, size_t bytesize, decoder_t decoder);
+```
+```c
+fifo_desc_t* bub_fifo_OpenAsProducerConsumer (char* pathname, size_t bytesize, encoder_t encoder, decoder_t decoder);
+```
+```c
+bool bub_fifo_Consume (fifo_desc_t* desc, void* elemdest);
+```
+```c
+bool bub_fifo_Produce (fifo_desc_t* desc, void* elemsrc);
+```
+```c
+void bub_fifo_Close (fifo_desc_t* desc);
+```
+
+== Future work
+=== Socket bridges
+=== more documentation
+=== catch simulator termination and destroy unix fifos

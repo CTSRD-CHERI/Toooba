@@ -1,0 +1,15 @@
+[submodule "BlueBasics"]
+	path = BlueBasics
+	url = https://github.com/CTSRD-CHERI/BlueBasics.git
+[submodule "SocketPacketUtils"]
+	path = SocketPacketUtils
+	url = https://github.com/CTSRD-CHERI/SocketPacketUtils.git
+[submodule "BlueAXI4"]
+	path = BlueAXI4
+	url = https://github.com/CTSRD-CHERI/BlueAXI4.git
+[submodule "BlueAvalon"]
+	path = BlueAvalon
+	url = https://github.com/CTSRD-CHERI/BlueAvalon.git
+[submodule "Recipe"]
+	path = Recipe
+	url = https://github.com/CTSRD-CHERI/Recipe.git
