@@ -347,6 +347,7 @@ typedef union tagged {
     void SetHigh;
     void SetMTE;
     void SetTloc;
+    void SetTmode;
     void BuildCap;
     void Move;
     void ClearTag;
@@ -369,6 +370,7 @@ typedef union tagged {
     void GetHigh;
     void GetMTE;
     void GetTloc;
+    void GetTmode;
     void ToPtr;
 } CapInspectFunc deriving(Bits, Eq, FShow);
 
@@ -1072,7 +1074,7 @@ function Fmt showInst(Instruction inst);
   return ret;
 endfunction
 
-function x addPc(x cap, Bit#(12) inc) provisos (Add#(f, 12, e), CHERICap::CHERICap#(x, a, b, c, d, e, h, j)) = setAddrUnsafe(cap, getAddr(cap) + signExtend(inc));
+function x addPc(x cap, Bit#(12) inc) provisos (Add#(f, 12, h), CHERICap::CHERICap#(x, a, b, c, d, e, h, i, j)) = setAddrUnsafe(cap, getAddr(cap) + signExtend(inc));
 
 `ifdef PERFORMANCE_MONITORING
 typedef   8 Report_Width;

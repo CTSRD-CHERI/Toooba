@@ -278,6 +278,8 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 setMTE(a_mut,  truncate(getAddr(b))); 
             tagged SetTloc:
                 setTloc(a_mut,  truncate(getAddr(b))); 
+            tagged SetTmode:
+                setTmode(a_mut,  truncate(getAddr(b))); 
             tagged BuildCap               :
                 setKind(setValidCap(a_mut, !buildCapIllegal), getKind(a)==SENTRY ? SENTRY : UNSEALED);
             tagged Move                   :
@@ -322,6 +324,8 @@ function Data capInspect(CapPipe a, CapPipe b, CapInspectFunc func);
                    zeroExtend(getMTE(a));
                tagged GetTloc                : 
                    zeroExtend(getTloc(a));
+               tagged GetTmode                : 
+                   zeroExtend(getTmode(a));
                tagged GetType                :
                    tpl_1(extractType(a));
                tagged ToPtr                  :
