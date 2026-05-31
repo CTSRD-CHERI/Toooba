@@ -723,7 +723,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                       Bit#(64) byteIndex = zeroExtend(getTloc(x.rVal1) >> 3);   
                       Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
                       objIdVAddr = Valid((getAddr(x.vaddr)& 64'hFFFFFFFFFFFFF000 ) + 4096-64 );
-                      objIdOffset = truncate(getTloc(x.rVal1));
+                      objIdOffset = zeroExtend(getTloc(x.rVal1));
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
                                           " objIdVAddr ", fshow(objIdVAddr), 
                                           " objIdOffset:", fshow(objIdOffset),
