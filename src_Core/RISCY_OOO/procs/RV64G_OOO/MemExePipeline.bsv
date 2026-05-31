@@ -628,7 +628,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Bit#(3) alloc_policy = lsq.getAllocPolicy(x.ldstq_tag);
         if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin 
             //vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
-            vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4096 -64 + zeroExtend(getTloc(rVal1) ))).value;
+            if(getTmode(rVal1) == 'h0) begin 
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
+            end else begin 
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4096 -64 + zeroExtend(getTloc(rVal1) ))).value;
+            end 
             $display("sendmemmte", fshow(vaddr));
         end 
         CapPipe data = rVal2;
@@ -718,7 +722,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         Bit#(7) objIdOffset = 'h0 ;
         
-        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 ) begin 
+        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) == 'h1 ) begin 
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
                       Bit#(64) byteIndex = zeroExtend(getTloc(x.rVal1) >> 3);   
                       Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
