@@ -197,7 +197,7 @@ Bit #(5) f5rs2_cap_CGetHigh    = 5'h17;
 Bit #(5) f5rs2_cap_CGetMTE     = 5'h18;
 Bit #(5) f5rs2_cap_CGetTloc    = 5'h19;
 Bit #(5) f5rs2_cap_CGetMemMTE  = 5'h1a;
-Bit #(5) f5rs2_cap_CGetTmode  = 5'h1b;
+Bit #(5) f5rs2_cap_CGetTmode   = 5'h1b;
 
 
 // 5'h18-5'h1f unused (5'h1f reserved for 1-reg instructions)
