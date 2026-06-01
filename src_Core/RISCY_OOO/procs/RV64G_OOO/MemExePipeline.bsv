@@ -722,7 +722,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         Bit#(7) objIdOffset = 'h0 ;
         
-        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) == 'h1 ) begin 
+        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) == 'h1 && x.alloc_policy == 'h0 ) begin 
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
                       Bit#(64) byteIndex = zeroExtend(getTloc(x.rVal1) >> 3);   
                       Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
