@@ -608,7 +608,7 @@ function Bit#(8) extractMemMTE(MemTaggedData d, Bit#(7) offset);
     if(offset <8)
         return d.data[0][(offset+1) * 8 - 1: (offset) * 8 ] ;
     else 
-        return d.data[0][(offset-8+1) * 8 - 1: (offset-8) * 8 ] ;
+        return d.data[1][(offset-8+1) * 8 - 1: (offset-8) * 8 ] ;
     // Would "pack(d.data)[offset] == 1'b1" be faster?  Not sure if it will generate an actual subtract...
 `endif
 endfunction
