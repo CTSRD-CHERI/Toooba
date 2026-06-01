@@ -726,8 +726,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
                       Bit#(64) byteIndex = zeroExtend(getTloc(x.rVal1) >> 3);   
                       Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
-                      objIdVAddr = Valid((getAddr(x.vaddr)& 64'hFFFFFFFFFFFFF000 ) + 4096-64 );
-                      objIdOffset = zeroExtend(getTloc(x.rVal1));
+                      objIdVAddr = Valid((getAddr(x.vaddr)& 64'hFFFFFFFFFFFFF000 ) + 4096-64 + (zeroExtend(getTloc(x.rVal1)& 6'h30)>>4)*16);
+                      objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
                                           " objIdVAddr ", fshow(objIdVAddr), 
                                           " objIdOffset:", fshow(objIdOffset),
