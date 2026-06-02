@@ -1,0 +1,304 @@
+Archive member included to satisfy reference by file (symbol)
+
+/usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-atexit.o)
+                              /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o (atexit)
+/usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-fini.o)
+                              /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o (__libc_fini_array)
+/usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-init.o)
+                              /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o (__libc_init_array)
+/usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-memset.o)
+                              /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o (memset)
+/usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__atexit.o)
+                              /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-atexit.o) (__register_exitproc)
+/usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__call_atexit.o)
+                              /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__atexit.o) (__call_exitprocs)
+
+Discarded input sections
+
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crti.o
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crti.o
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crti.o
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+ .data.__dso_handle
+                0x0000000000000000        0x4 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+ .text          0x0000000000000000       0x68 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o
+ .ARM.extab     0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o
+ .ARM.exidx     0x0000000000000000        0x8 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o
+ .ARM.attributes
+                0x0000000000000000       0x20 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o
+ .text          0x0000000000000000        0x0 vectors.o
+ .data          0x0000000000000000        0x0 vectors.o
+ .bss           0x0000000000000000        0x0 vectors.o
+ .ARM.attributes
+                0x0000000000000000       0x22 vectors.o
+ .data          0x0000000000000000        0x0 putget.o
+ .bss           0x0000000000000000        0x0 putget.o
+ .text          0x0000000000000000       0x64 supportFuncs.o
+ .data          0x0000000000000000        0x4 supportFuncs.o
+ .bss           0x0000000000000000        0x0 supportFuncs.o
+ .comment       0x0000000000000000       0x1e supportFuncs.o
+ .ARM.attributes
+                0x0000000000000000       0x32 supportFuncs.o
+ .text          0x0000000000000000     0x11a4 aes.o
+ .data          0x0000000000000000        0x0 aes.o
+ .bss           0x0000000000000000       0xbc aes.o
+ .rodata        0x0000000000000000      0x300 aes.o
+ .comment       0x0000000000000000       0x1e aes.o
+ .ARM.attributes
+                0x0000000000000000       0x32 aes.o
+ .text          0x0000000000000000        0x0 main.o
+ .data          0x0000000000000000        0x0 main.o
+ .bss           0x0000000000000000        0x0 main.o
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-atexit.o)
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-atexit.o)
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-atexit.o)
+ .text.atexit   0x0000000000000000        0xc /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-atexit.o)
+ .debug_frame   0x0000000000000000       0x20 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-atexit.o)
+ .ARM.attributes
+                0x0000000000000000       0x32 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-atexit.o)
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-fini.o)
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-fini.o)
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-fini.o)
+ .text.__libc_fini_array
+                0x0000000000000000       0x28 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-fini.o)
+ .debug_frame   0x0000000000000000       0x38 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-fini.o)
+ .ARM.attributes
+                0x0000000000000000       0x32 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-fini.o)
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-init.o)
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-init.o)
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-init.o)
+ .text.__libc_init_array
+                0x0000000000000000       0x48 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-init.o)
+ .debug_frame   0x0000000000000000       0x2c /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-init.o)
+ .ARM.attributes
+                0x0000000000000000       0x32 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-init.o)
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-memset.o)
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-memset.o)
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-memset.o)
+ .text.memset   0x0000000000000000       0x10 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-memset.o)
+ .debug_frame   0x0000000000000000       0x20 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-memset.o)
+ .ARM.attributes
+                0x0000000000000000       0x32 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-memset.o)
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__atexit.o)
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__atexit.o)
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__atexit.o)
+ .text.__register_exitproc
+                0x0000000000000000       0xc8 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__atexit.o)
+ .bss._global_atexit0
+                0x0000000000000000       0x8c /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__atexit.o)
+ .data.__atexit_dummy
+                0x0000000000000000        0x4 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__atexit.o)
+ .debug_frame   0x0000000000000000       0x34 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__atexit.o)
+ .ARM.attributes
+                0x0000000000000000       0x32 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__atexit.o)
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__call_atexit.o)
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__call_atexit.o)
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__call_atexit.o)
+ .text.__call_exitprocs
+                0x0000000000000000       0xd4 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__call_atexit.o)
+ .bss._global_atexit
+                0x0000000000000000        0x4 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__call_atexit.o)
+ .debug_frame   0x0000000000000000       0x3c /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__call_atexit.o)
+ .ARM.attributes
+                0x0000000000000000       0x32 /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a(lib_a-__call_atexit.o)
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtend.o
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtend.o
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtend.o
+ .text          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtn.o
+ .data          0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtn.o
+ .bss           0x0000000000000000        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtn.o
+
+Memory Configuration
+
+Name             Origin             Length             Attributes
+FLASH            0x0000000000000000 0x0000000000040000 xr
+RAM              0x0000000020000000 0x0000000000008000 xrw
+*default*        0x0000000000000000 0xffffffffffffffff
+
+Linker script and memory map
+
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crti.o
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/crt0.o
+LOAD vectors.o
+LOAD putget.o
+LOAD supportFuncs.o
+LOAD aes.o
+LOAD main.o
+START GROUP
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/libgcc.a
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libnosys.a
+END GROUP
+START GROUP
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/libgcc.a
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libg_nano.a
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a
+END GROUP
+START GROUP
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/libgcc.a
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/../../../../arm-none-eabi/lib/armv7e-m/softfp/libc_nano.a
+END GROUP
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtend.o
+LOAD /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtn.o
+
+.text           0x0000000000000000      0x204
+ *(.vectors)
+ .vectors       0x0000000000000000       0xea vectors.o
+                0x0000000000000000                __Vectors
+                0x00000000000000e6                exit
+                0x00000000000000ea                __Vectors_End = .
+                0x00000000000000ea                __Vectors_Size = (__Vectors_End - __Vectors)
+                0x00000000000000ea                __end__ = .
+ *(.text*)
+ *fill*         0x00000000000000ea        0x2 
+ .text.__do_global_dtors_aux
+                0x00000000000000ec       0x24 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+ .text.frame_dummy
+                0x0000000000000110       0x1c /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+ .text          0x000000000000012c       0xae putget.o
+                0x000000000000012c                putchar
+                0x0000000000000160                PUT32
+                0x0000000000000164                GET32
+                0x0000000000000168                PUTGETCLR
+                0x0000000000000170                atest
+                0x0000000000000182                stest
+                0x00000000000001b2                testfun1
+                0x00000000000001ba                testfun2
+                0x00000000000001c2                testfun3
+                0x00000000000001ca                testfun4
+                0x00000000000001d2                PUTGETSET
+ *fill*         0x00000000000001da        0x2 
+ .text.startup  0x00000000000001dc        0xc main.o
+                0x00000000000001dc                main
+ *(.init)
+ .init          0x00000000000001e8        0x4 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crti.o
+                0x00000000000001e8                _init
+ .init          0x00000000000001ec        0x8 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtn.o
+ *(.fini)
+ .fini          0x00000000000001f4        0x4 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crti.o
+                0x00000000000001f4                _fini
+ .fini          0x00000000000001f8        0x8 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtn.o
+ *crtbegin.o(.ctors)
+ *crtbegin?.o(.ctors)
+ *(EXCLUDE_FILE(*crtend.o *crtend?.o) .ctors)
+ *(SORT_BY_NAME(.ctors.*))
+ *(.ctors)
+ *crtbegin.o(.dtors)
+ *crtbegin?.o(.dtors)
+ *(EXCLUDE_FILE(*crtend.o *crtend?.o) .dtors)
+ *(SORT_BY_NAME(.dtors.*))
+ *(.dtors)
+ *(.rodata*)
+ *(.eh_frame*)
+ .eh_frame      0x0000000000000200        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+ .eh_frame      0x0000000000000200        0x4 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtend.o
+
+.glue_7         0x0000000000000204        0x0
+ .glue_7        0x0000000000000204        0x0 linker stubs
+
+.glue_7t        0x0000000000000204        0x0
+ .glue_7t       0x0000000000000204        0x0 linker stubs
+
+.vfp11_veneer   0x0000000000000204        0x0
+ .vfp11_veneer  0x0000000000000204        0x0 linker stubs
+
+.v4_bx          0x0000000000000204        0x0
+ .v4_bx         0x0000000000000204        0x0 linker stubs
+
+.iplt           0x0000000000000204        0x0
+ .iplt          0x0000000000000204        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+
+.rel.dyn        0x0000000000000204        0x0
+ .rel.iplt      0x0000000000000204        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+
+.ARM.extab
+ *(.ARM.extab* .gnu.linkonce.armextab.*)
+                0x0000000000000204                __exidx_start = .
+
+.ARM.exidx
+ *(.ARM.exidx* .gnu.linkonce.armexidx.*)
+                0x0000000000000204                __exidx_end = .
+                0x0000000000000204                __etext = .
+
+.data           0x0000000020000000        0x8 load address 0x0000000000000204
+                0x0000000020000000                __data_start__ = .
+ *(vtable)
+ *(.data*)
+                0x0000000020000000                . = ALIGN (0x4)
+ *(.ram)
+                0x0000000020000000                . = ALIGN (0x4)
+                0x0000000020000000                PROVIDE (__preinit_array_start = .)
+ *(.preinit_array)
+                0x0000000020000000                PROVIDE (__preinit_array_end = .)
+                0x0000000020000000                . = ALIGN (0x4)
+                0x0000000020000000                PROVIDE (__init_array_start = .)
+ *(SORT_BY_NAME(.init_array.*))
+ *(.init_array)
+ .init_array    0x0000000020000000        0x4 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+                0x0000000020000004                PROVIDE (__init_array_end = .)
+                0x0000000020000004                . = ALIGN (0x4)
+                0x0000000020000004                PROVIDE (__fini_array_start = .)
+ *(SORT_BY_NAME(.fini_array.*))
+ *(.fini_array)
+ .fini_array    0x0000000020000004        0x4 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+                0x0000000020000008                PROVIDE (__fini_array_end = .)
+ *(.jcr*)
+                0x0000000020000008                . = ALIGN (0x4)
+                0x0000000020000008                __data_end__ = .
+
+.igot.plt       0x0000000020000008        0x0 load address 0x000000000000020c
+ .igot.plt      0x0000000020000008        0x0 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+
+.bss            0x0000000020000008       0x1c load address 0x000000000000020c
+                0x0000000020000008                . = ALIGN (0x4)
+                0x0000000020000008                __bss_start__ = .
+ *(.bss*)
+ .bss.completed.9908
+                0x0000000020000008        0x1 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+ *fill*         0x0000000020000009        0x3 
+ .bss.object.9913
+                0x000000002000000c       0x18 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+ *(COMMON)
+                0x0000000020000024                . = ALIGN (0x4)
+                0x0000000020000024                __bss_end__ = .
+
+.heap           0x0000000020000024        0x0
+                0x0000000020000024                __HeapBase = .
+                0x0000000020000024                __end__ = .
+                0x0000000020000024                end = __end__
+                0x0000000020000024                _end = __end__
+ *(.heap*)
+                0x0000000020000024                __HeapLimit = .
+
+.stack_dummy    0x0000000020000024        0x0
+ *(.stack*)
+                0x0000000020008000                __StackTop = (ORIGIN (RAM) + LENGTH (RAM))
+                0x0000000020008000                __StackLimit = (__StackTop - SIZEOF (.stack_dummy))
+                0x0000000020008000                PROVIDE (__stack = __StackTop)
+                0x0000000000000001                ASSERT ((__StackLimit >= __HeapLimit), region RAM overflowed with stack)
+                0x0000000000000001                ASSERT ((LENGTH (FLASH) >= (__etext + SIZEOF (.data))), FLASH memory overflowed !)
+OUTPUT(main.axf elf32-littlearm)
+
+.ARM.attributes
+                0x0000000000000000       0x2e
+ .ARM.attributes
+                0x0000000000000000       0x22 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crti.o
+ .ARM.attributes
+                0x0000000000000022       0x32 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtbegin.o
+ .ARM.attributes
+                0x0000000000000054       0x21 putget.o
+ .ARM.attributes
+                0x0000000000000075       0x32 main.o
+ .ARM.attributes
+                0x00000000000000a7       0x32 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtend.o
+ .ARM.attributes
+                0x00000000000000d9       0x22 /usr/lib/gcc/arm-none-eabi/7.3.0/armv7e-m/softfp/crtn.o
+
+.comment        0x0000000000000000       0x1d
+ .comment       0x0000000000000000       0x1d main.o
+                                         0x1e (size before relaxing)

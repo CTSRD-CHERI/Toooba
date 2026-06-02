@@ -1,0 +1,6 @@
+[submodule "Toooba-mibench2"]
+	path = Toooba-mibench2
+	url = https://github.com/CTSRD-CHERI/Toooba-mibench2.git
+[submodule "Toooba-olden"]
+	path = Toooba-olden
+	url = https://github.com/CTSRD-CHERI/Toooba-olden.git
