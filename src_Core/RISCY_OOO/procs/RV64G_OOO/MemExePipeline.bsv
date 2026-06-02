@@ -22,13 +22,13 @@
 //     project funded by EPSRC: EP/S030868/1
 //-
 //-
-// Colored-Cap Main Designer: 
+// Colored-Cap Main Designer:
 //      Author: Hossam ElAtali
 //      Copyright (c) 2025 Secure System's Group
 // Colored-Cap (Compatibility with CHERI sealing + Atomic L&S enforcement + Bug Fixes)
 //      Author: Hakan Englund, Merve Gulmez
-//      Copyright (c) 2025 Ericsson AB 
-// Colored-Cap ObjID Buffer Implementation 
+//      Copyright (c) 2025 Ericsson AB
+// Colored-Cap ObjID Buffer Implementation
 //      Copyright (c) 2020 Jonathan Woodruff
 //-
 // Permission is hereby granted, free of charge, to any person
@@ -218,25 +218,6 @@ module mkDTlbSynth(DTlbSynth);
     return m;
 endmodule
 
-typedef DTlb#(MemExeToFinish) ObjIdTlbSynth;
-(* synthesize *)
-module mkObjIdTlbSynth(ObjIdTlbSynth);
-    function Maybe#(TlbReq) getTlbReq(MemExeToFinish x);
-        Maybe#(TlbReq) r = Invalid;
-        if (x.objIdAddr matches tagged Valid .a) begin
-            r = Valid(TlbReq{
-                addr: a,
-                write: False,
-                capStore: False,
-                potentialCapLoad: False
-            });
-        end
-        return r;
-    endfunction
-    let m <- mkDTlb(getTlbReq);
-    return m;
-endmodule
-
 interface MemExeInput;
     // conservative scoreboard check in reg read stage
     method RegsReady sbCons_lazyLookup(PhyRegs r);
@@ -296,7 +277,6 @@ interface MemExePipeline;
     interface Vector#(TMul#(2, AluExeNum), RecvBypass) recvBypass;
     interface ReservationStationMem rsMemIfc;
     interface DTlbSynth dTlbIfc;
-    interface ObjIdTlbSynth objIdTlbIfc;
     interface SplitLSQ lsqIfc;
     interface StoreBuffer stbIfc;
     interface DCoCache dMemIfc;
@@ -369,9 +349,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     // TLBs
     DTlbSynth dTlb <- mkDTlbSynth;
-    DTlbSynth objIdTlb <- mkObjIdTlbSynth;
-
-    let dTlbReqQ <- mkDTlbReqFifo;
 
     // store buffer only used in WEAK model
 `ifdef TSO_MM
@@ -420,7 +397,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // resp ifc to D$
     L1ProcResp#(DProcReqId) procRespIfc = (interface L1ProcResp;
         method Action respLd(DProcReqId id, ObjSealRdType objSealRdType, MemTaggedData d);
-            
+
             if(objSealRdType != None) begin
                 if(verbose) begin
                     $display("%t : [Ld resp] objSealRd Resp ", $time, fshow(objSealRdType), fshow(id), "; ", fshow(d));
@@ -565,7 +542,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // executed after address transation
         doAssert(!(x.data.mem_func == St && isValid(x.regs.dst)),
                  "St cannot have dst reg");
-`ifdef KONATA 
+`ifdef KONATA
         $display("KONATAE\t%0d\t%0d\t0\tRsvM", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem1", cur_cycle, x.u_id);
         $fflush;
@@ -626,15 +603,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // get virtual addr & St/Sc/Amo data
         CapPipe vaddr = modifyOffset(rVal1, signExtend(x.imm), True).value;
         Bit#(3) alloc_policy = lsq.getAllocPolicy(x.ldstq_tag);
-        if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin 
+        if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin
             //vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
-            if(getTmode(rVal1) == 'h0) begin 
+            if(getTmode(rVal1) == 'h0) begin
                 vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
-            end else begin 
+            end else begin
                 vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4032 + zeroExtend(getTloc(rVal1) ))).value;
-            end 
+            end
             $display("sendmemmte", fshow(vaddr));
-        end 
+        end
         CapPipe data = rVal2;
         MemTaggedData toMemData = unpack(pack(toMem(data)));
 
@@ -665,7 +642,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         end
 
-`ifdef KONATA 
+`ifdef KONATA
         $display("KONATAE\t%0d\t%0d\t0\tMem1", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
         $fflush;
@@ -721,30 +698,27 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Maybe#(Addr) objIdVAddr = Invalid; // default invalid
 `endif
         Bit#(7) objIdOffset = 'h0 ;
-        
-        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) == 'h1 && x.alloc_policy == 'h0 ) begin 
-            if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
-                      Bit#(64) byteIndex = zeroExtend(getTloc(x.rVal1) >> 3);   
-                      Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
-                      let pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
 
+        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) == 'h1 && x.alloc_policy == 'h0 ) begin
+            if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
+                      let pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
                       objIdVAddr = Valid(
                           pageBase
                           + zeroExtend(16'hFC0)
                           + zeroExtend(getTloc(x.rVal1) & 6'h30)
-                      );                      
+                      );
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
-                                          " objIdVAddr ", fshow(objIdVAddr), 
+                                          " objIdVAddr ", fshow(objIdVAddr),
                                           " objIdOffset:", fshow(objIdOffset),
                                           " capMTE:", fshow(getMTE(x.rVal1)),
                                           " capTLOC:", fshow(getTloc(x.rVal1))
-                                          
+
                       );
             end
-          
+
        end
-`ifdef KONATA 
+`ifdef KONATA
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
         $fflush;
@@ -762,147 +736,34 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end
         end
 
-        if (isValid(objIdVAddr)) begin // go to next stage by sending to TLB
-            objIdTlb.procReq(DTlbReq {
-                inst: MemExeToFinish {
-                    mem_func: x.mem_func,
-                    tag: x.tag,
-                    ldstq_tag: x.ldstq_tag,
-                    shiftedBE: shiftBE,
-                    vaddr: x.vaddr,
-                    objIdAddr: objIdVAddr, //Valid('h80010000),
-                    objIdOffset: objIdOffset,
-                    mte: getMTE(x.rVal1),
-                    alloc_policy: x.alloc_policy,
-`ifdef INCLUDE_TANDEM_VERIF
-                    store_data: x.rVal2,
-                    store_data_BE: origBE,
-`endif
-                    misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE, x.alloc_policy),
-                    capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
-                    allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
-                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
-                    check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                            ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
-`ifdef KONATA
-                    , u_id: x.u_id
-`endif
-                },
-                specBits: regToExe.spec_bits
-            });
-        end
-        else begin
-            // dTlb.procReq(
-            dTlbReqQ.enq(ToSpecFifo {
-                data: MemExeToFinish {
-                    mem_func: x.mem_func,
-                    tag: x.tag,
-                    ldstq_tag: x.ldstq_tag,
-                    shiftedBE: shiftBE,
-                    vaddr: x.vaddr,
-                    objIdAddr: Invalid,
-                    objIdOffset: objIdOffset,
-                    mte: getMTE(x.rVal1),
-                    alloc_policy: x.alloc_policy,
-`ifdef INCLUDE_TANDEM_VERIF
-                    store_data: x.rVal2,
-                    store_data_BE: origBE,
-`endif
-                    misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE, x.alloc_policy),
-                    capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
-                    allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
-                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
-                    check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                            ddc, getAddr(x.vaddr),
-                                            accessByteCount, x.cap_checks)
-`ifdef KONATA
-                    , u_id: x.u_id
-`endif
-                },
-                spec_bits: regToExe.spec_bits
-            });
-        end
-    endrule
-    (* descending_urgency = "doObjIdTlb, doExeMem" *)
-    rule doObjIdTlb;
-        objIdTlb.deqProcResp;
-        let objIdTlbResp = objIdTlb.procResp;
-        let x = objIdTlbResp.inst;
-        Maybe#(Addr) objIdPAddr = Invalid;
-        Bool allowCapPTE = False;
-        Maybe#(Trap) cause = Invalid;
-        if (objIdTlbResp.resp matches tagged Valid .rsp) begin
-            Maybe#(Exception) expCause = Invalid;
-            Addr a = 0;
-            {a, expCause, allowCapPTE} = rsp;
-            objIdPAddr = Valid(a);
-            if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
-        end
-
-        if(verbose) $display("%t : [doObjIdTlb] ", $time, fshow(objIdTlbResp));
-        if(isValid(cause) && verbose) $display("  [doObjIdTlb - objIdTlb response] PAGEFAULT!");
-
-        if(isValid(cause)) begin
-            // update LSQ with fault
-            doAssert(isValid(x.objIdAddr), "fault must have come from translation of valid objId VAddr");
-            inIfc.rob_setExecuted_doFinishMem(x.tag, fromMaybe(0, x.objIdAddr),
-`ifdef INCLUDE_TANDEM_VERIF
-                                             x.store_data, x.store_data_BE,
-`endif
-                                             False, False
-`ifdef RVFI
-                                             , ExtraTraceBundle{
-                                                 regWriteData: memData[pack(x.ldstq_tag)],
-                                                 memByteEn: unpack(truncate(pack(x.shiftedBE.DataMemAccess) >> getAddr(x.vaddr)[3:0]))
-                                             }
-`endif
-                                            );
-            LSQUpdateAddrResult updRes <- lsq.updateAddr(
-                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE, x.mte, x.alloc_policy,
-                /*(((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)*/ Invalid, x.objIdOffset
-        );
-        end
-        else begin
-            // dTlb.procReq(
-            dTlbReqQ.enq(ToSpecFifo {
-                data: MemExeToFinish {
-                    mem_func: x.mem_func,
-                    tag: x.tag,
-                    ldstq_tag: x.ldstq_tag,
-                    shiftedBE: x.shiftedBE,
-                    vaddr: x.vaddr,
-                    // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
-                    objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
-                    objIdOffset: x.objIdOffset,
-                    mte: x.mte,
-                    alloc_policy: x.alloc_policy,
-`ifdef INCLUDE_TANDEM_VERIF
-                    store_data: x.store_data,
-                    store_data_BE: x.store_data_BE,
-`endif
-                    misaligned: x.misaligned,
-                    capStore: x.capStore,
-                    allowCapLoad: x.allowCapLoad,
-                    capException: x.capException,
-                    check: x.check
-`ifdef KONATA
-                    , u_id: x.u_id
-`endif
-                },
-                spec_bits: objIdTlbResp.specBits
-            });
-        end
-    endrule
-    
-    rule doDTlb;
-        dTlbReqQ.deq;
-        let memExeFin = dTlbReqQ.first;
-        let x = memExeFin.data;
         dTlb.procReq(DTlbReq {
-            inst: x,
-            specBits: memExeFin.spec_bits
+            inst: MemExeToFinish {
+                mem_func: x.mem_func,
+                tag: x.tag,
+                ldstq_tag: x.ldstq_tag,
+                shiftedBE: shiftBE,
+                vaddr: x.vaddr,
+                objIdAddr: objIdVAddr,
+                objIdOffset: objIdOffset,
+                mte: getMTE(x.rVal1),
+                alloc_policy: x.alloc_policy,
+`ifdef INCLUDE_TANDEM_VERIF
+                store_data: x.rVal2,
+                store_data_BE: origBE,
+`endif
+                misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE, x.alloc_policy),
+                capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
+                allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
+                capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
+                check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
+                                        ddc, getAddr(x.vaddr),
+                                        accessByteCount, x.cap_checks)
+`ifdef KONATA
+                , u_id: x.u_id
+`endif
+            },
+            specBits: regToExe.spec_bits
         });
-        if (verbose) $display("%t : [doDTlb] ", $time, fshow(memExeFin));
     endrule
 
     rule doFinishMem;
@@ -1018,15 +879,17 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
 `endif
 
-`ifdef KONATA 
+`ifdef KONATA
         $display("KONATAE\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem4", cur_cycle, x.u_id);
         $fflush;
 `endif
+        Maybe#(Addr) objIdPAddr = Invalid;
+        if (x.objIdAddr matches tagged Valid .objIdVAddr) objIdPAddr = Valid({paddr[63:12],truncate(objIdVAddr)});
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy, 
-            (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? x.objIdAddr : Invalid), x.objIdOffset
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy,
+            (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 
@@ -1046,7 +909,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
-                objIdPAddr: x.objIdAddr,
+                objIdPAddr: objIdPAddr,
                 mte: x.mte,
                 alloc_policy: x.alloc_policy,
                 pcHash: hash(getAddr(pc))
@@ -1061,7 +924,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             else begin
                 doAssert(False, "must be in StQ");
             end
-            reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, x.objIdAddr)));
+            reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, objIdPAddr)));
         end
 
 `ifdef PERF_COUNT
@@ -1145,7 +1008,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         else begin
             doAssert(False, "load is stalled");
         end
-        
+
 `ifdef PERFORMANCE_MONITORING
         events_reg[0] <= events;
 `endif
@@ -1728,7 +1591,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             objSealRdType: None,
             pcHash: ?
         };
-        
+
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqStQ_ScAmo_issue] ", fshow(lsqDeqSt), "; ", fshow(req));
 `ifdef PERF_COUNT
@@ -2031,7 +1894,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     interface recvBypass = map(getRecvBypassIfc, bypassWire);
     interface rsMemIfc = rsMem;
     interface dTlbIfc = dTlb;
-    interface objIdTlbIfc = objIdTlb;
     interface lsqIfc = lsq;
     interface stbIfc = stb;
     interface dMemIfc = dMem;
@@ -2039,9 +1901,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         rsMem.specUpdate,
         dispToRegQ.specUpdate,
         regToExeQ.specUpdate,
-        dTlbReqQ.specUpdate,
         dTlb.specUpdate,
-        objIdTlb.specUpdate,
         lsq.specUpdate
     ));
 

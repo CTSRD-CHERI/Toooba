@@ -13,11 +13,7 @@
 //
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
 //-
-//-
-// Colored-Cap modifications: 
-//      Author: Hossam ElAtali
-//      Copyright (c) 2025 Secure System's Group
-//-
+//
 // Permission is hereby granted, free of charge, to any person
 // obtaining a copy of this software and associated documentation
 // files (the "Software"), to deal in the Software without
@@ -25,10 +21,10 @@
 // modify, merge, publish, distribute, sublicense, and/or sell copies
 // of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
-// 
+//
 // The above copyright notice and this permission notice shall be
 // included in all copies or substantial portions of the Software.
-// 
+//
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
 // EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
 // MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
@@ -92,7 +88,6 @@ endinterface
 typedef union tagged {
     void I;
     DTlbReqIdx D;
-    DTlbReqIdx ObjId;
 } TlbChild deriving(Bits, Eq, FShow);
 typedef struct {
     TlbChild child;
@@ -110,7 +105,6 @@ interface L2TlbToChildren;
     // flush with I/D TLB
     interface Put#(void) iTlbReqFlush;
     interface Put#(void) dTlbReqFlush;
-    interface Put#(void) objIdTlbReqFlush;
     interface Get#(void) flushDone;
 endinterface
 
@@ -150,7 +144,7 @@ typedef union tagged {
 (* synthesize *)
 module mkL2Tlb(L2Tlb::L2Tlb);
     Bool verbose = False;
-   
+
     // set associative TLB for 4KB pages
     L2SetAssocTlb tlb4KB <- mkL2SetAssocTlb;
     // fully associative TLB for mega and giga pages
@@ -166,9 +160,8 @@ module mkL2Tlb(L2Tlb::L2Tlb);
     // flush
     Reg#(Bool) iFlushReq <- mkReg(False);
     Reg#(Bool) dFlushReq <- mkReg(False);
-    Reg#(Bool) objIdFlushReq <- mkReg(False);
     Reg#(Bool) waitFlushDone <- mkReg(False);
-    Bool flushing = iFlushReq && dFlushReq && objIdFlushReq;
+    Bool flushing = iFlushReq && dFlushReq;
     Fifo#(1, void) flushDoneQ <- mkCFFifo;
 
     // req/resp with I/D TLBs
@@ -320,7 +313,6 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         flushDoneQ.enq(?);
         iFlushReq <= False;
         dFlushReq <= False;
-        objIdFlushReq <= False;
     endrule
 
     // tlb req rule is preempted by page walk rule, i.e., don't fire when page
@@ -371,7 +363,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         let respMG = tlbMG.translate(cRq.vpn, vm_info.asid);
 
         if(verbose) begin
-            $display("L2TLB resp: ", fshow(vm_info), " ; ", fshow(cRq), " ; ", 
+            $display("L2TLB resp: ", fshow(vm_info), " ; ", fshow(cRq), " ; ",
                      fshow(resp4KB), " ; ", fshow(respMG));
         end
 
@@ -661,7 +653,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
                 end
                 else begin
                     // continue page walk, check if other req is doing the same
-                    // walk 
+                    // walk
                     if(otherReqSamePTE(idx, newPTEAddr, readVReg(pendWait_pageWalk)) matches tagged Valid .i) begin
                         pendWait_pageWalk[idx] <= WaitPeer (i);
 `ifdef PERF_COUNT
@@ -773,11 +765,6 @@ module mkL2Tlb(L2Tlb::L2Tlb);
                 dFlushReq <= True;
             endmethod
         endinterface
-        interface Put objIdTlbReqFlush;
-            method Action put(void x) if(!objIdFlushReq);
-                objIdFlushReq <= True;
-            endmethod
-        endinterface
         interface Get flushDone = toGet(flushDoneQ);
     endinterface
 
@@ -785,7 +772,7 @@ module mkL2Tlb(L2Tlb::L2Tlb);
         interface FifoDeq memReq = toFifoDeq(memReqQ);
         interface FifoEnq respLd = toFifoEnq(respLdQ);
     endinterface
-  
+
     interface Perf perf;
         method Action setStatus(Bool stats);
 `ifdef PERF_COUNT
