@@ -631,7 +631,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             if(getTmode(rVal1) == 'h0) begin 
                 vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
             end else begin 
-                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4096 -64 + zeroExtend(getTloc(rVal1) ))).value;
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4032 + zeroExtend(getTloc(rVal1) ))).value;
             end 
             $display("sendmemmte", fshow(vaddr));
         end 
@@ -726,7 +726,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
                       Bit#(64) byteIndex = zeroExtend(getTloc(x.rVal1) >> 3);   
                       Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
-                      objIdVAddr = Valid((getAddr(x.vaddr)& 64'hFFFFFFFFFFFFF000 ) + 4096-64 + (zeroExtend(getTloc(x.rVal1)& 6'h30)>>4)*16);
+                      let pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
+
+                      objIdVAddr = Valid(
+                          pageBase
+                          + zeroExtend(16'hFC0)
+                          + zeroExtend(getTloc(x.rVal1) & 6'h30)
+                      );                      
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
                                           " objIdVAddr ", fshow(objIdVAddr), 
@@ -748,11 +754,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Maybe#(Maybe#(MemTaggedData)) mmObjIdTableEnt = objIdBuf.lookup(MapKeyIndex{key: objIdVAddrValid, index: hash(objIdVAddrValid)});
         if (mmObjIdTableEnt matches tagged Valid .mObjIdTableEnt) begin // First maybe to see if the key matched
             if (mObjIdTableEnt matches tagged Valid .objIdTableEnt) begin // Second maybe to see if this was a valid entry
-                Bool isSealed = extractObjIdSeal(objIdTableEnt, objIdOffset);
-                Bit#(8)  memMTE = extractMemMTE(objIdTableEnt, objIdOffset);
-                $display("mte table check ", fshow(isSealed), fshow(memMTE));
-                if(getMTE(x.rVal1) != memMTE) objIdVAddr = tagged Invalid;
-                //if (!isSealed) objIdVAddr = tagged Invalid;
+                //Bool isSealed = extractObjIdSeal(objIdTableEnt, objIdOffset);
+                Bool isSealed = extractMemMTE(objIdTableEnt,  getMTE(x.rVal1), objIdOffset);
+                $display("mte table check ", fshow(isSealed));
+                //if(getMTE(x.rVal1) != memMTE) objIdVAddr = tagged Invalid;
+                if (!isSealed) objIdVAddr = tagged Invalid;
             end
         end
 
