@@ -1,0 +1,9 @@
+target remote localhost:2331
+load main.elf
+set $pc=0x52
+break *0x50
+c
+disconnect
+q
+y
+
