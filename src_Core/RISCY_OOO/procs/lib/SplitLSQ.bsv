@@ -601,15 +601,12 @@ function Bool extractObjIdSeal(MemTaggedData d, Bit#(7) offset);
 `endif
 endfunction
 
-function Bit#(8) extractMemMTE(MemTaggedData d, Bit#(7) offset);
+function Bool extractMemMTE(MemTaggedData d, Bit#(8) capMTE, Bit#(7) offset);
 `ifdef OBJID_DEBUG
     return False;
 `else
-    if(offset <8)
-        return d.data[0][(offset+1) * 8 - 1: (offset) * 8 ] ;
-    else 
-        return d.data[1][(offset-8+1) * 8 - 1: (offset-8) * 8 ] ;
-    // Would "pack(d.data)[offset] == 1'b1" be faster?  Not sure if it will generate an actual subtract...
+    Vector#(16, Bit#(8)) bytes = unpack(pack(d.data));
+    return capMTE != bytes[offset];
 `endif
 endfunction
 
@@ -1875,9 +1872,9 @@ module mkSplitLSQ(SplitLSQ);
             doAssert(isValid(ld_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
             
             // get objId seal bit using offset
-            Bit#(8) memMTE = extractMemMTE(d, ld_objIdOffset_updObjIdSeal[tag]);
-            Bool isSealed = (ld_mte[tag] != memMTE);//extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
-            $display("ld mte check", fshow(isSealed), fshow(ld_mte[tag]), fshow(memMTE) );
+            Bool isSealed = extractMemMTE(d, ld_mte[tag], ld_objIdOffset_updObjIdSeal[tag]);
+            //Bool isSealed = (ld_mte[tag] != memMTE);//extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
+            $display("ld mte check", fshow(isSealed), fshow(ld_mte[tag]) );
             Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcColorViolation})) :
                                             Invalid;
             
@@ -1900,9 +1897,9 @@ module mkSplitLSQ(SplitLSQ);
             doAssert(st_valid_updObjIdSeal[tag], "entry must be valid");
 
             // Compute seal state and corresponding fault.
-            Bit#(8) memMTE = extractMemMTE(d, st_objIdOffset_updObjIdSeal[tag]);
-            $display("store mte check", fshow(st_mte_deqSt[tag]), fshow(memMTE), fshow(st_objIdOffset_updObjIdSeal[tag]));
-            Bool isSealed =  (st_mte_deqSt[tag] != memMTE); //extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
+            Bool isSealed = extractMemMTE(d, st_mte_deqSt[tag], st_objIdOffset_updObjIdSeal[tag]);
+            $display("store mte check", fshow(st_mte_deqSt[tag]),fshow(isSealed), fshow(st_objIdOffset_updObjIdSeal[tag]));
+            //Bool isSealed =  (st_mte_deqSt[tag] != memMTE); //extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
              Maybe#(Trap) fault = isSealed
                  ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}))
                 : Invalid;
