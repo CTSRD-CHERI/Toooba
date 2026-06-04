@@ -606,7 +606,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin
             //vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
             if(getTmode(rVal1) == 'h0) begin
-                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1)) * 4  -1)).value;
             end else begin
                 vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4032 + zeroExtend(getTloc(rVal1) ))).value;
             end
@@ -910,7 +910,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
                 objIdPAddr: objIdPAddr,
-                mte: x.mte,
                 alloc_policy: x.alloc_policy,
                 pcHash: hash(getAddr(pc))
             });
