@@ -629,7 +629,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin 
             //vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
             if(getTmode(rVal1) == 'h0) begin 
-                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
+            $display("before sendmemmte", fshow(vaddr));
+                //vaddr = setAddr(vaddr, (getAddr(vaddr) & ~'h3f) + zeroExtend(getTloc(rVal1) << 2) -1).value;
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1))* 4  -1)).value;
             end else begin 
                 vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4032 + zeroExtend(getTloc(rVal1) ))).value;
             end 
@@ -744,6 +746,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end
           
        end
+       if(getMTE(x.rVal1) != 'h0 ) begin 
+                      $display("[setmemmte doExeMem]: x.rVal1:",fshow(x.rVal1),
+                                          " capMTE:", fshow(getMTE(x.rVal1)),
+                                          " capTLOC:", fshow(getTloc(x.rVal1))
+                                          
+                      );
+       end 
 `ifdef KONATA 
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
