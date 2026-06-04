@@ -802,6 +802,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end
 
        end
+       if(getMTE(x.rVal1) != 'h0 ) begin
+                      $display("[setmemmte doExeMem]: x.rVal1:",fshow(x.rVal1),
+                                          " capMTE:", fshow(getMTE(x.rVal1)),
+                                          " capTLOC:", fshow(getTloc(x.rVal1))
+
+                      );
+       end
 `ifdef KONATA
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
