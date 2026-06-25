@@ -726,14 +726,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Addr objIdVAddrValid = fromMaybe(?,objIdVAddr);
         objIdVAddrs[pack(x.ldstq_tag)] <= objIdVAddrValid;
         Maybe#(Maybe#(MemTaggedData)) mmObjIdTableEnt = objIdBuf.lookup(MapKeyIndex{key: objIdVAddrValid, index: hash(objIdVAddrValid)});
-        if (mmObjIdTableEnt matches tagged Valid .mObjIdTableEnt) begin // First maybe to see if the key matched
-            if (mObjIdTableEnt matches tagged Valid .objIdTableEnt) begin // Second maybe to see if this was a valid entry
-                //Bool isSealed = extractObjIdSeal(objIdTableEnt, objIdOffset);
-                Bool isSealed = extractMemMTE(objIdTableEnt,  getMTE(x.rVal1), objIdOffset);
-                $display("mte table check ", fshow(isSealed));
-                //if(getMTE(x.rVal1) != memMTE) objIdVAddr = tagged Invalid;
-                if (!isSealed) objIdVAddr = tagged Invalid;
-            end
+        if (mmObjIdTableEnt matches tagged Valid (tagged Valid .objIdTableEnt)) begin // First maybe to see if the key matched
+            Bool isSealed = extractMemMTE(objIdTableEnt,  getMTE(x.rVal1), objIdOffset);
+            $display("mte table check ", fshow(isSealed));
+            if (!isSealed) objIdVAddr = tagged Invalid;
         end
 
         dTlb.procReq(DTlbReq {
