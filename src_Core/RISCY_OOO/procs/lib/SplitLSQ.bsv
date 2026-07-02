@@ -82,7 +82,7 @@ export mkSplitLSQ;
 export isLdQMemFunc;
 export isStQMemFunc;
 export extractObjIdSeal;
-export extractMemMTE;
+export mteMismatch;
 // state transition
 // Ld: enq and Idle -> set computed |-> issue and Executing |-> resp and Done |-> Deq
 //                                  |                       |                 |-> get killed and set ldKilled
@@ -597,8 +597,8 @@ function Bool extractObjIdSeal(MemTaggedData d, Bit#(7) offset);
 `endif
 endfunction
 
-function Bool extractMemMTE(MemTaggedData d, Bit#(8) capMTE, Bit#(7) offset);
-`ifdef OBJID_DEBUG
+function Bool mteMismatch(MemTaggedData d, Bit#(8) capMTE, Bit#(7) offset);
+//`ifdef OBJID_DEBUG
     return False;
 `else
     Vector#(16, Bit#(8)) bytes = unpack(pack(d.data));
@@ -1869,7 +1869,7 @@ module mkSplitLSQ(SplitLSQ);
             doAssert(isValid(ld_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
             
             // get objId seal bit using offset
-            Bool isSealed = extractMemMTE(d, ld_mte_updObjIdSeal[tag], ld_objIdOffset_updObjIdSeal[tag]);
+            Bool isSealed = mteMismatch(d, ld_mte_updObjIdSeal[tag], ld_objIdOffset_updObjIdSeal[tag]);
             //Bool isSealed = (ld_mte[tag] != memMTE);//extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
             $display("ld mte check", fshow(isSealed), fshow(ld_mte_updObjIdSeal[tag]) );
             Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcColorViolation})) :
@@ -1894,7 +1894,7 @@ module mkSplitLSQ(SplitLSQ);
             doAssert(st_valid_updObjIdSeal[tag], "entry must be valid");
 
             // Compute seal state and corresponding fault.
-            Bool isSealed = extractMemMTE(d, st_mte_updObjIdSeal[tag], st_objIdOffset_updObjIdSeal[tag]);
+            Bool isSealed = mteMismatch(d, st_mte_updObjIdSeal[tag], st_objIdOffset_updObjIdSeal[tag]);
             $display("store mte check", fshow(st_mte_updObjIdSeal[tag]),fshow(isSealed), fshow(st_objIdOffset_updObjIdSeal[tag]));
             //Bool isSealed =  (st_mte_deqSt[tag] != memMTE); //extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
              Maybe#(Trap) fault = isSealed

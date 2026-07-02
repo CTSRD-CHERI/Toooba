@@ -140,6 +140,7 @@ typedef struct {
     Bool objIdTransDone;
     Addr objIdAddr;
     Bit#(7) objIdOffset;
+    Bit#(8) objIdCap;
 `ifdef INCLUDE_TANDEM_VERIF
     // for those mem instrs that store data
     Data    store_data;
@@ -150,7 +151,6 @@ typedef struct {
     Bool allowCapLoad;
     Maybe#(CSR_XCapCause) capException;
     Maybe#(BoundsCheck) check;
-    Bit#(8) mte;
     Bit#(3) alloc_policy;
 
 `ifdef KONATA
@@ -196,16 +196,9 @@ module mkMemRegToExeFifo(MemRegToExeFifo);
     return m;
 endmodule
 
-typedef SpecFifo_SB_deq_enq_C_deq_enq#(1, DTlbReq#(MemExeToFinish)) DTlbReqFifo;
-(* synthesize *)
-module mkDTlbReqFifo(DTlbReqFifo);
-    let m <- mkSpecFifo_SB_deq_enq_C_deq_enq(True);
-    return m;
-endmodule
-
 typedef DTlb#(MemExeToFinish) DTlbSynth;
 (* synthesize *)
-module mkDTlbSynth(DTlbSynth);
+module mkDTlbCoreSynth(DTlbSynth);
     function Maybe#(TlbReq) getTlbReq(MemExeToFinish x);
         Bool objIdTrans = (x.objIdVirtual && !x.objIdTransDone);
         if (objIdTrans)
@@ -227,8 +220,15 @@ module mkDTlbSynth(DTlbSynth);
             });
     endfunction
     let m <- mkDTlb(getTlbReq);
+    return m;
+endmodule
+(* synthesize *)
+module mkDTlbSynth(DTlbSynth);
+    Bool verbose = True;
+
+    let m <- mkDTlbCoreSynth;
     SpecFifo_SB_deq_enq_C_deq_enq#(1, LdStQTag) objId_translation <- mkSpecFifoUG(True);
-    DTlbReqFifo req_fifo <- mkDTlbReqFifo;
+    SpecFifo_SB_deq_enq_C_deq_enq#(1, DTlbReq#(MemExeToFinish)) req_fifo <- mkSpecFifoUG(True);
 
     Maybe#(Trap) cause = Invalid;
     if (m.procResp.resp matches tagged Valid .rsp) begin
@@ -237,7 +237,7 @@ module mkDTlbSynth(DTlbSynth);
     end
     Bool objId_translation_ready = (objId_translation.notEmpty && m.procResp.inst.ldstq_tag == objId_translation.first.data && !isValid(cause));
 
-    rule finishObjIdTranslation(objId_translation_ready);
+    rule finishObjIdTranslation(objId_translation_ready && req_fifo.notFull);
         objId_translation.deq;
         let rsp = m.procResp;
         m.deqProcResp;
@@ -245,15 +245,16 @@ module mkDTlbSynth(DTlbSynth);
         req.inst.objIdTransDone = True; // Translation is done now!
         if (rsp.resp matches tagged Valid .tlbResp) begin
             req.inst.objIdAddr = tpl_1(tlbResp);
+            if (verbose) $display("%t did objVAddr translation; doing data now ", $time, fshow(req));
         end
         req_fifo.enq(ToSpecFifo{data: req, spec_bits: req.specBits});
     endrule
-/*
-    rule startDataTranslationAfterObjIdTrans;
+
+    rule startDataTranslationAfterObjIdTrans(req_fifo.notEmpty);
         m.procReq(req_fifo.first.data);
         req_fifo.deq;
     endrule
-*/
+
     // system consistency related
     method Bool flush_done = m.flush_done;
     method Action flush = m.flush;
@@ -261,12 +262,15 @@ module mkDTlbSynth(DTlbSynth);
     method Bool noPendingReq = m.noPendingReq;
 
     // req/resp with core
-    method Action procReq(DTlbReq#(MemExeToFinish) req) if (!objId_translation.notEmpty);
-        if (req.inst.objIdVirtual && !req.inst.objIdTransDone)
+    method Action procReq(DTlbReq#(MemExeToFinish) req) if (!objId_translation.notEmpty && !req_fifo.notEmpty);
+        if (verbose) $display("%t TLB received translation ", $time, fshow(req));
+        if (req.inst.objIdVirtual && !req.inst.objIdTransDone) begin
+            if (verbose) $display(" objId_translation");
             objId_translation.enq(ToSpecFifo{
                                     data: req.inst.ldstq_tag,
                                     spec_bits: req.specBits
                                  });
+        end
         m.procReq(req);
     endmethod
     method DTlbResp#(MemExeToFinish) procResp if (!objId_translation_ready);
@@ -276,6 +280,7 @@ module mkDTlbSynth(DTlbSynth);
         return rsp;
     endmethod
     method Action deqProcResp if (!objId_translation_ready);
+        if (objId_translation.notEmpty && m.procResp.inst.ldstq_tag == objId_translation.first.data) objId_translation.deq;
         m.deqProcResp;
     endmethod
 
@@ -805,9 +810,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdVAddrs[pack(x.ldstq_tag)] <= objIdVAddr;
         Maybe#(Maybe#(MemTaggedData)) mmObjIdTableEnt = objIdBuf.lookup(MapKeyIndex{key: objIdVAddr, index: hash(objIdVAddr)});
         if (mmObjIdTableEnt matches tagged Valid (tagged Valid .objIdTableEnt)) begin // First maybe to see if the key matched
-            Bool idMatch = extractMemMTE(objIdTableEnt,  getMTE(x.rVal1), objIdOffset);
-            $display("mte table check ", fshow(idMatch));
-            if (!idMatch) needsObjIdCheck = False;
+            Bool idMismatch = mteMismatch(objIdTableEnt,  getMTE(x.rVal1), objIdOffset);
+            $display("mte table check ", fshow(idMismatch));
+            if (idMismatch) needsObjIdCheck = False;
         end
 
         dTlb.procReq(DTlbReq {
@@ -818,11 +823,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 shiftedBE: shiftBE,
                 vaddr: x.vaddr,
                 objIdCheck: needsObjIdCheck,
-                objIdVirtual: getTmode(x.rVal1) > 'h1,
-                objIdTransDone: getTmode(x.rVal1) <= 'h1,
+                objIdVirtual: getTmode(x.rVal1) > 'h2,
+                objIdTransDone: getTmode(x.rVal1) <= 'h2,
                 objIdAddr: objIdVAddr,
                 objIdOffset: objIdOffset,
-                mte: getMTE(x.rVal1),
+                objIdCap: getMTE(x.rVal1),
                 alloc_policy: x.alloc_policy,
 `ifdef INCLUDE_TANDEM_VERIF
                 store_data: x.rVal2,
@@ -964,7 +969,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Maybe#(Addr) objIdPAddr = (x.objIdCheck) ? Valid(x.objIdAddr):Invalid;
         // update LSQ
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
-            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy,
+            x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.objIdCap, x.alloc_policy,
             (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
