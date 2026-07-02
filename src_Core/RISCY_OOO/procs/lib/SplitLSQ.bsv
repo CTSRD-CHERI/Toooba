@@ -2473,9 +2473,10 @@ module mkSplitLSQ(SplitLSQ);
             Bool executing = ld_executing_evict[i];
             Bool read_mem = True;//!isValid(ld_readFrom_evict[i]);
             Bool overlapLd = (getLineAddr(ld_paddr_evict[i]) == lineAddr);
-            Bool overlapObjIdLd = (isValid(ld_objIdPAddr_evict[i]) ? (getLineAddr(fromMaybe(?, ld_objIdPAddr_evict[i])) == lineAddr) :
-                                                                     False);
-            return valid && read_mem && executing && (overlapObjIdLd || overlapLd);
+            // Coherence for ObjIds is relaxed.
+            //Bool overlapObjIdLd = (isValid(ld_objIdPAddr_evict[i]) ? (getLineAddr(fromMaybe(?, ld_objIdPAddr_evict[i])) == lineAddr) :
+            //                                                         False);
+            return valid && read_mem && executing && (/*overlapObjIdLd ||*/overlapLd);
         endfunction
 
         // kill the oldest load
