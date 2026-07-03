@@ -15,13 +15,13 @@
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
 //-
 //-
-// Colored-Cap Main Designer: 
+// Colored-Cap Main Designer:
 //      Author: Hossam ElAtali
 //      Copyright (c) 2025 Secure System's Group
 // Colored-Cap (Atomic L&S, Sealing enforcement )
 //      Author: Hakan Englund, Merve Gulmez
-//      Copyright (c) 2025 Ericsson AB 
-// Colored-Cap ObjID Buffer Implementation 
+//      Copyright (c) 2025 Ericsson AB
+// Colored-Cap ObjID Buffer Implementation
 //      Copyright (c) 2020 Jonathan Woodruff
 //-
 //
@@ -591,14 +591,14 @@ function Bool extractObjIdSeal(MemTaggedData d, Bit#(7) offset);
 `else
     if(offset <64)
          return (d.data[0][offset] == 1'b1);
-    else 
+    else
         return (d.data[1][offset-64] == 1'b1);
     // Would "pack(d.data)[offset] == 1'b1" be faster?  Not sure if it will generate an actual subtract...
 `endif
 endfunction
 
 function Bool mteMismatch(MemTaggedData d, Bit#(8) capMTE, Bit#(7) offset);
-//`ifdef OBJID_DEBUG
+`ifdef OBJID_DEBUG
     return False;
 `else
     Vector#(16, Bit#(8)) bytes = unpack(pack(d.data));
@@ -1236,7 +1236,7 @@ module mkSplitLSQ(SplitLSQ);
                 !ld_waitWPRespLd_findIss[i] && !ld_waitWPRespObjId_findIss[i] && // (6) not wating wrong path resp
                 !ld_isMMIO_findIss[i] //&& // (7) not MMIO
                 // ld_objIdAddrComputed_findIss[i] && // (8) TODO: make sure objId PAddr is available
-                // ld_objIdSealOk_findIss[i] // (9) check that object 
+                // ld_objIdSealOk_findIss[i] // (9) check that object
             );
         endfunction
         Vector#(LdQSize, Bool) ableToIssue = map(canIssue,
@@ -1451,12 +1451,12 @@ module mkSplitLSQ(SplitLSQ);
                            (!isValid(ld_objIdPAddr_deqLd[deqP]) || isValid(ld_objIdSealOk_deqLd[deqP]));
                 end
                 else begin
-                       
+
                         // MMIO: done, at commit, no older st, do NOT wait for seal
                         return ld_computed_deqLd[deqP] &&
                                ld_atCommit_deqLd[deqP] &&
                                no_older_st;
-                    
+
                 end
             end
         end
@@ -1475,8 +1475,8 @@ module mkSplitLSQ(SplitLSQ);
             else begin
                 // computed or fence, and at commit
                 return (st_computed_deqSt[deqP] ||
-                        st_memFunc[deqP] == Fence) && 
-                       (!isValid(st_objIdPAddr_deqSt[deqP]) || isValid(st_objIdSealOk_deqSt[deqP])) && 
+                        st_memFunc[deqP] == Fence) &&
+                       (!isValid(st_objIdPAddr_deqSt[deqP]) || isValid(st_objIdSealOk_deqSt[deqP])) &&
                        st_atCommit_deqSt[deqP];
             end
         end
@@ -1512,12 +1512,12 @@ module mkSplitLSQ(SplitLSQ);
     endinterface);
 
     method Bit#(3) getAllocPolicy(LdStQTag t);
-        return (case(t) matches 
-            tagged Ld .tag: ld_alloc_policy[tag]; 
+        return (case(t) matches
+            tagged Ld .tag: ld_alloc_policy[tag];
             tagged St .tag: (st_alloc_policy[tag]);
-            default: ?; 
+            default: ?;
         endcase);
-    endmethod    
+    endmethod
 
     method ByteOrTagEn getOrigBE(LdStQTag t);
         return (case(t) matches
@@ -1789,19 +1789,19 @@ module mkSplitLSQ(SplitLSQ);
                 Bool overlap = overlapAddr(pa, shift_be,
                                            ld_paddr_updAddr[i],
                                            ld_shiftedBE_updAddr[i]) ||
-                               (isValid(ld_objIdPAddr_updAddr[i]) ? 
+                               (isValid(ld_objIdPAddr_updAddr[i]) ?
                                     overlapAddr(
                                             pa, shift_be,
                                             fromMaybe(?, ld_objIdPAddr_updAddr[i]),
                                             DataMemAccess(replicate(True))) :
                                     False) ||
-                               (isValid(objIdPAddr) ? 
+                               (isValid(objIdPAddr) ?
                                     overlapAddr(
                                             fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
                                             ld_paddr_updAddr[i],
                                             ld_shiftedBE_updAddr[i]) :
                                     False) ||
-                               ((isValid(ld_objIdPAddr_updAddr[i]) && isValid(objIdPAddr)) ? 
+                               ((isValid(ld_objIdPAddr_updAddr[i]) && isValid(objIdPAddr)) ?
                                     overlapAddr(
                                             fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
                                             fromMaybe(?, ld_objIdPAddr_updAddr[i]),
@@ -1867,16 +1867,16 @@ module mkSplitLSQ(SplitLSQ);
         if(!ld_waitWPRespObjId_updObjIdSeal[tag]) begin
             if(verbose) $display("[LSQ - updateLdObjIdSeal] 1 objIdResp:", fshow(tag), ", MemTaggedData:", fshow(d));
             doAssert(isValid(ld_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
-            
+
             // get objId seal bit using offset
             Bool isSealed = mteMismatch(d, ld_mte_updObjIdSeal[tag], ld_objIdOffset_updObjIdSeal[tag]);
             //Bool isSealed = (ld_mte[tag] != memMTE);//extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
             $display("ld mte check", fshow(isSealed), fshow(ld_mte_updObjIdSeal[tag]) );
             Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcColorViolation})) :
                                             Invalid;
-            
+
             Bit#(7) offset=ld_objIdOffset_updObjIdSeal[tag];
-            if(verbose) $display("[LSQ - updateLdObjIdSeal] isSealed:", fshow(isSealed), ", fault:", fshow(fault), ", offset:", fshow(offset));                               
+            if(verbose) $display("[LSQ - updateLdObjIdSeal] isSealed:", fshow(isSealed), ", fault:", fshow(fault), ", offset:", fshow(offset));
             // ld_fault_updObjIdSeal[tag] <= fault;
             ld_objIdSealOk_updObjIdSeal[tag] <= Valid(!isSealed);
         end
@@ -2004,7 +2004,7 @@ module mkSplitLSQ(SplitLSQ);
             Bool overlap = overlapAddr(pa, shift_be,
                                        st_paddr_issue[i],
                                        DataMemAccess(st_shiftedBE_issue[i])) ||
-                           (isValid(objIdPAddr) ? 
+                           (isValid(objIdPAddr) ?
                                 overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
                                        st_paddr_issue[i],
                                        DataMemAccess(st_shiftedBE_issue[i])) :
@@ -2080,12 +2080,12 @@ module mkSplitLSQ(SplitLSQ);
             Bool overlap = overlapAddr(pa, shift_be,
                                        ld_paddr_issue[i],
                                        ld_shiftedBE_issue[i]) ||
-                           (isValid(ld_objIdPAddr_issue[i]) ? 
+                           (isValid(ld_objIdPAddr_issue[i]) ?
                                 overlapAddr(pa, shift_be,
                                        fromMaybe(?, ld_objIdPAddr_issue[i]),
                                        DataMemAccess(replicate(True))) :
                                 False) ||
-                           (isValid(objIdPAddr) ? 
+                           (isValid(objIdPAddr) ?
                                 overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
                                        ld_paddr_issue[i],
                                        ld_shiftedBE_issue[i]) :
@@ -2457,7 +2457,7 @@ module mkSplitLSQ(SplitLSQ);
 
 `ifdef TSO_MM
     method Action cacheEvict(LineAddr lineAddr) if (!wrongSpec_conflict);
-        if(verbose) $display("%t : [LSQ - cacheEvict] ", $time, fshow(lineAddr), "; ", fshow(Addr'({lineAddr, '0})), "; ", 
+        if(verbose) $display("%t : [LSQ - cacheEvict] ", $time, fshow(lineAddr), "; ", fshow(Addr'({lineAddr, '0})), "; ",
                         fshow(getLineAddr('h80000100))
                         );
         // kill a load if it satisfies the following conditions:
