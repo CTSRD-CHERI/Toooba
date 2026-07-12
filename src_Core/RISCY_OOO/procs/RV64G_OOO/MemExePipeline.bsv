@@ -779,12 +779,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         //Addr objIdVAddr = (getAddr(x.vaddr)>>7) & (-1<<4); // derive default from VAddr
         //Bool needsObjIdCheck = True;
 //`else
-        Addr objIdVAddr = ?; // default invalid
+        Addr objIdVAddr = 0; // default invalid
         Bool needsObjIdCheck = False;
 //`endif
         Bit#(7) objIdOffset = 'h0 ;
         Bit#(64) pageBase = 64'b0;
-        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && ( getTmode(x.rVal1) == 'h1 || getTmode(x.rVal1) == 'h2 )&& x.alloc_policy == 'h0 ) begin
+        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && ( getTmode(x.rVal1) > 0 && getTmode(x.rVal1) < 4  )&& x.alloc_policy == 'h0 ) begin
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
                     
                     if( getTmode(x.rVal1) == 'h1) begin 
@@ -793,13 +793,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                                    + zeroExtend(16'hFC0)
                                    + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
-                    end else begin 
+                    end else if (getTmode(x.rVal1) == 'h2) begin 
                       pageBase = { getAddr(x.vaddr)[64-1:14], 14'b0 };
                       objIdVAddr = pageBase
                                    + zeroExtend(16'h3FC0)
                                    + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
-                      
+                    end else begin 
+                      objIdVAddr = truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&10'h3FF) + zeroExtend(getTloc(x.rVal1)) * 1024 - 1;
+                      objIdOffset = zeroExtend(6'h0F);
                     end 
                       needsObjIdCheck = True;
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
@@ -832,6 +834,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             if (idMismatch) needsObjIdCheck = False;
         end
 
+        Bool needsObjIdTranslation =
+            needsObjIdCheck &&
+            getTmode(x.rVal1) >= 2 &&
+            getTmode(x.rVal1) <= 3;
+
+
         dTlb.procReq(DTlbReq {
             inst: MemExeToFinish {
                 mem_func: x.mem_func,
@@ -840,8 +848,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 shiftedBE: shiftBE,
                 vaddr: x.vaddr,
                 objIdCheck: needsObjIdCheck,
-                objIdVirtual: getTmode(x.rVal1) >= 'h2,
-                objIdTransDone: getTmode(x.rVal1) < 'h2,
+                objIdVirtual: needsObjIdTranslation,
+                objIdTransDone: !needsObjIdTranslation,
                 objIdAddr: objIdVAddr,
                 objIdOffset: objIdOffset,
                 objIdCap: getMTE(x.rVal1),
