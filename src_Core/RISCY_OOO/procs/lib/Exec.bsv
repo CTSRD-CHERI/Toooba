@@ -186,6 +186,8 @@ endfunction
 
 (* noinline *)
 function CapPipe setBoundsALU(CapPipe cap, Data len, SetBoundsFunc boundsOp);
+    
+
     let combinedResult = setBoundsCombined(cap, len);
     CapPipe res = (case (boundsOp) matches
         SetBoundsRounding: combinedResult.cap;
@@ -195,6 +197,17 @@ function CapPipe setBoundsALU(CapPipe cap, Data len, SetBoundsFunc boundsOp);
     endcase);
     if (!combinedResult.inBounds) res = setValidCap(res, False);
     if (boundsOp == SetBoundsExact && !combinedResult.exact) res = setValidCap(res, False);
+    //let originalTop  = getTop(cap); 
+    //let originalTloc = getTloc(cap);
+    //if(getTmode(cap) == 3'h3) begin 
+    //    let updatedTop = getTop(res); 
+    //    if (updatedTop < originalTop) begin
+    //        let deltaPages = (originalTop >> 10) - (updatedTop >> 10);
+    //        res = setTloc(res, getTloc(cap) + truncate(deltaPages));
+    //        let newTloc = originalTloc + truncate(deltaPages); 
+    //        res = setTloc(res, newTloc);
+    //    end 
+    //end 
     return res;
 endfunction
 
