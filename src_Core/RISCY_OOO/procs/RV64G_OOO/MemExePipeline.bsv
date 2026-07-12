@@ -776,21 +776,31 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         // calculate bitmap offset and send to TLB here
 //`ifdef OBJID_DEBUG
-        Addr objIdVAddr = (getAddr(x.vaddr)>>7) & (-1<<4); // derive default from VAddr
-        Bool needsObjIdCheck = True;
+        //Addr objIdVAddr = (getAddr(x.vaddr)>>7) & (-1<<4); // derive default from VAddr
+        //Bool needsObjIdCheck = True;
 //`else
-//      Addr objIdVAddr = ?; // default invalid
-//      Bool needsObjIdCheck = False;
+        Addr objIdVAddr = ?; // default invalid
+        Bool needsObjIdCheck = False;
 //`endif
         Bit#(7) objIdOffset = 'h0 ;
-
-        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) == 'h1 && x.alloc_policy == 'h0 ) begin
+        Bit#(64) pageBase = 64'b0;
+        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && ( getTmode(x.rVal1) == 'h1 || getTmode(x.rVal1) == 'h2 )&& x.alloc_policy == 'h0 ) begin
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
-                      let pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
+                    
+                    if( getTmode(x.rVal1) == 'h1) begin 
+                      pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
                       objIdVAddr = pageBase
                                    + zeroExtend(16'hFC0)
                                    + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
+                    end else begin 
+                      pageBase = { getAddr(x.vaddr)[64-1:14], 14'b0 };
+                      objIdVAddr = pageBase
+                                   + zeroExtend(16'h3FC0)
+                                   + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
+                      objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
+                      
+                    end 
                       needsObjIdCheck = True;
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
                                           " objIdVAddr ", fshow(objIdVAddr),
@@ -830,8 +840,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 shiftedBE: shiftBE,
                 vaddr: x.vaddr,
                 objIdCheck: needsObjIdCheck,
-                objIdVirtual: getTmode(x.rVal1) > 'h2,
-                objIdTransDone: getTmode(x.rVal1) <= 'h2,
+                objIdVirtual: getTmode(x.rVal1) >= 'h2,
+                objIdTransDone: getTmode(x.rVal1) < 'h2,
                 objIdAddr: objIdVAddr,
                 objIdOffset: objIdOffset,
                 objIdCap: getMTE(x.rVal1),
