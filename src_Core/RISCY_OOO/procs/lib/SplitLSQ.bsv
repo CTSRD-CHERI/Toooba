@@ -15,13 +15,13 @@
 //     This work was supported by NCSC programme grant 4212611/RFA 15971 ("SafeBet").
 //-
 //-
-// Colored-Cap Main Designer: 
+// Colored-Cap Main Designer:
 //      Author: Hossam ElAtali
 //      Copyright (c) 2025 Secure System's Group
 // Colored-Cap (Atomic L&S, Sealing enforcement )
 //      Author: Hakan Englund, Merve Gulmez
-//      Copyright (c) 2025 Ericsson AB 
-// Colored-Cap ObjID Buffer Implementation 
+//      Copyright (c) 2025 Ericsson AB
+// Colored-Cap ObjID Buffer Implementation
 //      Copyright (c) 2020 Jonathan Woodruff
 //-
 //
@@ -82,7 +82,7 @@ export mkSplitLSQ;
 export isLdQMemFunc;
 export isStQMemFunc;
 export extractObjIdSeal;
-export extractMemMTE;
+export mteMismatch;
 // state transition
 // Ld: enq and Idle -> set computed |-> issue and Executing |-> resp and Done |-> Deq
 //                                  |                       |                 |-> get killed and set ldKilled
@@ -309,7 +309,6 @@ typedef struct {
     ByteOrTagEn shiftedBE;
     Maybe#(Addr) objIdPAddr;
     Bit#(16) pcHash;
-    Bit#(8) mte;
     Bit#(3) alloc_policy;
 } LSQIssueLdInfo deriving(Bits, Eq, FShow);
 
@@ -317,7 +316,6 @@ typedef struct {
     Bool wrongPath;
     Maybe#(PhyDst) dst;
     Bool allowCap;
-    Bit#(8) mte;
 `ifdef INCLUDE_TANDEM_VERIF
     InstTag instTag;    // For recording Ld data in ROB
 `endif
@@ -345,8 +343,7 @@ typedef struct {
     Maybe#(Trap)       fault;
     Bool               allowCap;
     Maybe#(LdKilledBy) killed;
-    Maybe#(Addr)      objIdPAddr;
-    Bit#(8)            mte;
+    Maybe#(Addr)       objIdPAddr;
     Bit#(3)            alloc_policy;
 } LdQDeqEntry deriving (Bits, Eq, FShow);
 
@@ -361,7 +358,6 @@ typedef struct {
     Bool              isMMIO;
     MemDataByteEn     shiftedBE;
     MemTaggedData     stData;
-    Bit#(8)           mte;
     Bool              allowCapAmoLd;
     Maybe#(Trap)      fault;
     Bool              objIdSealOk;
@@ -595,13 +591,13 @@ function Bool extractObjIdSeal(MemTaggedData d, Bit#(7) offset);
 `else
     if(offset <64)
          return (d.data[0][offset] == 1'b1);
-    else 
+    else
         return (d.data[1][offset-64] == 1'b1);
     // Would "pack(d.data)[offset] == 1'b1" be faster?  Not sure if it will generate an actual subtract...
 `endif
 endfunction
 
-function Bool extractMemMTE(MemTaggedData d, Bit#(8) capMTE, Bit#(7) offset);
+function Bool mteMismatch(MemTaggedData d, Bit#(8) capMTE, Bit#(7) offset);
 `ifdef OBJID_DEBUG
     return False;
 `else
@@ -710,7 +706,6 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Reg#(LdQMemFunc))              ld_memFunc         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bool))                    ld_unsigned        <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(ByteOrTagEn))             ld_byteOrTagEn     <- replicateM(mkConfigRegU);
-    Vector#(LdQSize, Reg#(Bit#(8)))                 ld_mte            <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(Bit#(3)))                 ld_alloc_policy    <- replicateM(mkConfigRegU);
 
     Vector#(LdQSize, Reg#(Bool))                    ld_allowCap        <- replicateM(mkConfigRegU);
@@ -722,6 +717,8 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Ehr#(2, Addr))                 ld_paddr           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))         ld_objIdPAddr      <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bit#(7)))              ld_objIdOffset     <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Bit#(8)))              ld_mte     <- replicateM(mkEhr(?));
+
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(Trap)))         ld_fault           <- replicateM(mkEhr(?));
@@ -783,6 +780,9 @@ module mkSplitLSQ(SplitLSQ);
 
     let ld_objIdOffset_updAddr      = getVEhrPort(ld_objIdOffset, 0); // write
     let ld_objIdOffset_updObjIdSeal = getVEhrPort(ld_objIdOffset, 1);
+
+    let ld_mte_updAddr      = getVEhrPort(ld_mte, 0); // write
+    let ld_mte_updObjIdSeal = getVEhrPort(ld_mte, 1);
 
     let ld_isMMIO_findIss = getVEhrPort(ld_isMMIO, 0);
     let ld_isMMIO_evict   = getVEhrPort(ld_isMMIO, 0); // assert
@@ -935,7 +935,6 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Reg#(StQMemFunc))              st_memFunc   <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(AmoFunc))                 st_amoFunc   <- replicateM(mkRegU);
     Vector#(StQSize, Reg#(MemDataByteEn))           st_byteEn    <- replicateM(mkRegU);
-    Vector#(StQSize, Ehr#(2, Bit#(8)))              st_mte       <- replicateM(mkEhr(?));
     Vector#(StQSize, Reg#(Bit#(3)))                 st_alloc_policy    <- replicateM(mkRegU);
 
     Vector#(StQSize, Reg#(Bool))                    st_acq       <- replicateM(mkRegU);
@@ -945,6 +944,8 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Ehr#(2, Addr))                 st_paddr     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Maybe#(Addr)))         st_objIdPAddr    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bit#(7)))              st_objIdOffset   <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(2, Bit#(8)))              st_mte       <- replicateM(mkEhr(?));
+
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(1, MemTaggedData))        st_stData    <- replicateM(mkEhr(?));
@@ -988,6 +989,9 @@ module mkSplitLSQ(SplitLSQ);
     let st_objIdOffset_updAddr      = getVEhrPort(st_objIdOffset, 0); // write
     let st_objIdOffset_updObjIdSeal = getVEhrPort(st_objIdOffset, 1);
 
+    let st_mte_updAddr              = getVEhrPort(st_mte, 0); // write
+    let st_mte_updObjIdSeal     = getVEhrPort(st_mte, 1); // write
+
     let st_waitWPRespObjId_wrongSpec    = getVEhrPort(st_waitWPRespObjId, 0); // write
     let st_waitWPRespObjId_updObjIdSeal = getVEhrPort(st_waitWPRespObjId, 0); // write, C with wrongSpec
     let st_waitWPRespObjId_enq          = getVEhrPort(st_waitWPRespObjId, 1); // C with wrongSpec
@@ -1017,9 +1021,6 @@ module mkSplitLSQ(SplitLSQ);
     let st_allowCapAmoLd_deqSt   = getVEhrPort(st_allowCapAmoLd, 1);
     let st_allowCapAmoLd_enq     = getVEhrPort(st_allowCapAmoLd, 1); // write
 
-    let st_mte_updAddr = getVEhrPort(st_mte, 0); // write
-    let st_mte_deqSt   = getVEhrPort(st_mte, 1);
-    let st_mte_enq     = getVEhrPort(st_mte, 1); // write
 
     let st_computed_verify  = getVEhrPort(st_computed, 0);
     let st_computed_wrongSpec  = getVEhrPort(st_computed, 0);
@@ -1235,7 +1236,7 @@ module mkSplitLSQ(SplitLSQ);
                 !ld_waitWPRespLd_findIss[i] && !ld_waitWPRespObjId_findIss[i] && // (6) not wating wrong path resp
                 !ld_isMMIO_findIss[i] //&& // (7) not MMIO
                 // ld_objIdAddrComputed_findIss[i] && // (8) TODO: make sure objId PAddr is available
-                // ld_objIdSealOk_findIss[i] // (9) check that object 
+                // ld_objIdSealOk_findIss[i] // (9) check that object
             );
         endfunction
         Vector#(LdQSize, Bool) ableToIssue = map(canIssue,
@@ -1248,7 +1249,6 @@ module mkSplitLSQ(SplitLSQ);
                 tag: tag,
                 paddr: ld_paddr_findIss[tag],
                 shiftedBE: ld_shiftedBE_findIss[tag],
-                mte: ld_mte[tag],
                 objIdPAddr: ld_objIdPAddr_findIss[tag],
                 pcHash: ld_pcHash[tag],
                 alloc_policy: ld_alloc_policy[tag]
@@ -1451,12 +1451,12 @@ module mkSplitLSQ(SplitLSQ);
                            (!isValid(ld_objIdPAddr_deqLd[deqP]) || isValid(ld_objIdSealOk_deqLd[deqP]));
                 end
                 else begin
-                       
+
                         // MMIO: done, at commit, no older st, do NOT wait for seal
                         return ld_computed_deqLd[deqP] &&
                                ld_atCommit_deqLd[deqP] &&
                                no_older_st;
-                    
+
                 end
             end
         end
@@ -1475,8 +1475,8 @@ module mkSplitLSQ(SplitLSQ);
             else begin
                 // computed or fence, and at commit
                 return (st_computed_deqSt[deqP] ||
-                        st_memFunc[deqP] == Fence) && 
-                       (!isValid(st_objIdPAddr_deqSt[deqP]) || isValid(st_objIdSealOk_deqSt[deqP])) && 
+                        st_memFunc[deqP] == Fence) &&
+                       (!isValid(st_objIdPAddr_deqSt[deqP]) || isValid(st_objIdSealOk_deqSt[deqP])) &&
                        st_atCommit_deqSt[deqP];
             end
         end
@@ -1512,12 +1512,12 @@ module mkSplitLSQ(SplitLSQ);
     endinterface);
 
     method Bit#(3) getAllocPolicy(LdStQTag t);
-        return (case(t) matches 
-            tagged Ld .tag: ld_alloc_policy[tag]; 
+        return (case(t) matches
+            tagged Ld .tag: ld_alloc_policy[tag];
             tagged St .tag: (st_alloc_policy[tag]);
-            default: ?; 
+            default: ?;
         endcase);
-    endmethod    
+    endmethod
 
     method ByteOrTagEn getOrigBE(LdStQTag t);
         return (case(t) matches
@@ -1573,7 +1573,6 @@ module mkSplitLSQ(SplitLSQ);
         ld_unsigned[ld_enqP] <= mem_inst.unsignedLd;
         ld_byteOrTagEn[ld_enqP] <= mem_inst.byteOrTagEn;
         ld_alloc_policy[ld_enqP] <= mem_inst.alloc_policy;
-        ld_mte[ld_enqP] <= 8'h0;
         ld_acq[ld_enqP] <= mem_inst.aq;
         ld_rel[ld_enqP] <= mem_inst.rl;
         ld_dst[ld_enqP] <= dst;
@@ -1641,8 +1640,6 @@ module mkSplitLSQ(SplitLSQ);
         st_fault_enq[st_enqP] <= Invalid;
         st_pcHash[st_enqP] <= pcHash;
         st_allowCapAmoLd_enq[st_enqP] <= False;
-        st_mte_enq[st_enqP]     <= 8'h0;
-
         st_computed_enq[st_enqP] <= False;
         st_verified_enq[st_enqP] <= False;
         st_specBits_enq[st_enqP] <= spec_bits;
@@ -1710,7 +1707,7 @@ module mkSplitLSQ(SplitLSQ);
             ld_objIdOffset_updAddr[tag] <= objIdOffset;
             ld_allowCap[tag] <= allowCap;
             ld_isMMIO_updAddr[tag] <= mmio;
-            ld_mte[tag] <= mte;
+            ld_mte_updAddr[tag] <= mte;
             ld_shiftedBE_updAddr[tag] <= shift_be;
             ld_alloc_policy[tag] <= alloc_policy;
             delayIssue = isValid(ld_olderSt_updAddr[tag]) && ld_waitForOlderSt[tag];
@@ -1743,9 +1740,9 @@ module mkSplitLSQ(SplitLSQ);
             st_paddr_updAddr[tag] <= pa;
             st_objIdPAddr_updAddr[tag] <= objIdPAddr;
             st_objIdOffset_updAddr[tag] <= objIdOffset;
+            st_mte_updAddr[tag] <= mte;
             st_isMMIO_updAddr[tag] <= mmio;
             st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
-            st_mte_updAddr[tag] <= mte;
             st_alloc_policy_updAddr[tag] <= alloc_policy;
 
             // A store always try to kill younger loads
@@ -1792,19 +1789,19 @@ module mkSplitLSQ(SplitLSQ);
                 Bool overlap = overlapAddr(pa, shift_be,
                                            ld_paddr_updAddr[i],
                                            ld_shiftedBE_updAddr[i]) ||
-                               (isValid(ld_objIdPAddr_updAddr[i]) ? 
+                               (isValid(ld_objIdPAddr_updAddr[i]) ?
                                     overlapAddr(
                                             pa, shift_be,
                                             fromMaybe(?, ld_objIdPAddr_updAddr[i]),
                                             DataMemAccess(replicate(True))) :
                                     False) ||
-                               (isValid(objIdPAddr) ? 
+                               (isValid(objIdPAddr) ?
                                     overlapAddr(
                                             fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
                                             ld_paddr_updAddr[i],
                                             ld_shiftedBE_updAddr[i]) :
                                     False) ||
-                               ((isValid(ld_objIdPAddr_updAddr[i]) && isValid(objIdPAddr)) ? 
+                               ((isValid(ld_objIdPAddr_updAddr[i]) && isValid(objIdPAddr)) ?
                                     overlapAddr(
                                             fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
                                             fromMaybe(?, ld_objIdPAddr_updAddr[i]),
@@ -1870,16 +1867,16 @@ module mkSplitLSQ(SplitLSQ);
         if(!ld_waitWPRespObjId_updObjIdSeal[tag]) begin
             if(verbose) $display("[LSQ - updateLdObjIdSeal] 1 objIdResp:", fshow(tag), ", MemTaggedData:", fshow(d));
             doAssert(isValid(ld_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
-            
+
             // get objId seal bit using offset
-            Bool isSealed = extractMemMTE(d, ld_mte[tag], ld_objIdOffset_updObjIdSeal[tag]);
+            Bool isSealed = mteMismatch(d, ld_mte_updObjIdSeal[tag], ld_objIdOffset_updObjIdSeal[tag]);
             //Bool isSealed = (ld_mte[tag] != memMTE);//extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
-            $display("ld mte check", fshow(isSealed), fshow(ld_mte[tag]) );
+            $display("ld mte check", fshow(isSealed), fshow(ld_mte_updObjIdSeal[tag]) );
             Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcColorViolation})) :
                                             Invalid;
-            
+
             Bit#(7) offset=ld_objIdOffset_updObjIdSeal[tag];
-            if(verbose) $display("[LSQ - updateLdObjIdSeal] isSealed:", fshow(isSealed), ", fault:", fshow(fault), ", offset:", fshow(offset));                               
+            if(verbose) $display("[LSQ - updateLdObjIdSeal] isSealed:", fshow(isSealed), ", fault:", fshow(fault), ", offset:", fshow(offset));
             // ld_fault_updObjIdSeal[tag] <= fault;
             ld_objIdSealOk_updObjIdSeal[tag] <= Valid(!isSealed);
         end
@@ -1897,8 +1894,8 @@ module mkSplitLSQ(SplitLSQ);
             doAssert(st_valid_updObjIdSeal[tag], "entry must be valid");
 
             // Compute seal state and corresponding fault.
-            Bool isSealed = extractMemMTE(d, st_mte_deqSt[tag], st_objIdOffset_updObjIdSeal[tag]);
-            $display("store mte check", fshow(st_mte_deqSt[tag]),fshow(isSealed), fshow(st_objIdOffset_updObjIdSeal[tag]));
+            Bool isSealed = mteMismatch(d, st_mte_updObjIdSeal[tag], st_objIdOffset_updObjIdSeal[tag]);
+            $display("store mte check", fshow(st_mte_updObjIdSeal[tag]),fshow(isSealed), fshow(st_objIdOffset_updObjIdSeal[tag]));
             //Bool isSealed =  (st_mte_deqSt[tag] != memMTE); //extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
              Maybe#(Trap) fault = isSealed
                  ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}))
@@ -2007,7 +2004,7 @@ module mkSplitLSQ(SplitLSQ);
             Bool overlap = overlapAddr(pa, shift_be,
                                        st_paddr_issue[i],
                                        DataMemAccess(st_shiftedBE_issue[i])) ||
-                           (isValid(objIdPAddr) ? 
+                           (isValid(objIdPAddr) ?
                                 overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
                                        st_paddr_issue[i],
                                        DataMemAccess(st_shiftedBE_issue[i])) :
@@ -2083,12 +2080,12 @@ module mkSplitLSQ(SplitLSQ);
             Bool overlap = overlapAddr(pa, shift_be,
                                        ld_paddr_issue[i],
                                        ld_shiftedBE_issue[i]) ||
-                           (isValid(ld_objIdPAddr_issue[i]) ? 
+                           (isValid(ld_objIdPAddr_issue[i]) ?
                                 overlapAddr(pa, shift_be,
                                        fromMaybe(?, ld_objIdPAddr_issue[i]),
                                        DataMemAccess(replicate(True))) :
                                 False) ||
-                           (isValid(objIdPAddr) ? 
+                           (isValid(objIdPAddr) ?
                                 overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
                                        ld_paddr_issue[i],
                                        ld_shiftedBE_issue[i]) :
@@ -2254,7 +2251,6 @@ module mkSplitLSQ(SplitLSQ);
             wrongPath: False,
             dst: Invalid,
             allowCap: False,
-            mte: 'h0,
             alloc_policy: 'h0,
 `ifdef INCLUDE_TANDEM_VERIF
             instTag: ld_instTag [t],    // For recording Ld data in ROB
@@ -2288,7 +2284,6 @@ module mkSplitLSQ(SplitLSQ);
             let is32BitLd = bEn matches tagged DataMemAccess .bEnData &&& (bEnData[3] && !bEnData[7]) ? True : False;
             res.allowCap = allowCap;
             res.dst = ld_dst[t];
-            res.mte = ld_mte[t];
             res.alloc_policy = ld_alloc_policy[t];
 
             if (dst.Valid.isFpuReg && is32BitLd)
@@ -2324,7 +2319,6 @@ module mkSplitLSQ(SplitLSQ);
             acq: ld_acq[deqP],
             rel: ld_rel[deqP],
             dst: ld_dst[deqP],
-            mte: ld_mte[deqP],
             paddr: ld_paddr_deqLd[deqP],
             isMMIO: ld_isMMIO_deqLd[deqP],
             alloc_policy: ld_alloc_policy[deqP],
@@ -2399,7 +2393,6 @@ module mkSplitLSQ(SplitLSQ);
             dst: st_dst[deqP],
             paddr: st_paddr_deqSt[deqP],
             isMMIO: st_isMMIO_deqSt[deqP],
-            mte : st_mte_deqSt[deqP],
             shiftedBE: st_shiftedBE_deqSt[deqP],
             alloc_policy: st_alloc_policy_deqSt[deqP],
             stData: st_stData_deqSt[deqP],
@@ -2464,7 +2457,7 @@ module mkSplitLSQ(SplitLSQ);
 
 `ifdef TSO_MM
     method Action cacheEvict(LineAddr lineAddr) if (!wrongSpec_conflict);
-        if(verbose) $display("%t : [LSQ - cacheEvict] ", $time, fshow(lineAddr), "; ", fshow(Addr'({lineAddr, '0})), "; ", 
+        if(verbose) $display("%t : [LSQ - cacheEvict] ", $time, fshow(lineAddr), "; ", fshow(Addr'({lineAddr, '0})), "; ",
                         fshow(getLineAddr('h80000100))
                         );
         // kill a load if it satisfies the following conditions:
@@ -2480,9 +2473,10 @@ module mkSplitLSQ(SplitLSQ);
             Bool executing = ld_executing_evict[i];
             Bool read_mem = True;//!isValid(ld_readFrom_evict[i]);
             Bool overlapLd = (getLineAddr(ld_paddr_evict[i]) == lineAddr);
-            Bool overlapObjIdLd = (isValid(ld_objIdPAddr_evict[i]) ? (getLineAddr(fromMaybe(?, ld_objIdPAddr_evict[i])) == lineAddr) :
-                                                                     False);
-            return valid && read_mem && executing && (overlapObjIdLd || overlapLd);
+            // Coherence for ObjIds is relaxed.
+            //Bool overlapObjIdLd = (isValid(ld_objIdPAddr_evict[i]) ? (getLineAddr(fromMaybe(?, ld_objIdPAddr_evict[i])) == lineAddr) :
+            //                                                         False);
+            return valid && read_mem && executing && (/*overlapObjIdLd ||*/overlapLd);
         endfunction
 
         // kill the oldest load
