@@ -738,9 +738,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                                    + zeroExtend(16'h3FC0)
                                    + zeroExtend(getTloc(x.rVal1) & 6'h30)); // TODO update for new modes
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
-                    end else begin 
+                    end else if (getTmode(x.rVal1) == 'h3) begin  
                       objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&10'h3FF) + zeroExtend(getTloc(x.rVal1)) * 1024 - 1);
                       objIdOffset = zeroExtend(6'h0F);
+                    end else if (getTmode(x.rVal1) == 'h4) begin 
+                      objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&13'h1FFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 8 - 1);
+                      objIdOffset = zeroExtend(6'h0F);
+                    end else if (getTmode(x.rVal1) == 'h5) begin 
+                      objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&16'hFFFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 64 - 1);
+                      objIdOffset = zeroExtend(6'h0F);
+                    end else begin 
+                      objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&19'h7FFFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 512 - 1);
+                      objIdOffset = zeroExtend(6'h0F);                        
                     end 
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
                                           " objIdVAddr ", fshow(objIdVAddr), 
