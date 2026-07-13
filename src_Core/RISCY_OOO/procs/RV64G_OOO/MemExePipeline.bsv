@@ -723,19 +723,25 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Maybe#(Addr) objIdVAddr = Invalid; // default invalid
 `endif
         Bit#(7) objIdOffset = 'h0 ;
-        
-        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) == 'h1 && x.alloc_policy == 'h0 ) begin 
+        Bit#(64) pageBase = 64'b0;
+        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) > 'h0 && x.alloc_policy == 'h0 ) begin 
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
-                      Bit#(64) byteIndex = zeroExtend(getTloc(x.rVal1) >> 3);   
-                      Bit#(64) blockAddr = (byteIndex >> 4) << 4; // align down to multiple of 16 bytes
-                      let pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
-
-                      objIdVAddr = Valid(
-                          pageBase
-                          + zeroExtend(16'hFC0)
-                          + zeroExtend(getTloc(x.rVal1) & 6'h30)
-                      );                      
+                    if( getTmode(x.rVal1) == 'h1) begin 
+                      pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
+                      objIdVAddr = Valid(pageBase
+                                   + zeroExtend(16'hFC0)
+                                   + zeroExtend(getTloc(x.rVal1) & 6'h30)); // TODO update for new modes
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
+                    end else if (getTmode(x.rVal1) == 'h2) begin 
+                      pageBase = { getAddr(x.vaddr)[64-1:14], 14'b0 };
+                      objIdVAddr = Valid (pageBase
+                                   + zeroExtend(16'h3FC0)
+                                   + zeroExtend(getTloc(x.rVal1) & 6'h30)); // TODO update for new modes
+                      objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
+                    end else begin 
+                      objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&10'h3FF) + zeroExtend(getTloc(x.rVal1)) * 1024 - 1);
+                      objIdOffset = zeroExtend(6'h0F);
+                    end 
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
                                           " objIdVAddr ", fshow(objIdVAddr), 
                                           " objIdOffset:", fshow(objIdOffset),
@@ -764,7 +770,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (mmObjIdTableEnt matches tagged Valid .mObjIdTableEnt) begin // First maybe to see if the key matched
             if (mObjIdTableEnt matches tagged Valid .objIdTableEnt) begin // Second maybe to see if this was a valid entry
                 //Bool isSealed = extractObjIdSeal(objIdTableEnt, objIdOffset);
-                Bool isSealed = extractMemMTE(objIdTableEnt,  getMTE(x.rVal1), objIdOffset);
+                Bool isSealed = mteMismatch(objIdTableEnt,  getMTE(x.rVal1), objIdOffset);
                 $display("mte table check ", fshow(isSealed));
                 //if(getMTE(x.rVal1) != memMTE) objIdVAddr = tagged Invalid;
                 if (!isSealed) objIdVAddr = tagged Invalid;
@@ -1056,7 +1062,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
                 objIdPAddr: x.objIdAddr,
-                mte: x.mte,
                 alloc_policy: x.alloc_policy,
                 pcHash: hash(getAddr(pc))
             });
