@@ -629,11 +629,19 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin 
             //vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
             if(getTmode(rVal1) == 'h0) begin 
-            $display("before sendmemmte", fshow(vaddr));
                 //vaddr = setAddr(vaddr, (getAddr(vaddr) & ~'h3f) + zeroExtend(getTloc(rVal1) << 2) -1).value;
                 vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1))* 4  -1)).value;
-            end else begin 
+            end 
+            else if(getTmode(rVal1) == 'h1)  begin 
                 vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4032 + zeroExtend(getTloc(rVal1) ))).value;
+            end 
+            else if(getTmode(rVal1) == 'h2)  begin 
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[13:0]) + 4096*4 - 64 + zeroExtend(getTloc(rVal1) ))).value;
+            end 
+            else if(getTmode(rVal1) == 'h3)  begin 
+                let originalTop  = getTop(rVal1); 
+                let updatedTop = originalTop - zeroExtend(getTop(rVal1)[9:0]);
+                vaddr = setAddr(vaddr, truncate(updatedTop) + zeroExtend(getTloc(rVal1))* 1024  -1).value;
             end 
             $display("sendmemmte", fshow(vaddr));
         end 
