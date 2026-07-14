@@ -602,7 +602,7 @@ function Bool mteMismatch(MemTaggedData d, Bit#(8) capMTE, Bit#(7) offset);
     return False;
 `else
     Vector#(16, Bit#(8)) bytes = unpack(pack(d.data));
-    return capMTE != bytes[offset];
+    return capMTE[1:0] != bytes[offset][1:0];
 `endif
 endfunction
 

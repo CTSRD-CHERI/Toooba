@@ -643,6 +643,21 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 let updatedTop = originalTop - zeroExtend(getTop(rVal1)[9:0]);
                 vaddr = setAddr(vaddr, truncate(updatedTop) + zeroExtend(getTloc(rVal1))* 1024  -1).value;
             end 
+            else if(getTmode(rVal1) == 'h4)  begin 
+                let originalTop  = getTop(rVal1); 
+                let updatedTop = originalTop - zeroExtend(getTop(rVal1)[12:0]);
+                vaddr = setAddr(vaddr, truncate(updatedTop) + zeroExtend(getTloc(rVal1))* 1024 * 8  -1).value;
+            end 
+            else if(getTmode(rVal1) == 'h5)  begin 
+                let originalTop  = getTop(rVal1); 
+                let updatedTop = originalTop - zeroExtend(getTop(rVal1)[15:0]);
+                vaddr = setAddr(vaddr, truncate(updatedTop) + zeroExtend(getTloc(rVal1))* 1024 * 64  -1).value;
+            end 
+            else if(getTmode(rVal1) == 'h6)  begin 
+                let originalTop  = getTop(rVal1); 
+                let updatedTop = originalTop - zeroExtend(getTop(rVal1)[18:0]);
+                vaddr = setAddr(vaddr, truncate(updatedTop) + zeroExtend(getTloc(rVal1))* 1024 * 512  -1).value;
+            end 
             $display("sendmemmte", fshow(vaddr));
         end 
         CapPipe data = rVal2;
