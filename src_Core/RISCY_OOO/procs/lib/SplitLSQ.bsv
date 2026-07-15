@@ -1963,14 +1963,9 @@ module mkSplitLSQ(SplitLSQ);
         function Bool isOverlapSt(StQTag i);
             Bool valid_older = validOlderSts[i];
             Bool computed = st_computed_issue[i];
-            Bool overlap = (objIdPAddr == st_paddr_issue[i]);//overlapAddr(pa, shift_be,
-                           //            st_paddr_issue[i],
-                           //            DataMemAccess(st_shiftedBE_issue[i])) ||
-                           //(isValid(objIdPAddr) ?
-                           //     overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
-                           //            st_paddr_issue[i],
-                           //            DataMemAccess(st_shiftedBE_issue[i])) :
-                           //     False);
+            Bool overlap = overlapAddr(objIdPAddr, DataMemAccess(replicate(True)),
+                                      st_paddr_issue[i],
+                                      DataMemAccess(st_shiftedBE_issue[i])) ;
             return valid_older && computed && overlap;
         endfunction
         Vector#(StQSize, Bool) overlapSts = map(isOverlapSt,
