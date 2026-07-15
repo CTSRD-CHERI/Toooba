@@ -404,6 +404,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
+    Fifo#(2, Tuple2#(StQTag, MemTaggedData))  memObjIdForwardQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
@@ -1299,6 +1300,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (verbose) $display("[doObjIdRespLdMem] ", fshow(t), "; ", fshow(d));
     endrule
 
+
+    (* descending_urgency = "doObjIdRespStMem, doObjIdRespStForward" *) // prioritize mem resp
     rule doObjIdRespStMem;
         memObjIdRespStQ.deq;
         let {t, d} = memObjIdRespStQ.first;
@@ -1308,6 +1311,27 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // If this ObjID response made a non-MMIO store become “done”,
         // tell the ROB now (non_mmio_st_done = True). Only pulse for real
         // stores (not Sc/Amo) to avoid ROB assertions.
+        if (mInstInfo matches tagged Valid { .instTag, .memFunc } &&& memFunc == St) begin
+            inIfc.rob_setExecuted_doFinishMem(
+                instTag,
+                0, // vaddr not needed for this bookkeeping pulse
+`ifdef INCLUDE_TANDEM_VERIF
+                0, 0, // store_data, store_data_BE (unused here)
+`endif
+                False, // access_at_commit
+                True   // non_mmio_st_done
+`ifdef RVFI
+                , unpack(0) // ExtraTraceBundle default
+`endif
+            );
+        end
+    endrule
+
+    rule doObjIdRespStForward;
+        memObjIdForwardQ.deq;
+        let {t, d} = memObjIdForwardQ.first;
+        let mInstInfo <- lsq.updateStObjIdSeal(t, d);
+        if (verbose) $display("[doObjIdRespStForward] ", fshow(t), "; ", fshow(d), "; instTagReady=", fshow(isValid(mInstInfo)));
         if (mInstInfo matches tagged Valid { .instTag, .memFunc } &&& memFunc == St) begin
             inIfc.rob_setExecuted_doFinishMem(
                 instTag,
@@ -2026,19 +2050,25 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // (* descending_urgency = "sendLdToMem, sendStObjSealRdToMem, sendStToMem" *)
     rule sendStObjSealRdToMem;
         let {lsqTag, addr} <- toGet(reqObjIdSealStQ).get;
+        LSQObjIdSearchResult result <- lsq.searchObjIDSt(lsqTag, addr);
         DProcReqId dId = zeroExtend(lsqTag);
-        dMem.procReq.req(ProcRq {
-            id: dId,
-            addr: addr,
-            toState: S,
-            op: Ld,
-            byteEn: ?,
-            data: ?,
-            amoInst: ?,
-            loadTags: False,
-            objSealRdType: St,
-            pcHash: ?
-        });
+        StQTag tag = truncate(dId);
+        if(result matches tagged ObjIdForward .forward) begin
+            memObjIdForwardQ.enq(tuple2(tag, forward));
+        end else begin 
+            dMem.procReq.req(ProcRq {
+                id: dId,
+                addr: addr,
+                toState: S,
+                op: Ld,
+                byteEn: ?,
+                data: ?,
+                amoInst: ?,
+                loadTags: False,
+                objSealRdType: St,
+                pcHash: ?
+            });
+        end 
         if(verbose) $display("[sendStObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
     endrule
 

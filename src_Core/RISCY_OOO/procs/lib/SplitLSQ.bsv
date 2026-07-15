@@ -70,6 +70,7 @@ export LdQMemFunc(..);
 export StQMemFunc(..);
 export LdQDeqEntry(..);
 export StQDeqEntry(..);
+export LSQObjIdSearchResult(..);
 export LSQUpdateAddrResult(..);
 export LSQForwardResult(..);
 export LdStalledBy(..);
@@ -365,6 +366,12 @@ typedef struct {
     Bit#(3)           alloc_policy;
 } StQDeqEntry deriving (Bits, Eq, FShow);
 
+typedef union tagged {
+    void ObjIdToCache;
+    MemTaggedData ObjIdForward;
+    LdStalledBy Stall;
+} LSQObjIdSearchResult deriving(Bits, Eq, FShow);
+
 interface SplitLSQ;
     // Enq at renaming. We split to 2 enq methods to enable synthesize
     // boundary. If we merge into 1 enq method, the guard will depend on the
@@ -403,6 +410,9 @@ interface SplitLSQ;
     method Action updateLdObjIdSeal(LdQTag tag, MemTaggedData d);
     method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc)))  updateStObjIdSeal(StQTag t, MemTaggedData d);
     // Issue a load, and remove dependence on this load issue.
+    method ActionValue#(LSQObjIdSearchResult) searchObjIDSt(
+                                StQTag requester,
+                                Addr objIdPAddr) ;
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, ByteOrTagEn shiftedBE, SBSearchRes sbRes
     );
@@ -1931,6 +1941,69 @@ module mkSplitLSQ(SplitLSQ);
             return Invalid;
         end
     endmethod
+
+    method ActionValue#(LSQObjIdSearchResult) searchObjIDSt(
+                                StQTag requester,
+                                Addr objIdPAddr) if (!wrongSpec_conflict);
+        LSQObjIdSearchResult result = tagged ObjIdToCache;
+        StQVirTag requesterVTag = stVirTags[requester];
+        function Bool isValidOlderSt(StQTag i);
+            Bool valid = st_valid_issue[i];
+
+            // Strictly older. This excludes requester itself.
+            Bool older = stVirTags[i] < requesterVTag;
+
+            return valid && older;
+        endfunction
+
+        Vector#(StQSize, Bool) validOlderSts =
+                map(isValidOlderSt, genWith(fromInteger));
+        $display("searchObjIDSt requesterVTag", fshow(requesterVTag) );
+        $display("searchObjIDSt validOlderSts", fshow(validOlderSts) );
+        function Bool isOverlapSt(StQTag i);
+            Bool valid_older = validOlderSts[i];
+            Bool computed = st_computed_issue[i];
+            Bool overlap = (objIdPAddr == st_paddr_issue[i]);//overlapAddr(pa, shift_be,
+                           //            st_paddr_issue[i],
+                           //            DataMemAccess(st_shiftedBE_issue[i])) ||
+                           //(isValid(objIdPAddr) ?
+                           //     overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
+                           //            st_paddr_issue[i],
+                           //            DataMemAccess(st_shiftedBE_issue[i])) :
+                           //     False);
+            return valid_older && computed && overlap;
+        endfunction
+        Vector#(StQSize, Bool) overlapSts = map(isOverlapSt,
+                                                genWith(fromInteger));
+        $display("searchObjIDSt overlapSts", fshow(overlapSts) );
+        // search the youngest store, and derive issue result
+        if(findYoungestSt(overlapSts) matches tagged Valid .stTag) begin
+            // find an overlaping SQ entry, check its type
+            case(st_memFunc[stTag])
+                St: begin
+                    // check if forwarding is possible
+                    //if(be1CoverBe2(DataMemAccess(st_shiftedBE_issue[stTag]), shift_be)) begin
+                        // store covers the issuing load, forward
+                        result = ObjIdForward (st_stData_issue[stTag]);
+                    //end
+                    //else begin
+                    //    // cannot forward, stall
+                    //    issRes = Stall (StQ);
+                    //end
+                end
+                default: begin
+                    doAssert(False, "unknown st mem func");
+                end
+            endcase
+        end
+        else begin
+            // no overlaping SQ entry is found, send to mem
+            result = ObjIdToCache;
+        end
+        $display("searchObjIDSt result", fshow(result) );
+        return result;
+
+    endmethod 
 
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,
                                                   Addr pa,
