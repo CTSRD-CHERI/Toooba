@@ -412,7 +412,8 @@ interface SplitLSQ;
     // Issue a load, and remove dependence on this load issue.
     method ActionValue#(LSQObjIdSearchResult) searchObjIDSt(
                                 StQTag requester,
-                                Addr objIdPAddr) ;
+                                Addr objIdPAddr,
+                                Bit#(7) objIDoffset) ;
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, ByteOrTagEn shiftedBE, SBSearchRes sbRes
     );
@@ -1944,7 +1945,8 @@ module mkSplitLSQ(SplitLSQ);
 
     method ActionValue#(LSQObjIdSearchResult) searchObjIDSt(
                                 StQTag requester,
-                                Addr objIdPAddr) if (!wrongSpec_conflict);
+                                Addr objIdPAddr,
+                                Bit#(7) objIDoffset) if (!wrongSpec_conflict);
         LSQObjIdSearchResult result = tagged ObjIdToCache;
         StQVirTag requesterVTag = stVirTags[requester];
         function Bool isValidOlderSt(StQTag i);
@@ -1960,10 +1962,22 @@ module mkSplitLSQ(SplitLSQ);
                 map(isValidOlderSt, genWith(fromInteger));
         $display("searchObjIDSt requesterVTag", fshow(requesterVTag) );
         $display("searchObjIDSt validOlderSts", fshow(validOlderSts) );
+        MemDataByteEn objIdByteBE = replicate(False);
+
+        Bit#(TLog#(MemDataBytes)) objIdByteIndex =
+            truncate(objIDoffset);
+
+        doAssert(
+            objIDoffset < fromInteger(valueOf(MemDataBytes)),
+            "ObjID offset is outside metadata word"
+        );
+
+        objIdByteBE[objIdByteIndex] = True;
+
         function Bool isOverlapSt(StQTag i);
             Bool valid_older = validOlderSts[i];
             Bool computed = st_computed_issue[i];
-            Bool overlap = overlapAddr(objIdPAddr, DataMemAccess(replicate(True)),
+            Bool overlap = overlapAddr(objIdPAddr, DataMemAccess(objIdByteBE),
                                       st_paddr_issue[i],
                                       DataMemAccess(st_shiftedBE_issue[i])) ;
             return valid_older && computed && overlap;

@@ -395,7 +395,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // fifo for req mem
     Fifo#(1, Tuple4#(LdQTag, Addr, Bool, Bit#(16))) reqLdQ <- mkBypassFifo;
     Fifo#(1, Tuple2#(LdQTag, Addr)) reqObjIdSealLdQ <- mkBypassFifo;
-    Fifo#(1, Tuple2#(StQTag, Addr)) reqObjIdSealStQ <- mkBypassFifo;
+    Fifo#(1, Tuple3#(StQTag, Addr, Bit#(7))) reqObjIdSealStQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
     Fifo#(1, Tuple2#(Addr, Bit#(16))) reqStQ <- mkBypassFifo;
@@ -404,7 +404,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
-    Fifo#(2, Tuple2#(StQTag, MemTaggedData))  memObjIdForwardQ <- mkCFFifo;
+    Fifo#(2, Tuple3#(StQTag, MemTaggedData, Addr))  memObjIdForwardQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
@@ -804,7 +804,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             if (mObjIdTableEnt matches tagged Valid .objIdTableEnt) begin // Second maybe to see if this was a valid entry
                 //Bool isSealed = extractObjIdSeal(objIdTableEnt, objIdOffset);
                 Bool isSealed = mteMismatch(objIdTableEnt,  getMTE(x.rVal1), objIdOffset);
-                $display("mte table check ", fshow(isSealed));
+                $display("mte table check ", fshow(isSealed), fshow(objIdTableEnt), fshow(objIdOffset));
                 //if(getMTE(x.rVal1) != memMTE) objIdVAddr = tagged Invalid;
                 if (!isSealed) objIdVAddr = tagged Invalid;
             end
@@ -1108,7 +1108,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             else begin
                 doAssert(False, "must be in StQ");
             end
-            reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, x.objIdAddr)));
+            reqObjIdSealStQ.enq(tuple3(stTag, fromMaybe(?, x.objIdAddr), x.objIdOffset));
         end
 
 `ifdef PERF_COUNT
@@ -1329,7 +1329,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     rule doObjIdRespStForward;
         memObjIdForwardQ.deq;
-        let {t, d} = memObjIdForwardQ.first;
+        let {t, d, objvaddr} = memObjIdForwardQ.first;
+        objIdBuf.update(
+            MapKeyIndex {
+                key: objvaddr,
+                index: hash(objvaddr)
+            },
+            Invalid
+        );
+
+
         let mInstInfo <- lsq.updateStObjIdSeal(t, d);
         if (verbose) $display("[doObjIdRespStForward] ", fshow(t), "; ", fshow(d), "; instTagReady=", fshow(isValid(mInstInfo)));
         if (mInstInfo matches tagged Valid { .instTag, .memFunc } &&& memFunc == St) begin
@@ -2049,12 +2058,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     // (* descending_urgency = "sendLdToMem, sendStObjSealRdToMem, sendStToMem" *)
     rule sendStObjSealRdToMem;
-        let {lsqTag, addr} <- toGet(reqObjIdSealStQ).get;
-        LSQObjIdSearchResult result <- lsq.searchObjIDSt(lsqTag, addr);
+        let {lsqTag, addr, offset} <- toGet(reqObjIdSealStQ).get;
+        LSQObjIdSearchResult result <- lsq.searchObjIDSt(lsqTag, addr, offset);
         DProcReqId dId = zeroExtend(lsqTag);
         StQTag tag = truncate(dId);
+
+        LdStQTag ldstqTag =
+                tagged St lsqTag;
+        Addr objIdVAddr =
+            objIdVAddrs[pack(ldstqTag)];
+
         if(result matches tagged ObjIdForward .forward) begin
-            memObjIdForwardQ.enq(tuple2(tag, forward));
+            memObjIdForwardQ.enq(tuple3(tag, forward, objIdVAddr));
         end else begin 
             dMem.procReq.req(ProcRq {
                 id: dId,
