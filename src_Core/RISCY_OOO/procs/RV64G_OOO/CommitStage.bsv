@@ -66,6 +66,7 @@ import CHERICap::*;
 import CHERICC_Fat::*;
 import ISA_Decls_CHERI::*;
 import RegFile::*; // Just for the interface
+import RenameStage::*;
 `ifdef PERFORMANCE_MONITORING
 import StatCounters::*;
 `endif
@@ -111,6 +112,7 @@ interface CommitInput;
     interface ReorderBufferSynth robIfc;
     interface RegRenamingTable rtIfc;
     interface CsrFile csrfIfc;
+    interface RenameStage rsIfc;
     // no stores
     method Bool stbEmpty;
     method Bool stqEmpty;
@@ -297,7 +299,7 @@ deriving (Eq, FShow, Bits);
 `endif
 
 module mkCommitStage#(CommitInput inIfc)(CommitStage);
-    Bool verbose = False;
+    Bool verbose = True;
 
     Integer verbosity = 1;   // Bluespec: for lightweight verbosity trace
 
@@ -899,6 +901,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         !isValid(rob.deqPort[0].deq_data.ldKilled) &&
         rob.deqPort[0].deq_data.rob_inst_state == Executed &&
         isSystem(rob.deqPort[0].deq_data.iType) &&
+        !rob.deqPort[0].deq_data.isPureDataRead &&
         (! send_mip_csr_change_to_tv)
     );
         rob.deqPort[0].deq;
@@ -1100,7 +1103,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
         !isValid(rob.deqPort[0].deq_data.trap) &&
         !isValid(rob.deqPort[0].deq_data.ldKilled) &&
         rob.deqPort[0].deq_data.rob_inst_state == Executed &&
-        !isSystem(rob.deqPort[0].deq_data.iType) &&
+        !(isSystem(rob.deqPort[0].deq_data.iType) && !rob.deqPort[0].deq_data.isPureDataRead) &&
         (! send_mip_csr_change_to_tv)
     );
         // stop superscalar commit after we
@@ -1169,7 +1172,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                 let inst_tag = rob.deqPort[i].getDeqInstTag;
 
                 // check can be committed or not
-                if(x.rob_inst_state != Executed || isValid(x.ldKilled) || isValid(x.trap) || isSystem(x.iType)) begin
+                if(x.rob_inst_state != Executed || isValid(x.ldKilled) || isValid(x.trap) || (isSystem(x.iType) && !x.isPureDataRead)) begin
                     // inst not ready for commit, or system inst, or trap, or killed, stop here
                     stop = True;
                 end
@@ -1307,7 +1310,7 @@ module mkCommitStage#(CommitInput inIfc)(CommitStage);
                     if (opcode == opcMiscMem && funct3 == fnFENCE) fenceCnt = fenceCnt + 1;
 `ifdef KONATA
                     case(x.iType)
-                        Alu, J, Jr, Br, Auipc, Auipcc, CCall, CJAL, CJALR, Cap: begin
+                        Alu, J, Jr, Br, Auipc, Auipcc, CCall, CJAL, CJALR, Cap, Csr, Scr: begin
                             $display("KONATAE\t%0d\t%0d\t0\tAlu4", cur_cycle, x.u_id);
                             $display("KONATAS\t%0d\t%0d\t0\tC", cur_cycle, x.u_id);
                             $fflush; 

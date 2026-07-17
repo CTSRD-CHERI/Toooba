@@ -660,6 +660,7 @@ module mkCore#(CoreId coreId)(Core);
         interface robIfc = rob;
         interface rtIfc = regRenamingTable;
         interface csrfIfc = csrf;
+        interface rsIfc = renameStage;
         method stbEmpty = stb.isEmpty;
         method stqEmpty = lsq.stqEmpty;
         method lsqSetAtCommit = lsq.setAtCommit;

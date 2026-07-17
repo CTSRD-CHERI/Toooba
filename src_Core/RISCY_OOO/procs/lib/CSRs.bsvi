@@ -2,6 +2,7 @@
 `CSR(FFLAGS,     12'h001)
 `CSR(FRM,        12'h002)
 `CSR(FCSR,       12'h003)
+`CSR(UTID,       12'h080)
 `CSR(CYCLE,      12'hc00)
 `CSR(TIME,       12'hc01)
 `CSR(INSTRET,    12'hc02)
@@ -21,6 +22,7 @@
 `CSR(STVAL,      12'h143) // it's still called sbadaddr in spike
 `CSR(SIP,        12'h144)
 `CSR(SATP,       12'h180) // it's still called sptbr in spike
+`CSR(STID,       12'h580)
 `CSR(SCCSR,      12'h9c0)
 // machine standard CSRs
 `CSR(MSTATUS,    12'h300)
@@ -35,6 +37,7 @@
 `CSR(MCAUSE,     12'h342)
 `CSR(MTVAL,      12'h343) // it's still called mbadaddr in spike
 `CSR(MIP,        12'h344)
+`CSR(MTID,       12'h380)
 `CSR(MCYCLE,     12'hb00)
 `CSR(MINSTRET,   12'hb02)
 
