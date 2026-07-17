@@ -2,6 +2,7 @@
 //
 //-
 // RVFI_DII + CHERI modifications:
+//     Copyright (c) 2024 Samuel Stark
 //     Copyright (c) 2020-2022 Alexandre Joannou
 //     Copyright (c) 2020 Peter Rugg
 //     Copyright (c) 2020 Jonathan Woodruff
@@ -109,7 +110,7 @@ interface Proc_IFC;
    interface AXI4_Slave #( Wd_CoreW_Bus_SId, Wd_Addr, Wd_Data_Periph
                          , Wd_AW_User_Periph, Wd_W_User_Periph, Wd_B_User_Periph
                          , Wd_AR_User_Periph, Wd_R_User_Periph)
-     debug_module_mem_server;
+     io_coherent_mem_server;
 
 `ifdef RVFI_DII
    interface Toooba_RVFI_DII_Server rvfi_dii_server;
