@@ -455,7 +455,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // fifo for req mem
     Fifo#(1, Tuple4#(LdQTag, Addr, Bool, Bit#(16))) reqLdQ <- mkBypassFifo;
     Fifo#(1, Tuple2#(LdQTag, Addr)) reqObjIdSealLdQ <- mkBypassFifo;
-    Fifo#(1, Tuple2#(StQTag, Addr)) reqObjIdSealStQ <- mkBypassFifo;
+    Fifo#(1, Tuple3#(StQTag, Addr, Bit#(7))) reqObjIdSealStQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
     Fifo#(1, Tuple2#(Addr, Bit#(16))) reqStQ <- mkBypassFifo;
@@ -464,6 +464,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
+    Fifo#(2, Tuple4#(StQTag, MemTaggedData, Addr, Bit#(7)))  memObjIdForwardQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
@@ -1029,7 +1030,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             else begin
                 doAssert(False, "must be in StQ");
             end
-            reqObjIdSealStQ.enq(tuple2(stTag, fromMaybe(?, objIdPAddr)));
+            reqObjIdSealStQ.enq(tuple3(stTag,  x.objIdAddr, x.objIdOffset));
         end
 
 `ifdef PERF_COUNT
@@ -1242,6 +1243,111 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `ifdef RVFI
                 , unpack(0) // ExtraTraceBundle default
 `endif
+            );
+        end
+    endrule
+
+    function MemTaggedData clearObjIdByte(
+        MemTaggedData oldData,
+        Bit#(7) objIdOffset
+    );
+        MemTaggedData newData = oldData;
+
+        Vector#(MemDataBytes, Bit#(8)) dataBytes =
+            unpack(pack(oldData.data));
+
+        Bit#(TLog#(MemDataBytes)) byteIndex =
+            truncate(objIdOffset);
+
+        dataBytes[byteIndex] = 0;
+
+        newData.data = unpack(pack(dataBytes));
+
+        return newData;
+    endfunction
+
+
+    rule doObjIdRespStForward;
+
+        let {
+            requesterTag,
+            forwardedData,
+            objIdVAddr,
+            objIdOffset
+        } = memObjIdForwardQ.first;
+
+        memObjIdForwardQ.deq;
+
+        doAssert(
+            objIdOffset < fromInteger(valueOf(MemDataBytes)),
+            "forwarded ObjID offset is outside objIdBuf entry"
+        );
+
+        let oldLookup = objIdBuf.lookup(MapKeyIndex{key: objIdVAddr, index: hash(objIdVAddr)});
+
+        case (oldLookup) matches
+
+            tagged Valid (tagged Valid .oldEntry): begin
+
+                MemTaggedData updatedEntry =
+                    clearObjIdByte(
+                        oldEntry,
+                        objIdOffset
+                    );
+
+                objIdBuf.update(
+                    MapKeyIndex{key: objIdVAddr, index: hash(objIdVAddr)},
+                    Valid(updatedEntry)
+                );
+
+            
+            end
+
+            tagged Valid (tagged Invalid): begin
+                objIdBuf.update(
+                    MapKeyIndex{key: objIdVAddr, index: hash(objIdVAddr)},
+                    Invalid
+                );
+
+                
+            end
+
+            tagged Invalid: begin
+                objIdBuf.update(
+                    MapKeyIndex{key: objIdVAddr, index: hash(objIdVAddr)},
+                    Invalid
+                );
+
+            end
+        endcase
+
+        let mInstInfo <-
+            lsq.updateStObjIdSeal(
+                requesterTag,
+                forwardedData
+            );
+
+
+        if (
+            mInstInfo matches
+                tagged Valid {
+                    .instTag,
+                    .memFunc
+                }
+            &&& memFunc == St
+        ) begin
+            inIfc.rob_setExecuted_doFinishMem(
+                instTag,
+                0, // vaddr not needed for this bookkeeping pulse
+    `ifdef INCLUDE_TANDEM_VERIF
+                0,
+                0, // store_data and store_data_BE unused here
+    `endif
+                False, // access_at_commit
+                True   // non_mmio_st_done
+    `ifdef RVFI
+                , unpack(0) // ExtraTraceBundle default
+    `endif
             );
         end
     endrule
@@ -1947,20 +2053,32 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     // (* descending_urgency = "sendLdToMem, sendStObjSealRdToMem, sendStToMem" *)
     rule sendStObjSealRdToMem;
-        let {lsqTag, addr} <- toGet(reqObjIdSealStQ).get;
+        let {lsqTag, addr, offset} <- toGet(reqObjIdSealStQ).get;
+        LSQObjIdSearchResult result <- lsq.searchObjIDSt(lsqTag, addr, offset);
         DProcReqId dId = zeroExtend(lsqTag);
-        dMem.procReq.req(ProcRq {
-            id: dId,
-            addr: addr,
-            toState: S,
-            op: Ld,
-            byteEn: ?,
-            data: ?,
-            amoInst: ?,
-            loadTags: False,
-            objSealRdType: St,
-            pcHash: ?
-        });
+        StQTag tag = truncate(dId);
+
+        LdStQTag ldstqTag =
+                tagged St lsqTag;
+        Addr objIdVAddr =
+            objIdVAddrs[pack(ldstqTag)];
+
+        if(result matches tagged ObjIdForward .forward) begin
+            memObjIdForwardQ.enq(tuple4(tag, forward, objIdVAddr, offset));
+        end else begin 
+            dMem.procReq.req(ProcRq {
+                id: dId,
+                addr: addr,
+                toState: S,
+                op: Ld,
+                byteEn: ?,
+                data: ?,
+                amoInst: ?,
+                loadTags: False,
+                objSealRdType: St,
+                pcHash: ?
+            });
+        end 
         if(verbose) $display("[sendStObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
     endrule
 
