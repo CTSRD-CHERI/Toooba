@@ -87,7 +87,7 @@ module mkRandomReplace(RandomReplace#(wayNum)) provisos(
             return unlocked[i] && invalid[i];
         endfunction
         function Bool isPoisoned(Integer i);
-            return poisoned[i] && unlocked[i];
+            return False;//poisoned[i] && unlocked[i];
         endfunction
         Vector#(wayNum, Integer) idxVec = genVector;
         Maybe#(wayT) repWay = searchIndex(isInvUnlock, idxVec);
