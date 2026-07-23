@@ -646,33 +646,33 @@ endfunction
                     Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
                     let poison_length = getLength(loaded_dataUnpacked);
                     //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
-                    if(req.alloc_policy == 3'b001) begin 
-                            //let newTaggedData =
-                            //     mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
-                            newLine = setTaggedDataAt( curLine, dataSel, unpack(0));
-                            $display("%t L1 %m pipelineResp: zero poison",
-                                $time,
-                                fshow(curLine), fshow(newLine)
-                            );
-                    end else begin 
-                        if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked)  == 1'b1 && !req.permitPoison && req.length <= poison_length) begin 
-                        //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
-                            if (req.pver >  poison_pver ) begin  
-                                let newTaggedData =
-                                    mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
-                                newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
-                            end else begin 
-                                $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
-                                    $time,
-                                    fshow(taggedData)
-                                );
-                            end 
-                        end else begin 
+                    //if(req.alloc_policy == 3'b001) begin 
+                    //        //let newTaggedData =
+                    //        //     mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
+                    //        newLine = setTaggedDataAt( curLine, dataSel, unpack(0));
+                    //        $display("%t L1 %m pipelineResp: zero poison",
+                    //            $time,
+                    //            fshow(curLine), fshow(newLine)
+                    //        );
+                    //end else begin 
+                    //    if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked)  == 1'b1 && !req.permitPoison && req.length <= poison_length) begin 
+                    //    //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
+                    //        if (req.pver >  poison_pver ) begin  
+                    //            let newTaggedData =
+                    //                mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
+                    //            newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
+                    //        end else begin 
+                    //            $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
+                    //                $time,
+                    //                fshow(taggedData)
+                    //            );
+                    //        end 
+                    //    end else begin 
                             let newTaggedData =
                                 mergeMemTaggedDataBE(taggedData, req.data, zeroExtend(pack(req.byteEn)));
                             newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
-                        end 
-                    end 
+                        //end 
+                    //end 
                 end
                 // reset link addr
                 linkAddr <= Invalid;
@@ -698,24 +698,24 @@ endfunction
                         fshow(curLine), fshow(newLine)
                     );
                 end else begin 
-                    if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked) == 1'b1 && !req.permitPoison && req.length <= poison_length) begin
-                        if (req.pver > poison_pver || req.alloc_policy == 3'b001) begin  
-                        //if(pver == pver) begin
-                            let unpoisoned_curLine = setTaggedDataAt( curLine, dataSel, unpack(0));
-                            newLine = getUpdatedLine(unpoisoned_curLine, be, wrLine);
-                            $display("%t L1 %m pipelineResp: found mismatch poison on store access, return 0",
-                                $time,
-                                fshow(curLine), fshow(newLine)
-                            );
-                        end else begin 
-                            $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
-                                $time,
-                                fshow(curData), fshow(pver), isValidCap(loaded_dataUnpacked), fshow(wrLine)
-                            );
-                        end 
-                    end else begin 
+                    //if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked) == 1'b1 && !req.permitPoison && req.length <= poison_length) begin
+                    //    if (req.pver > poison_pver || req.alloc_policy == 3'b001) begin  
+                    //    //if(pver == pver) begin
+                    //        let unpoisoned_curLine = setTaggedDataAt( curLine, dataSel, unpack(0));
+                    //        newLine = getUpdatedLine(unpoisoned_curLine, be, wrLine);
+                    //        $display("%t L1 %m pipelineResp: found mismatch poison on store access, return 0",
+                    //            $time,
+                    //            fshow(curLine), fshow(newLine)
+                    //        );
+                    //    end else begin 
+                    //        $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
+                    //            $time,
+                    //            fshow(curData), fshow(pver), isValidCap(loaded_dataUnpacked), fshow(wrLine)
+                    //        );
+                    //    end 
+                    //end else begin 
                         newLine = getUpdatedLine(curLine, be, wrLine);
-                    end 
+                    //end 
                 end 
             end
             default: begin
