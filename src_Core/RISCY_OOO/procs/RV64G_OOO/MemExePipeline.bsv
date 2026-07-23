@@ -933,56 +933,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         LSQRespLdResult res <- lsq.respLd(tag, data);
         if(verbose) $display("%t : ", $time, rule_name, " ", fshow(tag), "; ", fshow(data), "; ", fshow(res));
         if(res.dst matches tagged Valid .dst) begin
-            CapPipe loaded_dataUnpacked = fromMem(unpack(pack(data)));
-            loaded_dataUnpacked = setValidCap(loaded_dataUnpacked, res.allowCap && isValidCap(loaded_dataUnpacked));
-            Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
-            $display("%t poison check: ", $time, rule_name, " ", fshow(data), " ", fshow(res), " ", fshow(data.data[1][47] ));
-
             CapPipe dataUnpacked = fromMem(unpack(pack(res.data)));
             dataUnpacked = setValidCap(dataUnpacked, res.allowCap && isValidCap(dataUnpacked));
-
-            let poison_length = getLength(loaded_dataUnpacked);
-            if(res.alloc_policy == 3'b100) begin 
-                $display("cgetpoison",fshow(res));
-            end 
-
-            Bit#(1) isPoison = (getCapPoison(loaded_dataUnpacked) ==1'b1 && data.tag==True) ? 1'b1: 1'b0;
-
-            //if (data.data[1][46] ==1'b1 && data.tag==True && !res.permitPoison) begin 
-            if (getCapPoison(loaded_dataUnpacked) == 1'b1 && data.tag==True && !res.permitPoison) begin
-                if (res.alloc_policy == 3'b100) begin 
-                    inIfc.writeRegFile(dst.indx, dataUnpacked);
-                    $display("%t return getPoison1 res: ", $time, rule_name, " ", fshow(dataUnpacked));
-                end else begin 
-                    if(res.pver >  poison_pver || res.length > poison_length ) begin  
-                       inIfc.writeRegFile(dst.indx, unpack(0));
-                       $display("%t poison load mismatch return 0: ", $time, rule_name, " ", fshow(data));
-                    end else begin 
-                       $display("%t poison load exception: ", $time, rule_name, " ", fshow(data));
-                       $display("poison cap ", fshow(getLength(loaded_dataUnpacked)));
-                       $display("cap length ", fshow(res.length));
-                       //poisonExceptionFIFO.enq(res.instTag);
-		                inIfc.writeRegFile(dst.indx, unpack(0));
-                       /*
-                       inIfc.rob_setExecuted_deqLSQ(res.instTag, Valid(Exception(excLoadAccessFault)), Invalid
-                    
-`ifdef RVFI
-            , ExtraTraceBundle{
-                regWriteData: pack(res.data.data[0]),
-                memByteEn: replicate(False)
-            }
-`endif
-        );  */
-                    end 
-                end 
-            end else begin 
-                if (res.alloc_policy == 3'b100) begin 
-                    $display("%t return getPoison2 res: ", $time, rule_name, " ", fshow(dataUnpacked));
-                    inIfc.writeRegFile(dst.indx, dataUnpacked);
-                end else begin 
-                    inIfc.writeRegFile(dst.indx, dataUnpacked);
-                end 
-            end 
+            inIfc.writeRegFile(dst.indx, dataUnpacked);
 
 `ifdef INCLUDE_TANDEM_VERIF
             inIfc.rob_setExecuted_doFinishMem_RegData (res.instTag, res.data);
