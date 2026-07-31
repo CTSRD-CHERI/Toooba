@@ -148,6 +148,7 @@ typedef struct {
     Maybe#(CSR_XCapCause) capException;
     Maybe#(BoundsCheck) check;
     Bit#(8) mte;
+    Bit#(3) tmode; 
     Bit#(3) alloc_policy;
 
 `ifdef KONATA
@@ -810,7 +811,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end
         end
 
-        if (isValid(objIdVAddr)) begin // go to next stage by sending to TLB
+        if (isValid(objIdVAddr) && getTmode(x.rVal1) > 1) begin // go to next stage by sending to TLB
             objIdTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
                     mem_func: x.mem_func,
@@ -821,6 +822,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     objIdAddr: objIdVAddr, //Valid('h80010000),
                     objIdOffset: objIdOffset,
                     mte: getMTE(x.rVal1),
+                    tmode: getTmode(x.rVal1),
                     alloc_policy: x.alloc_policy,
 `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
@@ -847,8 +849,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     ldstq_tag: x.ldstq_tag,
                     shiftedBE: shiftBE,
                     vaddr: x.vaddr,
-                    objIdAddr: Invalid,
+                    objIdAddr: objIdVAddr,
                     objIdOffset: objIdOffset,
+                    tmode: getTmode(x.rVal1),
                     mte: getMTE(x.rVal1),
                     alloc_policy: x.alloc_policy,
         `ifdef INCLUDE_TANDEM_VERIF
@@ -944,6 +947,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
                     objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
                     objIdOffset: x.objIdOffset,
+                    tmode: x.tmode,
                     mte: x.mte,
                     alloc_policy: x.alloc_policy,
 `ifdef INCLUDE_TANDEM_VERIF
@@ -1094,9 +1098,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         // update LSQ
+        Maybe#(Addr) objIdPAddr = Invalid;
+        if (x.objIdAddr matches tagged Valid .objIdVAddr) begin
+            if(x.tmode == 1)
+                objIdPAddr = Valid({paddr[63:12],truncate(objIdVAddr)});
+            else 
+                objIdPAddr = x.objIdAddr;
+        end 
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy, 
-            (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? x.objIdAddr : Invalid), x.objIdOffset
+            (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 
@@ -1116,7 +1127,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
-                objIdPAddr: x.objIdAddr,
+                objIdPAddr: objIdPAddr,
                 alloc_policy: x.alloc_policy,
                 pcHash: hash(getAddr(pc))
             });
@@ -1130,7 +1141,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             else begin
                 doAssert(False, "must be in StQ");
             end
-            reqObjIdSealStQ.enq(tuple3(stTag, fromMaybe(?, x.objIdAddr), x.objIdOffset));
+            reqObjIdSealStQ.enq(tuple3(stTag, fromMaybe(?, objIdPAddr), x.objIdOffset));
         end
 
 `ifdef PERF_COUNT
