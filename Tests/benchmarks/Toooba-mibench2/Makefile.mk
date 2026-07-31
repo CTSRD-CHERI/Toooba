@@ -8,7 +8,7 @@ ifeq ($(CHERI),1)
 TOOLCHAIN:=LLVM
 endif
 
-CCDIR   ?= /Users/jonathanwoodruff/cheri/build/llvm-project-build/bin
+CCDIR   ?= /local/scratch/yw737/cheri_emte/build/llvm-project-build/bin
 ifeq ($(TOOLCHAIN),LLVM)
 CC      := $(CCDIR)/clang
 LD      := $(CCDIR)/ld.lld
@@ -23,15 +23,15 @@ LD      := riscv64-unknown-elf-ld
 OBJDUMP := riscv64-unknown-elf-objdump
 OBJCOPY := riscv64-unknown-elf-objcopy
 RISCV_FLAGS += -mcmodel=medany
-LIBS := -lgcc
+LIBS :=
 endif
 
 # Make sure user explicitly defines the target GFE platform.
 ifeq ($(TOOLCHAIN),LLVM)
 ifeq ($(CHERI),1)
-  RISCV_FLAGS += -target riscv64 -march=rv64imafdxcheri -mabi=l64pc128d
+  RISCV_FLAGS += -target riscv64 -march=rv64imafdcxcheri -mabi=l64pc128d 
 else
-  RISCV_FLAGS += -target riscv64 -march=rv64imafdc -mabi=lp64
+  RISCV_FLAGS += -target riscv64-unknown-elf -march=rv64imafdc -mabi=lp64d
 endif
 else
   RISCV_FLAGS += -march=rv64imafdc -mabi=lp64d
@@ -61,11 +61,14 @@ CFLAGS := \
 	-DHAS_FLOAT=1 \
 	-DRUNS=$(RUNS) \
 	-O2 \
-	-Wall \
+	-target riscv64-unknown-freebsd --sysroot="/local/scratch/yw737/cheri_emte/output/rootfs-riscv64-purecap" \
+        -Wall \
+	-fuse-ld=lld \
 	-static \
 	-std=gnu99 \
 	-ffast-math \
 	-fno-common \
+	-fno-builtin \
 	-fno-builtin-printf \
 	-I$(COMMON_DIR)
 ASFLAGS := $(CFLAGS)
@@ -92,7 +95,7 @@ all: main.elf
 %.o: ../%.c
 	$(CC) $(CFLAGS) -c -o $@ $<
 
-main.elf: $(OBJS) $(COMMON_C_SRCS) $(COMMON_ASM_SRCS)
+main.elf: $(OBJS) $(COMMON_C_SRCS) $(COMMON_ASM_SRCS) 
 	$(CC) $(CFLAGS) $(OBJS) -o main.elf -Xlinker $(LDFLAGS)
 #	$(LD) $(OBJS) --allow-shlib-undefined -lm -lc -lclang_rt.profile-riscv64 -Bstatic -T ../test.ld -L/Users/jonathanwoodruff/cheri/build/cheribsd-riscv64-build/Users/jonathanwoodruff/cheri/cheribsd/riscv.riscv64/lib/libclang_rt/profile/ -L/Users/jonathanwoodruff/cheri/build/cheribsd-riscv64-build/Users/jonathanwoodruff/cheri/cheribsd/riscv.riscv64/tmp/usr/lib/ --sysroot=/Users/jonathanwoodruff/cheri/build/cheribsd-riscv64-build/Users/jonathanwoodruff/cheri/cheribsd/riscv.riscv64//tmp/ -o main.elf
 	$(OBJDUMP) --disassemble-all main.elf > main.lst
