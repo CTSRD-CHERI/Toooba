@@ -840,9 +840,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             });
         end
         else begin
-            // dTlb.procReq(
-            dTlbReqQ.enq(ToSpecFifo {
-                data: MemExeToFinish {
+            dTlb.procReq(DTlbReq {
+                inst: MemExeToFinish {
                     mem_func: x.mem_func,
                     tag: x.tag,
                     ldstq_tag: x.ldstq_tag,
@@ -852,22 +851,45 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     objIdOffset: objIdOffset,
                     mte: getMTE(x.rVal1),
                     alloc_policy: x.alloc_policy,
-`ifdef INCLUDE_TANDEM_VERIF
+        `ifdef INCLUDE_TANDEM_VERIF
                     store_data: x.rVal2,
                     store_data_BE: origBE,
-`endif
-                    misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE, x.alloc_policy),
-                    capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
-                    allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
-                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
-                    check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                            ddc, getAddr(x.vaddr),
-                                            accessByteCount, x.cap_checks)
-`ifdef KONATA
+        `endif
+                    misaligned:
+                        memAddrMisaligned(
+                            getAddr(x.vaddr),
+                            x.origBE,
+                            x.alloc_policy
+                        ),
+                    capStore:
+                        isValidCap(x.rVal2) &&
+                        x.origBE == DataMemAccess(unpack(~0)),
+                    allowCapLoad:
+                        getHardPerms(x.rVal1).permitLoadCap &&
+                        x.origBE == DataMemAccess(unpack(~0)),
+                    capException:
+                        capChecksMem(
+                            x.rVal1,
+                            x.rVal2,
+                            x.cap_checks,
+                            x.mem_func,
+                            x.origBE
+                        ),
+                    check:
+                        prepareBoundsCheck(
+                            x.rVal1,
+                            x.rVal2,
+                            almightyCap,
+                            ddc,
+                            getAddr(x.vaddr),
+                            accessByteCount,
+                            x.cap_checks
+                        )
+        `ifdef KONATA
                     , u_id: x.u_id
-`endif
+        `endif
                 },
-                spec_bits: regToExe.spec_bits
+                specBits: regToExe.spec_bits
             });
         end
     endrule
