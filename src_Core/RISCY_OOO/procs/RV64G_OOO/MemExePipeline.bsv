@@ -937,8 +937,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
         else begin
             // dTlb.procReq(
-            dTlbReqQ.enq(ToSpecFifo {
-                data: MemExeToFinish {
+            dTlb.procReq(DTlbReq {
+                inst: MemExeToFinish {
                     mem_func: x.mem_func,
                     tag: x.tag,
                     ldstq_tag: x.ldstq_tag,
@@ -963,21 +963,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     , u_id: x.u_id
 `endif
                 },
-                spec_bits: objIdTlbResp.specBits
+                specBits: objIdTlbResp.specBits
             });
         end
     endrule
     
-    rule doDTlb;
-        dTlbReqQ.deq;
-        let memExeFin = dTlbReqQ.first;
-        let x = memExeFin.data;
-        dTlb.procReq(DTlbReq {
-            inst: x,
-            specBits: memExeFin.spec_bits
-        });
-        if (verbose) $display("%t : [doDTlb] ", $time, fshow(memExeFin));
-    endrule
 
     rule doFinishMem;
         dTlb.deqProcResp;
