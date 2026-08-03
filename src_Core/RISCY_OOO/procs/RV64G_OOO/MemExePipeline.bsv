@@ -1851,7 +1851,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             }
 `endif
         );
-        objIdBuf.clear;
+        //objIdBuf.clear;
         if(verbose) $display("[doDeqStQ_Fence] ", fshow(lsqDeqSt));
 `ifdef PERF_COUNT
         if(inIfc.doStats) begin
