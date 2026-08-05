@@ -395,7 +395,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     // fifo for req mem
     Fifo#(1, Tuple4#(LdQTag, Addr, Bool, Bit#(16))) reqLdQ <- mkBypassFifo;
-    Fifo#(1, Tuple2#(LdQTag, Addr)) reqObjIdSealLdQ <- mkBypassFifo;
+    Fifo#(1, Tuple3#(LdQTag, Addr, Bit#(7))) reqObjIdSealLdQ <- mkBypassFifo;
     Fifo#(1, Tuple3#(StQTag, Addr, Bit#(7))) reqObjIdSealStQ <- mkBypassFifo;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
@@ -406,6 +406,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
     Fifo#(2, Tuple4#(StQTag, MemTaggedData, Addr, Bit#(7)))  memObjIdForwardQ <- mkCFFifo;
+    Fifo#(2, Tuple2#(LdQTag, MemTaggedData))  memObjIdLdForwardQ <- mkCFFifo;
+
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
@@ -532,6 +534,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         endmethod
 `endif
         method Action evict(LineAddr lineAddr);
+            //objIdBuf.clear;
 `ifdef TSO_MM
             if(verbose) $display("[cache evict] ", fshow(lineAddr));
             lsq.cacheEvict(lineAddr);
@@ -1118,6 +1121,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
                 objIdPAddr: objIdPAddr,
+                objIdOffset: x.objIdOffset,
                 alloc_policy: x.alloc_policy,
                 pcHash: hash(getAddr(pc))
             });
@@ -1176,7 +1180,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             forwardQ.enq(tuple2(info.tag, forward.data));
             if (info.objIdPAddr matches tagged Valid .a) begin
                 $display("Forward: Issuing objIdSeal ", fshow(info));
-                reqObjIdSealLdQ.enq(tuple2(zeroExtend(info.tag), a));
+                reqObjIdSealLdQ.enq(tuple3(zeroExtend(info.tag), a, info.objIdOffset));
             end
             // early wake up
             if(forward.dst matches tagged Valid .dst) begin
@@ -1193,7 +1197,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             reqLdQ.enq(tuple4(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash));
             if (info.objIdPAddr matches tagged Valid .a) begin
                 $display("ToCache: Issuing objIdSeal ", fshow(info));
-                reqObjIdSealLdQ.enq(tuple2(zeroExtend(info.tag), a));
+                reqObjIdSealLdQ.enq(tuple3(zeroExtend(info.tag), a,  info.objIdOffset));
             end
             // perf: load mem latency
             ldMemLatTimer.start(info.tag);
@@ -1322,6 +1326,19 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         lsq.updateLdObjIdSeal(t, d);
         if (verbose) $display("[doObjIdRespLdMem] ", fshow(t), "; ", fshow(d));
     endrule
+
+    rule doObjIdRespLdForward;
+        let {
+            requesterTag,
+            forwardedData
+        } = memObjIdLdForwardQ.first;
+
+        memObjIdLdForwardQ.deq;
+        
+        lsq.updateLdObjIdSeal(requesterTag,
+                forwardedData);
+
+    endrule 
 
 
     (* descending_urgency = "doObjIdRespStMem, doObjIdRespStForward" *) // prioritize mem resp
@@ -1553,7 +1570,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         };
         if (lsqDeqLd.objIdPAddr matches tagged Valid .a) begin
             if(verbose) $display("%t : [doDeqLdQ_Lr_issue] Issuing objIdSeal for LR tag: %d", $time, lsqDeqLd.tag);
-            reqObjIdSealLdQ.enq(tuple2(zeroExtend(lsqDeqLd.tag), a));
+            reqObjIdSealLdQ.enq(tuple3(zeroExtend(lsqDeqLd.tag), a, lsqDeqLd.objIdOffset));
         end
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqLdQ_Lr_issue] ", fshow(lsqDeqLd), "; ", fshow(req));
@@ -1851,7 +1868,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             }
 `endif
         );
-        //objIdBuf.clear;
+        objIdBuf.clear;
         if(verbose) $display("[doDeqStQ_Fence] ", fshow(lsqDeqSt));
 `ifdef PERF_COUNT
         if(inIfc.doStats) begin
@@ -2118,9 +2135,25 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     // send req to D$
     rule sendLdObjSealRdToMem;
-        let {lsqTag, addr} <- toGet(reqObjIdSealLdQ).get;
+        let req = reqObjIdSealLdQ.first;
+        let {lsqTag, addr, offset} = req;
         DProcReqId dId = zeroExtend(lsqTag);
-        dMem.procReq.req(ProcRq {
+
+        LSQObjIdSearchResult result <- lsq.searchObjIdLd(lsqTag, addr, offset);
+        LdQTag tag = truncate(dId);
+
+        LdStQTag ldstqTag =
+                tagged Ld lsqTag;
+        Addr objIdVAddr =
+            objIdVAddrs[pack(ldstqTag)];
+
+        if(result matches tagged ObjIdForward .forward) begin
+            memObjIdLdForwardQ.enq(tuple2(tag, forward));
+            reqObjIdSealLdQ.deq;
+        //end else if (result matches tagged ObjIdToCache .toCache) begin 
+        end else begin 
+            reqObjIdSealLdQ.deq;
+            dMem.procReq.req(ProcRq {
             id: dId,
             addr: addr,
             toState: S,
@@ -2131,7 +2164,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             loadTags: False,
             objSealRdType: Ld,
             pcHash: ?
-        });
+            });
+        //end else begin 
+        //    noAction;
+        end 
+
         if(verbose) $display("[sendLdObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
     endrule
 

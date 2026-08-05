@@ -309,6 +309,7 @@ typedef struct {
     Addr paddr;
     ByteOrTagEn shiftedBE;
     Maybe#(Addr) objIdPAddr;
+    Bit#(7) objIdOffset;
     Bit#(16) pcHash;
     Bit#(3) alloc_policy;
 } LSQIssueLdInfo deriving(Bits, Eq, FShow);
@@ -345,6 +346,7 @@ typedef struct {
     Bool               allowCap;
     Maybe#(LdKilledBy) killed;
     Maybe#(Addr)       objIdPAddr;
+    Bit#(7)            objIdOffset;
     Bit#(3)            alloc_policy;
 } LdQDeqEntry deriving (Bits, Eq, FShow);
 
@@ -414,6 +416,13 @@ interface SplitLSQ;
                                 StQTag requester,
                                 Addr objIdPAddr,
                                 Bit#(7) objIDoffset) ;
+    
+
+    method ActionValue#(LSQObjIdSearchResult) searchObjIdLd(
+                                LdQTag requester,
+                                Addr objIdPAddr,
+                                Bit#(7) objIDoffset) ;
+
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, ByteOrTagEn shiftedBE, SBSearchRes sbRes
     );
@@ -789,6 +798,8 @@ module mkSplitLSQ(SplitLSQ);
     let ld_objIdPAddr_issue         = getVEhrPort(ld_objIdPAddr, 1);
     let ld_objIdPAddr_enq           = getVEhrPort(ld_objIdPAddr, 1); // write
 
+    let ld_objIdOffset_findIss      = getVEhrPort(ld_objIdOffset, 0);
+    let ld_objIdOffset_deqLd        = getVEhrPort(ld_objIdOffset, 0);
     let ld_objIdOffset_updAddr      = getVEhrPort(ld_objIdOffset, 0); // write
     let ld_objIdOffset_updObjIdSeal = getVEhrPort(ld_objIdOffset, 1);
 
@@ -1261,6 +1272,7 @@ module mkSplitLSQ(SplitLSQ);
                 paddr: ld_paddr_findIss[tag],
                 shiftedBE: ld_shiftedBE_findIss[tag],
                 objIdPAddr: ld_objIdPAddr_findIss[tag],
+                objIdOffset: ld_objIdOffset_findIss[tag],
                 pcHash: ld_pcHash[tag],
                 alloc_policy: ld_alloc_policy[tag]
             };
@@ -2014,6 +2026,102 @@ module mkSplitLSQ(SplitLSQ);
 
     endmethod 
 
+
+    method ActionValue#(LSQObjIdSearchResult) searchObjIdLd(
+                                LdQTag requester,
+                                Addr objIdPAddr,
+                                Bit#(7) objIDoffset) if (!wrongSpec_conflict);
+        LSQObjIdSearchResult result = tagged ObjIdToCache;
+        Maybe#(StQVirTag) precedingSt = olderStVirTags[requester];
+
+        function Bool isValidOlderSt(StQTag i);
+            Bool older = False;
+                
+            if (precedingSt matches tagged Valid .st) begin
+                older = stVirTags[i] <= st;
+            end
+                
+            return st_valid_issue[i] && older;
+        endfunction
+
+        Vector#(StQSize, Bool) validOlderSts =
+                map(isValidOlderSt, genWith(fromInteger));
+        $display("searchObjIDSt requesterVTag", fshow(requester) );
+        $display("searchObjIDSt validOlderSts", fshow(validOlderSts) );
+        MemDataByteEn objIdByteBE = replicate(False);
+
+        Bit#(TLog#(MemDataBytes)) objIdByteIndex =
+            truncate(objIDoffset);
+
+        doAssert(
+            objIDoffset < fromInteger(valueOf(MemDataBytes)),
+            "ObjID offset is outside metadata word"
+        );
+
+        objIdByteBE[objIdByteIndex] = True;
+
+        function Bool isUnresolvedOlderSt(StQTag i);
+            return validOlderSts[i] &&
+                   !st_computed_issue[i];
+        endfunction
+
+        Vector#(StQSize, Bool) unresolvedOlderSts =
+                    map(isUnresolvedOlderSt, genWith(fromInteger));
+
+        function Bool isObjIdOverlapSt(StQTag i);
+            Bool overlap =
+                overlapAddr(
+                    objIdPAddr,
+                    DataMemAccess(objIdByteBE),
+                    st_paddr_issue[i],
+                    DataMemAccess(st_shiftedBE_issue[i])
+                );
+
+            return validOlderSts[i] &&
+                   st_computed_issue[i] &&
+                   overlap;
+        endfunction
+        Vector#(StQSize, Bool) overlapSts =
+            map(isObjIdOverlapSt, genWith(fromInteger));
+        $display("searchObjIDLd overlapSts", fshow(overlapSts) );
+
+        Maybe#(StQTag) unresolvedMatch =
+        findYoungestSt(unresolvedOlderSts);
+
+        Maybe#(StQTag) overlapMatch =
+            findYoungestSt(overlapSts);
+
+
+        if (unresolvedMatch matches tagged Valid .stTag) begin
+            result = tagged Stall StQ;
+        end
+        else if (overlapMatch matches tagged Valid .stTag) begin
+            case (st_memFunc[stTag])
+
+                St: begin
+                    result =
+                        tagged ObjIdForward
+                            st_stData_issue[stTag];
+                end
+
+                Sc, Amo: begin
+                    result = tagged Stall StQ;
+                end
+
+                default: begin
+                    result = tagged Stall StQ;
+                end
+
+            endcase
+        end
+        else begin
+            result = tagged ObjIdToCache;
+        end
+        $display("searchObjIDSt result", fshow(result) );
+        return result;
+
+    endmethod 
+
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,
                                                   Addr pa,
                                                   Maybe#(Addr) objIdPAddr,
@@ -2408,7 +2516,8 @@ module mkSplitLSQ(SplitLSQ);
             fault: fault, //ld_fault_deqLd[deqP],
             allowCap: ld_allowCap[deqP],
             killed: ld_killed_deqLd[deqP],
-            objIdPAddr: ld_objIdPAddr_deqLd[deqP]
+            objIdPAddr: ld_objIdPAddr_deqLd[deqP],
+            objIdOffset: ld_objIdOffset_deqLd[deqP]
         };
     endmethod
 
