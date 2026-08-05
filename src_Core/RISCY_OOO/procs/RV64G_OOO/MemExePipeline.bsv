@@ -412,6 +412,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
+    Reg#(Bool) objIdInvalidatePending <- mkReg(False);
+
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
     // 4-bit index == 16 entries per set.
     // Each record is a Maybe#(MemTaggedData); essentially a 128-bit word with a validity bit.
@@ -534,13 +536,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         endmethod
 `endif
         method Action evict(LineAddr lineAddr);
-            //objIdBuf.clear;
 `ifdef TSO_MM
             if(verbose) $display("[cache evict] ", fshow(lineAddr));
             lsq.cacheEvict(lineAddr);
 `else
             noAction;
 `endif
+            objIdInvalidatePending <= True;
         endmethod
     endinterface);
     // non-blocking coherent D$
@@ -752,8 +754,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         Bit#(7) objIdOffset = 'h0 ;
         Bit#(64) pageBase = 64'b0;
+        function Addr mteAddr(Addr top, Bit#(6) loc, Integer shift);
+            Addr mask = ('1 << shift);
+            return (top & mask) + (zeroExtend(loc) << shift) - 1;
+        endfunction
         if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) > 'h0 && x.alloc_policy == 'h0 ) begin 
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
+            
+                    let top = getTop(x.vaddr);
+
                     if( getTmode(x.rVal1) == 'h1) begin 
                       pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
                       objIdVAddr = Valid(pageBase
@@ -767,16 +776,20 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                                    + zeroExtend(getTloc(x.rVal1) & 6'h30)); // TODO update for new modes
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
                     end else if (getTmode(x.rVal1) == 'h3) begin  
-                      objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&10'h3FF) + zeroExtend(getTloc(x.rVal1)) * 1024 - 1);
+                      //objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&10'h3FF) + zeroExtend(getTloc(x.rVal1)) * 1024 - 1);
+                      objIdVAddr = Valid(mteAddr(truncate(top), getTloc(x.rVal1), 10));
                       objIdOffset = zeroExtend(6'h0F);
                     end else if (getTmode(x.rVal1) == 'h4) begin 
-                      objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&13'h1FFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 8 - 1);
+                      ///objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&13'h1FFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 8 - 1);
+                      objIdVAddr = Valid(mteAddr(truncate(top), getTloc(x.rVal1), 13));
                       objIdOffset = zeroExtend(6'h0F);
                     end else if (getTmode(x.rVal1) == 'h5) begin 
-                      objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&16'hFFFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 64 - 1);
+                      //objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&16'hFFFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 64 - 1);
+                      objIdVAddr = Valid(mteAddr(truncate(top), getTloc(x.rVal1), 16));
                       objIdOffset = zeroExtend(6'h0F);
                     end else begin 
-                      objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&19'h7FFFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 512 - 1);
+                      //objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&19'h7FFFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 512 - 1);
+                      objIdVAddr = Valid(mteAddr(truncate(top), getTloc(x.rVal1), 19));
                       objIdOffset = zeroExtend(6'h0F);                        
                     end 
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
@@ -1868,7 +1881,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             }
 `endif
         );
-        objIdBuf.clear;
+        //objIdBuf.clear;
         if(verbose) $display("[doDeqStQ_Fence] ", fshow(lsqDeqSt));
 `ifdef PERF_COUNT
         if(inIfc.doStats) begin
@@ -2131,6 +2144,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // check
         doAssert(lsqDeqSt.memFunc == St || lsqDeqSt.memFunc == Amo, "must be St/Amo");
         doAssert(!isValid(lsqDeqSt.fault), "no fault");
+    endrule
+
+    rule doObjIdBufInvalidate(objIdInvalidatePending);
+        objIdBuf.clear;
+        objIdInvalidatePending <= False;
     endrule
 
     // send req to D$
