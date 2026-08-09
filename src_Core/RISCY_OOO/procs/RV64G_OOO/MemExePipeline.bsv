@@ -161,6 +161,10 @@ typedef struct {
     Bool isLd;
 } WaitMMIOResp deriving(Bits, Eq, FShow);
 
+typedef struct {
+    Vector#(4, Maybe#(MemTaggedData)) words;
+} ObjIdBufLine deriving(Bits, FShow);
+
 typedef union tagged {
     void Invalid;
     void Lr;
@@ -419,7 +423,41 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // Each record is a Maybe#(MemTaggedData); essentially a 128-bit word with a validity bit.
     // 4-way associative, so 64 entries total
     // Default value of Invalid
-    Map#(Addr, Bit#(4), Maybe#(MemTaggedData), 4) objIdBuf <- mkMapLossy(Invalid);
+    Map#(Addr, Bit#(4), Maybe#(ObjIdBufLine), 4) objIdBuf <- mkMapLossy(Invalid);
+
+    function Action updateObjIdBuf(Addr objIDAddr, MemTaggedData idData);
+    action 
+        Addr lineAddr = objIDAddr & ~64'h3F; 
+        Bit#(2) wordIdx = objIDAddr[5:4];
+        ObjIdBufLine newLine = ObjIdBufLine {
+            words: replicate(Invalid)
+        };
+
+        let old =
+            objIdBuf.lookup(
+                MapKeyIndex {
+                    key: lineAddr,
+                    index: hash(lineAddr)
+                }
+            );
+            
+        if (old matches tagged Valid .mOld) begin
+            if (mOld matches tagged Valid .oldLine)
+                newLine = oldLine;
+        end
+            
+        newLine.words[wordIdx] = Valid(idData);
+            
+        objIdBuf.update(
+            MapKeyIndex {
+                key: lineAddr,
+                index: hash(lineAddr)
+            },
+            Valid(newLine)
+        );
+
+    endaction 
+    endfunction 
 
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
@@ -438,14 +476,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     // Save read in buffer.  Should do for both load and store responses, but I haven't figured out a store ID.
                     LdStQTag ldstq_tag = tagged Ld tag;
                     Addr addr = objIdVAddrs[pack(ldstq_tag)];
-                    objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
+                    //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
+                    updateObjIdBuf(addr, d);
                 end
                 else if (objSealRdType == St) begin
                     StQTag tag = truncate(id);
                     memObjIdRespStQ.enq(tuple2(tag, d));
                     LdStQTag ldstq_tag = tagged St tag;
                     Addr addr = objIdVAddrs[pack(ldstq_tag)];
-                    objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
+                    //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
+                    updateObjIdBuf(addr, d);
                 end
                 else begin
                     doAssert(False, "unknown objSealRdType");
@@ -816,14 +856,38 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         Addr objIdVAddrValid = fromMaybe(?,objIdVAddr);
         objIdVAddrs[pack(x.ldstq_tag)] <= objIdVAddrValid;
-        Maybe#(Maybe#(MemTaggedData)) mmObjIdTableEnt = objIdBuf.lookup(MapKeyIndex{key: objIdVAddrValid, index: hash(objIdVAddrValid)});
-        if (mmObjIdTableEnt matches tagged Valid .mObjIdTableEnt) begin // First maybe to see if the key matched
-            if (mObjIdTableEnt matches tagged Valid .objIdTableEnt) begin // Second maybe to see if this was a valid entry
-                //Bool isSealed = extractObjIdSeal(objIdTableEnt, objIdOffset);
-                Bool isSealed = mteMismatch(objIdTableEnt,  getMTE(x.rVal1), objIdOffset);
-                $display("mte table check ", fshow(isSealed), fshow(objIdTableEnt), fshow(objIdOffset));
-                //if(getMTE(x.rVal1) != memMTE) objIdVAddr = tagged Invalid;
-                if (!isSealed) objIdVAddr = tagged Invalid;
+        Addr objIdLineVAddr =
+            objIdVAddrValid & ~64'h3F;
+
+        Bit#(2) wordIndex =
+            objIdVAddrValid[5:4];
+
+        Bit#(4) byteIndex =
+            objIdVAddrValid[3:0];
+
+        let lineLookup =
+            objIdBuf.lookup(
+                MapKeyIndex {
+                    key: objIdLineVAddr,
+                    index: hash(objIdLineVAddr)
+                }
+            );
+
+        if (lineLookup matches tagged Valid .mLine) begin
+            if (mLine matches tagged Valid .line) begin
+                if (line.words[wordIndex]
+                        matches tagged Valid .objIdTableEnt) begin
+
+                    Bool isSealed =
+                        mteMismatch(
+                            objIdTableEnt,
+                            getMTE(x.rVal1),
+                            zeroExtend(byteIndex)
+                        );
+
+                    if (!isSealed)
+                        objIdVAddr = Invalid;
+                end
             end
         end
 
@@ -1381,23 +1445,34 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
 
-    function MemTaggedData clearObjIdByte(
-        MemTaggedData oldData,
+    function ObjIdBufLine clearObjIdByte(
+        ObjIdBufLine oldLine,
+        Bit#(2) wordIndex,
         Bit#(7) objIdOffset
     );
-        MemTaggedData newData = oldData;
+        ObjIdBufLine newLine = oldLine;
 
-        Vector#(MemDataBytes, Bit#(8)) dataBytes =
-            unpack(pack(oldData.data));
+        Vector#(4, Maybe#(MemTaggedData)) words = oldLine.words;
 
-        Bit#(TLog#(MemDataBytes)) byteIndex =
-            truncate(objIdOffset);
+        if (words[wordIndex] matches tagged Valid .oldData) begin
+            MemTaggedData newData = oldData;
 
-        dataBytes[byteIndex] = 0;
+            Vector#(MemDataBytes, Bit#(8)) dataBytes =
+                unpack(pack(oldData.data));
 
-        newData.data = unpack(pack(dataBytes));
+            Bit#(TLog#(MemDataBytes)) byteIndex =
+                truncate(objIdOffset);
 
-        return newData;
+            dataBytes[byteIndex] = 0;
+
+            newData.data = unpack(pack(dataBytes));
+
+            words[wordIndex] = tagged Valid newData;
+        end
+
+        newLine.words = words;
+
+        return newLine;
     endfunction
 
     rule doObjIdRespStForward;
@@ -1416,20 +1491,28 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             "forwarded ObjID offset is outside objIdBuf entry"
         );
 
-        let oldLookup = objIdBuf.lookup(MapKeyIndex{key: objIdVAddr, index: hash(objIdVAddr)});
+        Addr objIdLineVAddr =
+            objIdVAddr & ~64'h3F;
+
+        Bit#(2) wordIndex =
+            objIdVAddr[5:4];
+
+        let oldLookup = objIdBuf.lookup(MapKeyIndex{key: objIdLineVAddr, index: hash(objIdLineVAddr)});
+        
 
         case (oldLookup) matches
 
             tagged Valid (tagged Valid .oldEntry): begin
 
-                MemTaggedData updatedEntry =
+                ObjIdBufLine updatedEntry =
                     clearObjIdByte(
                         oldEntry,
+                        wordIndex,
                         objIdOffset
                     );
 
                 objIdBuf.update(
-                    MapKeyIndex{key: objIdVAddr, index: hash(objIdVAddr)},
+                    MapKeyIndex{key: objIdLineVAddr, index: hash(objIdLineVAddr)},
                     Valid(updatedEntry)
                 );
 
@@ -1438,7 +1521,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
             tagged Valid (tagged Invalid): begin
                 objIdBuf.update(
-                    MapKeyIndex{key: objIdVAddr, index: hash(objIdVAddr)},
+                    MapKeyIndex{key: objIdLineVAddr, index: hash(objIdLineVAddr)},
                     Invalid
                 );
 
@@ -1447,7 +1530,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
             tagged Invalid: begin
                 objIdBuf.update(
-                    MapKeyIndex{key: objIdVAddr, index: hash(objIdVAddr)},
+                    MapKeyIndex{key: objIdLineVAddr, index: hash(objIdLineVAddr)},
                     Invalid
                 );
 
