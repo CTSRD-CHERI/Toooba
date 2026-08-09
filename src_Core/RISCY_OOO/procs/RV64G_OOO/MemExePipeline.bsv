@@ -796,7 +796,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Bit#(64) pageBase = 64'b0;
         function Addr mteAddr(Addr top, Bit#(6) loc, Integer shift);
             Addr mask = ('1 << shift);
-            return (top & mask) + (zeroExtend(loc) << shift) - 1;
+            return (top & mask) + (zeroExtend(loc[4:0]) << shift) - 1 - zeroExtend(loc[5]);
         endfunction
         if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) > 'h0 && x.alloc_policy == 'h0 ) begin 
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
