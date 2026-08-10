@@ -673,36 +673,34 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // get virtual addr & St/Sc/Amo data
         CapPipe vaddr = modifyOffset(rVal1, signExtend(x.imm), True).value;
         Bit#(3) alloc_policy = lsq.getAllocPolicy(x.ldstq_tag);
+        let top = getTop(rVal1);
+        let tloc = getTloc(rVal1);
         if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin 
             //vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
             if(getTmode(rVal1) == 'h0) begin 
                 //vaddr = setAddr(vaddr, (getAddr(vaddr) & ~'h3f) + zeroExtend(getTloc(rVal1) << 2) -1).value;
-                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1))* 4  -1)).value;
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(tloc)* 16  - 1 -  zeroExtend(tloc>>5))).value;
             end 
             else if(getTmode(rVal1) == 'h1)  begin 
-                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4032 + zeroExtend(getTloc(rVal1) ))).value;
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4032 + zeroExtend(tloc ))).value;
             end 
             else if(getTmode(rVal1) == 'h2)  begin 
-                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[13:0]) + 4096*4 - 64 + zeroExtend(getTloc(rVal1) ))).value;
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[13:0]) + 4096*4 - 64 + zeroExtend(tloc ))).value;
             end 
             else if(getTmode(rVal1) == 'h3)  begin 
-                let originalTop  = getTop(rVal1); 
-                let updatedTop = originalTop - zeroExtend(getTop(rVal1)[9:0]) + zeroExtend(getTloc(rVal1))* 1024  -1;
+                let updatedTop = top - zeroExtend(top[9:0]) + zeroExtend(tloc[4:0])* 1024  - 1 -  zeroExtend(tloc>>5);
                 vaddr = setAddr(vaddr, truncate(updatedTop) ).value;
             end 
             else if(getTmode(rVal1) == 'h4)  begin 
-                let originalTop  = getTop(rVal1); 
-                let updatedTop = originalTop - zeroExtend(getTop(rVal1)[12:0]) + zeroExtend(getTloc(rVal1))* 1024 * 8  -1;
+                let updatedTop = top - zeroExtend(top[12:0]) + zeroExtend(tloc[4:0])* 1024 * 8  - 1 -  zeroExtend(tloc>>5);
                 vaddr = setAddr(vaddr, truncate(updatedTop) ).value;
             end 
             else if(getTmode(rVal1) == 'h5)  begin 
-                let originalTop  = getTop(rVal1); 
-                let updatedTop = originalTop - zeroExtend(getTop(rVal1)[15:0]) + zeroExtend(getTloc(rVal1))* 1024 * 64  -1;
+                let updatedTop = top - zeroExtend(top[15:0]) + zeroExtend(tloc[4:0])* 1024 * 64  - 1 -  zeroExtend(tloc>>5);
                 vaddr = setAddr(vaddr, truncate(updatedTop) ).value;
             end 
             else if(getTmode(rVal1) == 'h6)  begin 
-                let originalTop  = getTop(rVal1); 
-                let updatedTop = originalTop - zeroExtend(getTop(rVal1)[18:0]) + zeroExtend(getTloc(rVal1))* 1024 * 512  -1;
+                let updatedTop = top - zeroExtend(top[18:0]) + zeroExtend(tloc[4:0])* 1024 * 512  - 1 -  zeroExtend(tloc>>5);   
                 vaddr = setAddr(vaddr, truncate(updatedTop) ).value;
             end 
             $display("sendmemmte", fshow(vaddr));
