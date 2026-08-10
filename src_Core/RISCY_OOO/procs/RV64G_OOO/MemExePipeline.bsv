@@ -818,19 +818,19 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     end else if (getTmode(x.rVal1) == 'h3) begin  
                       //objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&10'h3FF) + zeroExtend(getTloc(x.rVal1)) * 1024 - 1);
                       objIdVAddr = Valid(mteAddr(truncate(top), getTloc(x.rVal1), 10));
-                      objIdOffset = zeroExtend(6'h0F);
+                      objIdOffset = zeroExtend(6'h0F) - zeroExtend(getTloc(x.rVal1)>>5);
                     end else if (getTmode(x.rVal1) == 'h4) begin 
                       ///objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&13'h1FFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 8 - 1);
                       objIdVAddr = Valid(mteAddr(truncate(top), getTloc(x.rVal1), 13));
-                      objIdOffset = zeroExtend(6'h0F);
+                      objIdOffset = zeroExtend(6'h0F) - zeroExtend(getTloc(x.rVal1)>>5);
                     end else if (getTmode(x.rVal1) == 'h5) begin 
                       //objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&16'hFFFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 64 - 1);
                       objIdVAddr = Valid(mteAddr(truncate(top), getTloc(x.rVal1), 16));
-                      objIdOffset = zeroExtend(6'h0F);
+                      objIdOffset = zeroExtend(6'h0F) - zeroExtend(getTloc(x.rVal1)>>5);
                     end else begin 
                       //objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&19'h7FFFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 512 - 1);
                       objIdVAddr = Valid(mteAddr(truncate(top), getTloc(x.rVal1), 19));
-                      objIdOffset = zeroExtend(6'h0F);                        
+                      objIdOffset = zeroExtend(6'h0F) - zeroExtend(getTloc(x.rVal1)>>5);                
                     end 
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
                                           " objIdVAddr ", fshow(objIdVAddr), 
