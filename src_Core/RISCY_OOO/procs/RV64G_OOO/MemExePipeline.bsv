@@ -161,7 +161,10 @@ typedef struct {
     Bool isLd;
 } WaitMMIOResp deriving(Bits, Eq, FShow);
 
+typedef Bit#(TSub#(SizeOf#(Addr), 12)) ObjIdPhysTag;
+
 typedef struct {
+    ObjIdPhysTag physTag;
     Vector#(4, Maybe#(MemTaggedData)) words;
 } ObjIdBufLine deriving(Bits, FShow);
 
@@ -416,6 +419,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
+    Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdPAddrs <- replicateM(mkRegU);
     Reg#(Bool) objIdInvalidatePending <- mkReg(False);
 
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
@@ -852,38 +856,39 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
         $fflush;
 `endif
-        Addr objIdVAddrValid = fromMaybe(?,objIdVAddr);
-        objIdVAddrs[pack(x.ldstq_tag)] <= objIdVAddrValid;
-        Addr objIdLineVAddr =
-            objIdVAddrValid & ~64'h3F;
 
-        Bit#(2) wordIndex =
-            objIdVAddrValid[5:4];
+        if (objIdVAddr matches tagged Valid .objIdAddr) begin
 
-        Bit#(4) byteIndex =
-            objIdVAddrValid[3:0];
+            objIdVAddrs[pack(x.ldstq_tag)] <= objIdAddr;
 
-        let lineLookup =
-            objIdBuf.lookup(
-                MapKeyIndex {
-                    key: objIdLineVAddr,
-                    index: hash(objIdLineVAddr)
-                }
-            );
+            Addr objIdLineVAddr =
+                objIdAddr & ~64'h3F;
 
-        if (lineLookup matches tagged Valid .mLine) begin
-            if (mLine matches tagged Valid .line) begin
+            Bit#(2) wordIndex =
+                objIdAddr[5:4];
+
+            let lineLookup =
+                objIdBuf.lookup(
+                    MapKeyIndex {
+                        key: objIdLineVAddr,
+                        index: hash(objIdLineVAddr)
+                    }
+                );
+
+            if (lineLookup matches
+                    tagged Valid (tagged Valid .line)) begin
+
                 if (line.words[wordIndex]
                         matches tagged Valid .objIdTableEnt) begin
 
-                    Bool isSealed =
+                    Bool mismatch =
                         mteMismatch(
                             objIdTableEnt,
                             getMTE(x.rVal1),
-                            zeroExtend(objIdOffset)
+                            objIdOffset
                         );
 
-                    if (!isSealed)
+                    if (!mismatch)
                         objIdVAddr = Invalid;
                 end
             end
