@@ -880,7 +880,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                         mteMismatch(
                             objIdTableEnt,
                             getMTE(x.rVal1),
-                            zeroExtend(byteIndex)
+                            zeroExtend(objIdOffset)
                         );
 
                     if (!isSealed)
