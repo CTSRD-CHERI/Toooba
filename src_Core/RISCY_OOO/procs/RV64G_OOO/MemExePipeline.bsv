@@ -571,7 +571,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `else
             noAction;
 `endif
-            objIdInvalidatePending <= True;
+            if (lineAddr[3:0] == 4'hF) begin
+                objIdInvalidatePending <= True;
+            end
         endmethod
     endinterface);
     // non-blocking coherent D$
