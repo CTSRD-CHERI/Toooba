@@ -467,7 +467,8 @@ endfunction
             waitP: True // we have req parent at the same time
         });
         // inform processor of line eviction
-        procResp.evict(getLineAddr(resp.addr));
+        Bool flushObjIDbuf = (resp.addr[3:0] == 4'hF);
+        procResp.evict(getLineAddr(resp.addr), flushObjIDbuf);
        if (verbose)
         $display("%t L1 %m sendRsToP: ", $time,
             fshow(rsToPIndexQ.first)," ; ",
@@ -490,7 +491,8 @@ endfunction
         rsToPQ.enq(resp);
         pRqMshr.sendRsToP_pRq.releaseEntry(n); // mshr entry released
         // inform processor of line eviction
-        procResp.evict(getLineAddr(resp.addr));
+        Bool flushObjIDbuf = (resp.addr[3:0] == 4'hF);
+        procResp.evict(getLineAddr(resp.addr), flushObjIDbuf);
        if (verbose)
         $display("%t L1 %m sendRsToP: ", $time,
             fshow(rsToPIndexQ.first), " ; ",

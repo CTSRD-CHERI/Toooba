@@ -564,16 +564,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             return tuple2(unpack(pack(e.byteEn)), e.line); // return SB entry
         endmethod
 `endif
-        method Action evict(LineAddr lineAddr);
+        method Action evict(LineAddr lineAddr, Bool flushObjIDbuf);
 `ifdef TSO_MM
             if(verbose) $display("[cache evict] ", fshow(lineAddr));
             lsq.cacheEvict(lineAddr);
 `else
             noAction;
 `endif
-            if (lineAddr[3:0] == 4'hF) begin
+            if(flushObjIDbuf) 
                 objIdInvalidatePending <= True;
-            end
         endmethod
     endinterface);
     // non-blocking coherent D$
