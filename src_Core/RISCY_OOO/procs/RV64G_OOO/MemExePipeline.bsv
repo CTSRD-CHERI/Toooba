@@ -421,6 +421,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdPAddrs <- replicateM(mkRegU);
     Reg#(Bool) objIdInvalidatePending <- mkReg(False);
+    Reg#(Bool) objIdBufMayContainMode3 <- mkReg(False);
+    Reg#(Bool) flushObjIDbuf1k_reg <- mkReg(False);
+    Reg#(Bool) flushObjIDbuf4k_reg <- mkReg(False);
+
 
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
     // 4-bit index == 16 entries per set.
@@ -564,15 +568,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             return tuple2(unpack(pack(e.byteEn)), e.line); // return SB entry
         endmethod
 `endif
-        method Action evict(LineAddr lineAddr, Bool flushObjIDbuf);
+        method Action evict(LineAddr lineAddr, Bool flushObjIDbuf1k, flushObjIDbuf4k);
 `ifdef TSO_MM
             if(verbose) $display("[cache evict] ", fshow(lineAddr));
             lsq.cacheEvict(lineAddr);
 `else
             noAction;
 `endif
-            if(flushObjIDbuf) 
-                objIdInvalidatePending <= True;
+            objIdInvalidatePending <= True;
+            flushObjIDbuf1k_reg <= flushObjIDbuf1k;
+            flushObjIDbuf4k_reg <= flushObjIDbuf4k;
         endmethod
     endinterface);
     // non-blocking coherent D$
@@ -842,6 +847,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $display("KONATAS\t%0d\t%0d\t0\tMem3", cur_cycle, x.u_id);
         $fflush;
 `endif
+        if(getTmode(x.rVal1) == 'h3)
+            objIdBufMayContainMode3 <= True;
 
         if (objIdVAddr matches tagged Valid .objIdAddr) begin
 
@@ -2180,8 +2187,21 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     rule doObjIdBufInvalidate(objIdInvalidatePending);
-        objIdBuf.clear;
+
+        Bool shouldFlush =
+            flushObjIDbuf4k_reg ||
+            (objIdBufMayContainMode3 &&
+             flushObjIDbuf1k_reg);
+
         objIdInvalidatePending <= False;
+        flushObjIDbuf1k_reg <= False;
+        flushObjIDbuf4k_reg <= False;
+
+        if (shouldFlush) begin
+            objIdBuf.clear;
+            objIdBufMayContainMode3 <= False;
+        end
+
     endrule
 
     // send req to D$

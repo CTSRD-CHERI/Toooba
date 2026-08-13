@@ -467,8 +467,19 @@ endfunction
             waitP: True // we have req parent at the same time
         });
         // inform processor of line eviction
-        Bool flushObjIDbuf = (resp.addr[3:0] == 4'hF);
-        procResp.evict(getLineAddr(resp.addr), flushObjIDbuf);
+        LineAddr lineAddr = getLineAddr(resp.addr);
+
+        Bool flushObjIDbuf1k =
+            (lineAddr[3:0] == 4'hF);
+
+        Bool flushObjIDbuf4k =
+            (lineAddr[5:0] == 6'h3F);
+
+        procResp.evict(
+            lineAddr,
+            flushObjIDbuf1k,
+            flushObjIDbuf4k
+        );
        if (verbose)
         $display("%t L1 %m sendRsToP: ", $time,
             fshow(rsToPIndexQ.first)," ; ",
@@ -491,8 +502,24 @@ endfunction
         rsToPQ.enq(resp);
         pRqMshr.sendRsToP_pRq.releaseEntry(n); // mshr entry released
         // inform processor of line eviction
-        Bool flushObjIDbuf = (resp.addr[3:0] == 4'hF);
-        procResp.evict(getLineAddr(resp.addr), flushObjIDbuf);
+        LineAddr lineAddr = getLineAddr(resp.addr);
+
+        Bool actuallyInvalidated =
+            (req.toState == I);
+            
+        Bool flushObjIDbuf1k =
+            actuallyInvalidated &&
+            (lineAddr[3:0] == 4'hF);
+            
+        Bool flushObjIDbuf4k =
+            actuallyInvalidated &&
+            (lineAddr[5:0] == 6'h3F);
+            
+        procResp.evict(
+            lineAddr,
+            flushObjIDbuf1k,
+            flushObjIDbuf4k
+        );
        if (verbose)
         $display("%t L1 %m sendRsToP: ", $time,
             fshow(rsToPIndexQ.first), " ; ",
