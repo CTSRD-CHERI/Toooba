@@ -679,15 +679,38 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // get virtual addr & St/Sc/Amo data
         CapPipe vaddr = modifyOffset(rVal1, signExtend(x.imm), True).value;
         Bit#(3) alloc_policy = lsq.getAllocPolicy(x.ldstq_tag);
-        if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin
+        let top = getTop(rVal1);
+        let tloc = getTloc(rVal1);
+        if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin 
             //vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
-            if(getTmode(rVal1) == 'h0) begin
-                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1)) * 4  -1)).value;
-            end else begin
-                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4032 + zeroExtend(getTloc(rVal1) ))).value;
-            end
+            if(getTmode(rVal1) == 'h0) begin 
+                //vaddr = setAddr(vaddr, (getAddr(vaddr) & ~'h3f) + zeroExtend(getTloc(rVal1) << 2) -1).value;
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(tloc)* 16  - 1 -  zeroExtend(tloc>>5))).value;
+            end 
+            else if(getTmode(rVal1) == 'h1)  begin 
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4032 + zeroExtend(tloc ))).value;
+            end 
+            else if(getTmode(rVal1) == 'h2)  begin 
+                vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[13:0]) + 4096*4 - 64 + zeroExtend(tloc ))).value;
+            end 
+            else if(getTmode(rVal1) == 'h3)  begin 
+                let updatedTop = top - zeroExtend(top[9:0]) + zeroExtend(tloc[4:0])* 1024  - 1 -  zeroExtend(tloc>>5);
+                vaddr = setAddr(vaddr, truncate(updatedTop) ).value;
+            end 
+            else if(getTmode(rVal1) == 'h4)  begin 
+                let updatedTop = top - zeroExtend(top[12:0]) + zeroExtend(tloc[4:0])* 1024 * 8  - 1 -  zeroExtend(tloc>>5);
+                vaddr = setAddr(vaddr, truncate(updatedTop) ).value;
+            end 
+            else if(getTmode(rVal1) == 'h5)  begin 
+                let updatedTop = top - zeroExtend(top[15:0]) + zeroExtend(tloc[4:0])* 1024 * 64  - 1 -  zeroExtend(tloc>>5);
+                vaddr = setAddr(vaddr, truncate(updatedTop) ).value;
+            end 
+            else if(getTmode(rVal1) == 'h6)  begin 
+                let updatedTop = top - zeroExtend(top[18:0]) + zeroExtend(tloc[4:0])* 1024 * 512  - 1 -  zeroExtend(tloc>>5);   
+                vaddr = setAddr(vaddr, truncate(updatedTop) ).value;
+            end 
             $display("sendmemmte", fshow(vaddr));
-        end
+        end 
         CapPipe data = rVal2;
         MemTaggedData toMemData = unpack(pack(toMem(data)));
 
@@ -777,35 +800,59 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 //`endif
         Bit#(7) objIdOffset = 'h0 ;
         Bit#(64) pageBase = 64'b0;
-        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && ( getTmode(x.rVal1) > 0 && getTmode(x.rVal1) < 4  )&& x.alloc_policy == 'h0 ) begin
+        function Addr mteAddr(Addr top, Bit#(6) loc, Integer shift);
+            Addr mask = ('1 << shift);
+            return (top & mask) + (zeroExtend(loc[4:0]) << shift) - 1 - zeroExtend(loc[5]);
+        endfunction
+        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) > 'h0 && x.alloc_policy == 'h0 ) begin 
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
 
-                    if( getTmode(x.rVal1) == 'h1) begin
+                    let top = getTop(x.vaddr);
+
+                    if( getTmode(x.rVal1) == 'h1) begin 
                       pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
                       objIdVAddr = pageBase
                                    + zeroExtend(16'hFC0)
                                    + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
-                    end else if (getTmode(x.rVal1) == 'h2) begin
+                    end else if (getTmode(x.rVal1) == 'h2) begin 
                       pageBase = { getAddr(x.vaddr)[64-1:14], 14'b0 };
                       objIdVAddr = pageBase
                                    + zeroExtend(16'h3FC0)
                                    + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
-                    end else begin
-                      objIdVAddr = truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&10'h3FF) + zeroExtend(getTloc(x.rVal1)) * 1024 - 1;
-                      objIdOffset = zeroExtend(6'h0F);
-                    end
                       needsObjIdCheck = True;
-                      $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
-                                          " objIdVAddr ", fshow(objIdVAddr),
+                    end else if (getTmode(x.rVal1) == 'h3) begin  
+                      //objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&10'h3FF) + zeroExtend(getTloc(x.rVal1)) * 1024 - 1);
+                      objIdVAddr = mteAddr(truncate(top), getTloc(x.rVal1), 10);
+                      objIdOffset = zeroExtend(6'h0F) - zeroExtend(getTloc(x.rVal1)>>5);
+                      needsObjIdCheck = True;
+                    end else if (getTmode(x.rVal1) == 'h4) begin 
+                      ///objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&13'h1FFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 8 - 1);
+                      objIdVAddr = mteAddr(truncate(top), getTloc(x.rVal1), 13);
+                      objIdOffset = zeroExtend(6'h0F) - zeroExtend(getTloc(x.rVal1)>>5);
+                      needsObjIdCheck = True;
+                    end else if (getTmode(x.rVal1) == 'h5) begin 
+                      //objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&16'hFFFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 64 - 1);
+                      objIdVAddr = mteAddr(truncate(top), getTloc(x.rVal1), 16);
+                      objIdOffset = zeroExtend(6'h0F) - zeroExtend(getTloc(x.rVal1)>>5);
+                      needsObjIdCheck = True;
+                    end else begin 
+                      //objIdVAddr = Valid(truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&19'h7FFFF) + zeroExtend(getTloc(x.rVal1)) * 1024 * 512 - 1);
+                      objIdVAddr = mteAddr(truncate(top), getTloc(x.rVal1), 19);
+                      objIdOffset = zeroExtend(6'h0F) - zeroExtend(getTloc(x.rVal1)>>5);  
+                      needsObjIdCheck = True;              
+                    end 
+                
+                    $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
+                                          " objIdVAddr ", fshow(objIdVAddr), 
                                           " objIdOffset:", fshow(objIdOffset),
                                           " capMTE:", fshow(getMTE(x.rVal1)),
                                           " capTLOC:", fshow(getTloc(x.rVal1))
-
+                                          
                       );
             end
-
+          
        end
        if(getMTE(x.rVal1) != 'h0 ) begin
                       $display("[setmemmte doExeMem]: x.rVal1:",fshow(x.rVal1),
@@ -830,7 +877,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Bool needsObjIdTranslation =
             needsObjIdCheck &&
             getTmode(x.rVal1) >= 2 &&
-            getTmode(x.rVal1) <= 3;
+            getTmode(x.rVal1) <= 6;
 
 
         dTlb.procReq(DTlbReq {
