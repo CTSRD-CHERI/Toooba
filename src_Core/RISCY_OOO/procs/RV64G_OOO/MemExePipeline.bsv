@@ -227,18 +227,16 @@ module mkDTlbSynth(DTlbSynth);
     Bool verbose = True;
 
     let m <- mkDTlbCoreSynth;
-    SpecFifo_SB_deq_enq_C_deq_enq#(1, LdStQTag) objId_translation <- mkSpecFifoUG(True);
-    SpecFifo_SB_deq_enq_C_deq_enq#(1, DTlbReq#(MemExeToFinish)) req_fifo <- mkSpecFifoUG(True);
+    SpecFifo_SB_deq_enq_C_deq_enq#(2, DTlbReq#(MemExeToFinish)) req_fifo <- mkSpecFifoUG(True);
 
     Maybe#(Trap) cause = Invalid;
     if (m.procResp.resp matches tagged Valid .rsp) begin
         Maybe#(Exception) expCause = tpl_2(rsp);
         if (expCause matches tagged Valid .c) cause = Valid(Exception(c));
     end
-    Bool objId_translation_ready = (objId_translation.notEmpty && m.procResp.inst.ldstq_tag == objId_translation.first.data && !isValid(cause));
+    Bool objId_translation_ready = (!m.procResp.inst.objIdTransDone && !isValid(cause));
 
     rule finishObjIdTranslation(objId_translation_ready && req_fifo.notFull);
-        objId_translation.deq;
         let rsp = m.procResp;
         m.deqProcResp;
         DTlbReq#(MemExeToFinish) req = DTlbReq{inst: rsp.inst, specBits: rsp.specBits};
@@ -262,14 +260,10 @@ module mkDTlbSynth(DTlbSynth);
     method Bool noPendingReq = m.noPendingReq;
 
     // req/resp with core
-    method Action procReq(DTlbReq#(MemExeToFinish) req) if (!objId_translation.notEmpty && !req_fifo.notEmpty);
+    method Action procReq(DTlbReq#(MemExeToFinish) req) if (!req_fifo.notEmpty);
         if (verbose) $display("%t TLB received translation ", $time, fshow(req));
         if (req.inst.objIdVirtual && !req.inst.objIdTransDone) begin
             if (verbose) $display(" objId_translation");
-            objId_translation.enq(ToSpecFifo{
-                                    data: req.inst.ldstq_tag,
-                                    spec_bits: req.specBits
-                                 });
         end
         m.procReq(req);
     endmethod
@@ -280,7 +274,6 @@ module mkDTlbSynth(DTlbSynth);
         return rsp;
     endmethod
     method Action deqProcResp if (!objId_translation_ready);
-        if (objId_translation.notEmpty && m.procResp.inst.ldstq_tag == objId_translation.first.data) objId_translation.deq;
         m.deqProcResp;
     endmethod
 
@@ -290,7 +283,6 @@ module mkDTlbSynth(DTlbSynth);
     // speculation
     interface SpeculationUpdate specUpdate = joinSpeculationUpdate(vec(
         m.specUpdate,
-        objId_translation.specUpdate,
         req_fifo.specUpdate
     ));
 
@@ -787,23 +779,23 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Bit#(64) pageBase = 64'b0;
         if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && ( getTmode(x.rVal1) > 0 && getTmode(x.rVal1) < 4  )&& x.alloc_policy == 'h0 ) begin
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
-                    
-                    if( getTmode(x.rVal1) == 'h1) begin 
+
+                    if( getTmode(x.rVal1) == 'h1) begin
                       pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
                       objIdVAddr = pageBase
                                    + zeroExtend(16'hFC0)
                                    + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
-                    end else if (getTmode(x.rVal1) == 'h2) begin 
+                    end else if (getTmode(x.rVal1) == 'h2) begin
                       pageBase = { getAddr(x.vaddr)[64-1:14], 14'b0 };
                       objIdVAddr = pageBase
                                    + zeroExtend(16'h3FC0)
                                    + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
                       objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
-                    end else begin 
+                    end else begin
                       objIdVAddr = truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&10'h3FF) + zeroExtend(getTloc(x.rVal1)) * 1024 - 1;
                       objIdOffset = zeroExtend(6'h0F);
-                    end 
+                    end
                       needsObjIdCheck = True;
                       $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
                                           " objIdVAddr ", fshow(objIdVAddr),
@@ -1300,7 +1292,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     Valid(updatedEntry)
                 );
 
-            
+
             end
 
             tagged Valid (tagged Invalid): begin
@@ -1309,7 +1301,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     Invalid
                 );
 
-                
+
             end
 
             tagged Invalid: begin
@@ -2065,7 +2057,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         if(result matches tagged ObjIdForward .forward) begin
             memObjIdForwardQ.enq(tuple4(tag, forward, objIdVAddr, offset));
-        end else begin 
+        end else begin
             dMem.procReq.req(ProcRq {
                 id: dId,
                 addr: addr,
@@ -2078,7 +2070,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 objSealRdType: St,
                 pcHash: ?
             });
-        end 
+        end
         if(verbose) $display("[sendStObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
     endrule
 
