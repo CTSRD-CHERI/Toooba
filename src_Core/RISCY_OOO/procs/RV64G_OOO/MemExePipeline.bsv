@@ -227,7 +227,7 @@ module mkDTlbSynth(DTlbSynth);
     Bool verbose = True;
 
     let m <- mkDTlbCoreSynth;
-    SpecFifo_SB_deq_enq_C_deq_enq#(2, DTlbReq#(MemExeToFinish)) req_fifo <- mkSpecFifoUG(True);
+    SpecFifo_SB_deq_enq_C_deq_enq#(16, DTlbReq#(MemExeToFinish)) req_fifo <- mkSpecFifoUG(True);
 
     Maybe#(Trap) cause = Invalid;
     if (m.procResp.resp matches tagged Valid .rsp) begin
