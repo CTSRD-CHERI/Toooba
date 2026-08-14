@@ -280,7 +280,8 @@ module mkDTlbSynth(DTlbSynth);
         return rsp;
     endmethod
     method Action deqProcResp if (!objId_translation_ready);
-        if (objId_translation.notEmpty && m.procResp.inst.ldstq_tag == objId_translation.first.data) objId_translation.deq;
+        if (objId_translation.notEmpty && m.procResp.inst.ldstq_tag == objId_translation.first.data)
+            objId_translation.deq; // The objId translation has failed; there is a valid cause!
         m.deqProcResp;
     endmethod
 
@@ -493,14 +494,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     // Save read in buffer.  Should do for both load and store responses, but I haven't figured out a store ID.
                     LdStQTag ldstq_tag = tagged Ld tag;
                     Addr addr = objIdVAddrs[pack(ldstq_tag)];
-                    objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
+                    //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
                 end
                 else if (objSealRdType == St) begin
                     StQTag tag = truncate(id);
                     memObjIdRespStQ.enq(tuple2(tag, d));
                     LdStQTag ldstq_tag = tagged St tag;
                     Addr addr = objIdVAddrs[pack(ldstq_tag)];
-                    objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
+                    //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
                 end
                 else begin
                     doAssert(False, "unknown objSealRdType");
@@ -776,51 +777,50 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let ccpt = inIfc.csrf_rd(csrAddrCCPT)[20:0];
 
         // calculate bitmap offset and send to TLB here
-//`ifdef OBJID_DEBUG
-        //Addr objIdVAddr = (getAddr(x.vaddr)>>7) & (-1<<4); // derive default from VAddr
-        //Bool needsObjIdCheck = True;
-//`else
         Addr objIdVAddr = 0; // default invalid
         Bool needsObjIdCheck = False;
-//`endif
         Bit#(7) objIdOffset = 'h0 ;
         Bit#(64) pageBase = 64'b0;
+        $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
+                            " objIdVAddr ", fshow(objIdVAddr),
+                            " objIdOffset:", fshow(objIdOffset),
+                            " capTmode:", fshow(getTmode(x.rVal1)),
+                            " capMTE:", fshow(getMTE(x.rVal1)),
+                            " capTLOC:", fshow(getTloc(x.rVal1))
+        );
         if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && ( getTmode(x.rVal1) > 0 && getTmode(x.rVal1) < 4  )&& x.alloc_policy == 'h0 ) begin
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
-                    
-                    if( getTmode(x.rVal1) == 'h1) begin 
-                      pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
-                      objIdVAddr = pageBase
-                                   + zeroExtend(16'hFC0)
-                                   + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
-                      objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
-                    end else if (getTmode(x.rVal1) == 'h2) begin 
-                      pageBase = { getAddr(x.vaddr)[64-1:14], 14'b0 };
-                      objIdVAddr = pageBase
-                                   + zeroExtend(16'h3FC0)
-                                   + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
-                      objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
-                    end else begin 
-                      objIdVAddr = truncate(getTop(x.vaddr)) - zeroExtend(truncate(getTop(x.vaddr))&10'h3FF) + zeroExtend(getTloc(x.rVal1)) * 1024 - 1;
-                      objIdOffset = zeroExtend(6'h0F);
-                    end 
-                      needsObjIdCheck = True;
-                      $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
-                                          " objIdVAddr ", fshow(objIdVAddr),
-                                          " objIdOffset:", fshow(objIdOffset),
-                                          " capMTE:", fshow(getMTE(x.rVal1)),
-                                          " capTLOC:", fshow(getTloc(x.rVal1))
-
-                      );
+                    if( getTmode(x.rVal1) == 'h1) begin
+                        pageBase = { getAddr(x.vaddr)[64-1:12], 12'b0 };
+                        objIdVAddr = pageBase
+                                     + zeroExtend(16'hFC0)
+                                     + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
+                        objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
+                    end else if (getTmode(x.rVal1) == 'h2) begin
+                        pageBase = { getAddr(x.vaddr)[64-1:14], 14'b0 };
+                        objIdVAddr = pageBase
+                                     + zeroExtend(16'h3FC0)
+                                     + zeroExtend(getTloc(x.rVal1) & 6'h30); // TODO update for new modes
+                        objIdOffset = zeroExtend(getTloc(x.rVal1)& 6'h0F);
+                    end else begin
+                        objIdVAddr = getAddr(x.vaddr)&(64'hFFFFFFFFFFFFC000) + (zeroExtend(getTloc(x.rVal1))<<10) - 1;
+                        objIdOffset = zeroExtend(6'h0F);
+                    end
+                    needsObjIdCheck = True;
+                    $display("[doExeMem]: x.rVal1:",fshow(x.rVal1),
+                                        " objIdVAddr ", fshow(objIdVAddr),
+                                        " objIdOffset:", fshow(objIdOffset),
+                                        " capMTE:", fshow(getMTE(x.rVal1)),
+                                        " capTLOC:", fshow(getTloc(x.rVal1))
+                    );
             end
+        end
+        if(getMTE(x.rVal1) != 'h0 ) begin
+                        $display("[setmemmte doExeMem]: x.rVal1:",fshow(x.rVal1),
+                                            " capMTE:", fshow(getMTE(x.rVal1)),
+                                            " capTLOC:", fshow(getTloc(x.rVal1))
 
-       end
-       if(getMTE(x.rVal1) != 'h0 ) begin
-                      $display("[setmemmte doExeMem]: x.rVal1:",fshow(x.rVal1),
-                                          " capMTE:", fshow(getMTE(x.rVal1)),
-                                          " capTLOC:", fshow(getTloc(x.rVal1))
-
-                      );
+                        );
        end
 `ifdef KONATA
         $display("KONATAE\t%0d\t%0d\t0\tMem2", cur_cycle, x.u_id);
@@ -832,7 +832,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (mmObjIdTableEnt matches tagged Valid (tagged Valid .objIdTableEnt)) begin // First maybe to see if the key matched
             Bool idMismatch = mteMismatch(objIdTableEnt,  getMTE(x.rVal1), objIdOffset);
             $display("mte table check ", fshow(idMismatch));
-            if (idMismatch) needsObjIdCheck = False;
+            if (!idMismatch) needsObjIdCheck = False;
         end
 
         Bool needsObjIdTranslation =
@@ -1300,7 +1300,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     Valid(updatedEntry)
                 );
 
-            
+
             end
 
             tagged Valid (tagged Invalid): begin
@@ -1309,7 +1309,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     Invalid
                 );
 
-                
+
             end
 
             tagged Invalid: begin
@@ -2065,7 +2065,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         if(result matches tagged ObjIdForward .forward) begin
             memObjIdForwardQ.enq(tuple4(tag, forward, objIdVAddr, offset));
-        end else begin 
+        end else begin
             dMem.procReq.req(ProcRq {
                 id: dId,
                 addr: addr,
@@ -2078,7 +2078,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 objSealRdType: St,
                 pcHash: ?
             });
-        end 
+        end
         if(verbose) $display("[sendStObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
     endrule
 

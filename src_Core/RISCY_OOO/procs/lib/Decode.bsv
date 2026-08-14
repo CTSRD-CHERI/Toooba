@@ -533,7 +533,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
             else begin
                 dInst.iType = J;
             end
-            
+
             regs.dst  = Valid(tagged Gpr rd);
             regs.src1 = Invalid;
             regs.src2 = Invalid;
@@ -1188,7 +1188,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                             regs.src2 = Valid(tagged Gpr rs2);
                             dInst.capFunc = CapModify (SetTloc);
                         end
-                        f7_cap_CSetMemMTE: begin 
+                        f7_cap_CSetMemMTE: begin
                             legalInst = True;
                             dInst.iType = St;
                             dInst.imm = Valid(0);
@@ -1201,11 +1201,11 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                 aq: False,
                                 rl: False,
                                 reg_bounds: True };
-                                
+
                             regs.src2 = Valid(tagged Gpr rs2);
                             regs.src1 = Valid(tagged Gpr rs1);
                             dInst.capChecks = memCapChecks(False);
-                        end 
+                        end
                         f7_cap_CSetTmode: begin
                             legalInst = True;
                             dInst.iType = Cap;
@@ -1406,7 +1406,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capFunc = CapInspect (GetTloc);
                                 end
-                                f5rs2_cap_CGetMemMTE: begin 
+                                f5rs2_cap_CGetMemMTE: begin
                                     legalInst = True;
                                     dInst.iType = Ld;
                                     dInst.imm = Valid(0);
@@ -1422,7 +1422,7 @@ function DecodeResult decode(Instruction inst, Bool cap_mode);
                                     regs.dst  = Valid(tagged Gpr rd);
                                     regs.src1 = Valid(tagged Gpr rs1);
                                     dInst.capChecks = memCapChecks(False);
-                                end 
+                                end
                                 f5rs2_cap_CGetTmode: begin
                                     legalInst = True;
                                     dInst.iType = Cap;

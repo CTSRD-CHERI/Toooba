@@ -609,12 +609,12 @@ function Bool extractObjIdSeal(MemTaggedData d, Bit#(7) offset);
 endfunction
 
 function Bool mteMismatch(MemTaggedData d, Bit#(8) capMTE, Bit#(7) offset);
-`ifdef OBJID_DEBUG
+//`ifdef OBJID_DEBUG
     return False;
-`else
-    Vector#(16, Bit#(8)) bytes = unpack(pack(d.data));
-    return capMTE[3:0] != bytes[offset][3:0];
-`endif
+//`else
+//    Vector#(16, Bit#(8)) bytes = unpack(pack(d.data));
+//    return capMTE != bytes[offset];
+//`endif
 endfunction
 
 // issueQ of LSQ tags for issue
@@ -2012,7 +2012,7 @@ module mkSplitLSQ(SplitLSQ);
         $display("searchObjIDSt result", fshow(result) );
         return result;
 
-    endmethod 
+    endmethod
 
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,
                                                   Addr pa,
