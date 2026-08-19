@@ -225,7 +225,7 @@ interface L1ProcResp#(type idT);
     method Action respLd(idT id, ObjSealRdType objSealRdType, MemTaggedData resp);
     method Action respLrScAmo(idT id, MemTaggedData resp);
     method ActionValue#(Tuple2#(LineByteEn, Line)) respSt(idT id);
-    method Action evict(LineAddr a,  Bool flushObjIDbuf1k, Bool flushObjIDbuf4k); // called when cache line is evicted
+    method Action evict(LineAddr a); // called when cache line is evicted
 endinterface
 
 // RISCV-specific store-cond return values

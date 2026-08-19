@@ -469,16 +469,9 @@ endfunction
         // inform processor of line eviction
         LineAddr lineAddr = getLineAddr(resp.addr);
 
-        Bool flushObjIDbuf1k =
-            (lineAddr[3:0] == 4'hF);
-
-        Bool flushObjIDbuf4k =
-            (lineAddr[5:0] == 6'h3F);
 
         procResp.evict(
-            lineAddr,
-            flushObjIDbuf1k,
-            flushObjIDbuf4k
+            lineAddr
         );
        if (verbose)
         $display("%t L1 %m sendRsToP: ", $time,
@@ -504,21 +497,9 @@ endfunction
         // inform processor of line eviction
         LineAddr lineAddr = getLineAddr(resp.addr);
 
-        Bool actuallyInvalidated =
-            (req.toState == I);
-            
-        Bool flushObjIDbuf1k =
-            actuallyInvalidated &&
-            (lineAddr[3:0] == 4'hF);
-            
-        Bool flushObjIDbuf4k =
-            actuallyInvalidated &&
-            (lineAddr[5:0] == 6'h3F);
             
         procResp.evict(
-            lineAddr,
-            flushObjIDbuf1k,
-            flushObjIDbuf4k
+            lineAddr
         );
        if (verbose)
         $display("%t L1 %m sendRsToP: ", $time,

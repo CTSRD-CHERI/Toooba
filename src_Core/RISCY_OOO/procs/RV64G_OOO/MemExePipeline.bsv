@@ -416,28 +416,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData))  memObjIdLdForwardQ <- mkCFFifo;
 
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
-    Fifo#(2, Tuple3#(LdQTag, MemTaggedData, Addr))
-        memObjIdRespLdQ <- mkCFFifo;
-
-    Fifo#(2, Tuple3#(StQTag, MemTaggedData, Addr))
-        memObjIdRespStQ <- mkCFFifo;
+    Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
+    Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdPAddrs <- replicateM(mkRegU);
+    Reg#(Bool) objIdInvalidatePending <- mkReg(False);
     Reg#(Bool) objIdBufMayContainMode3 <- mkReg(False);
+    Reg#(Bool) flushObjIDbuf1k_reg <- mkReg(False);
+    Reg#(Bool) flushObjIDbuf4k_reg <- mkReg(False);
+    Reg#(Addr) objIdEvictPAddr <- mkRegU;
 
-    /*
-     * Eviction notification from D$.
-     *
-     * Using an RWire avoids making procRespIfc.evict() and
-     * doObjIdReverseLookup share/write architectural registers.
-     *
-     * Tuple:
-     *   { physical line address, flush 1K, flush 4K }
-     */
-    RWire#(Tuple3#(Addr, Bool, Bool))
-        objIdEvictWire <- mkRWire;
-
-    Reg#(Bool) objIdFlushAfterLookup <- mkReg(False);
 
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
     // 4-bit index == 16 entries per set.
@@ -445,75 +433,56 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // 4-way associative, so 64 entries total
     // Default value of Invalid
     Map#(Addr, Bit#(4), Maybe#(MemTaggedData), 4) objIdBuf <- mkMapLossy(Invalid);
-
-    /*
-     * Lossy PA-line presence filter for ObjID buffer.
-     *
-     * False positives are safe:
-     * they only cause an unnecessary ObjID-buffer flush.
-     *
-     * False negatives must not occur.
-     */
-    Reg#(Bit#(256))
-        objIdPAddrFilter <- mkReg(0);
-
-    /*
-     * Keep the actual filter register out of the LSQ response rules.
-     * Load/store responses simply publish PA update events.
-     */
-    RWire#(Addr)
-        objIdPAddrFilterLdUpdate <- mkRWire;
-
-    RWire#(Addr)
-        objIdPAddrFilterStUpdate <- mkRWire;
-
-
-    /*
-     * Hash a physical ObjID address at cache-line granularity.
-     */
-    function Bit#(8) objIdPAddrFilterIndex(
-        Addr paddr
-    );
-    
-        Addr pLineAddr =
-            paddr & ~64'h3F;
-    
-        Bit#(64) x =
-            pack(pLineAddr);
-    
-        Bit#(8) idx =
-              x[13:6]
-            ^ x[21:14]
-            ^ x[29:22]
-            ^ x[37:30]
-            ^ x[45:38]
-            ^ x[53:46]
-            ^ x[61:54];
-    
-        return idx;
-    
-    endfunction
-
+    Map#(Addr, Bit#(4), Maybe#(Addr), 4) objIdPAddrBuf <- mkMapLossy(Invalid);
 
     function Action updateObjIdBuf(
-        Addr objIDAddr,
+        Addr objIDVAddr,
+        Addr objIDPAddr,
         MemTaggedData idData
     );
     action
 
-        Addr wordAddr = objIDAddr & ~64'hF;
+        /*
+         * Existing ObjID buffer is indexed at 16-byte granularity.
+         */
+        Addr vWordAddr =
+            objIDVAddr & ~64'hF;
 
+        /*
+         * Physical cache line used for reverse lookup.
+         */
+        Addr pLineAddr =
+            objIDPAddr & ~64'h3F;
+
+        /*
+         * Preserve the existing ObjID-buffer representation:
+         *
+         *     VA word -> MemTaggedData
+         */
         objIdBuf.update(
             MapKeyIndex {
-                key: wordAddr,
-                index: hash(wordAddr)
+                key: vWordAddr,
+                index: hash(vWordAddr)
             },
             Valid(idData)
         );
 
+        /*
+         * Remember the VA corresponding to this physical line.
+         *
+         * NOTE: this minimal version assumes only one relevant
+         * ObjID-buffer entry per physical metadata line.
+         */
+        objIdPAddrBuf.update(
+            MapKeyIndex {
+                key: pLineAddr,
+                index: hash(pLineAddr)
+            },
+            Valid(vWordAddr)
+        );
+
     endaction
     endfunction
-
 
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
@@ -528,59 +497,28 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 // TODO: figure out if obj ID seal is ok here
                 if (objSealRdType == Ld) begin
                     LdQTag tag = truncate(id);
+                    memObjIdRespLdQ.enq(tuple2(tag, d));
                     // Save read in buffer.  Should do for both load and store responses, but I haven't figured out a store ID.
-                    LdStQTag ldstq_tag =
-                        tagged Ld tag;
-
+                    LdStQTag ldstq_tag = tagged Ld tag;
                     Addr vaddr =
-                        objIdVAddrs[
-                            pack(ldstq_tag)
-                        ];
+                        objIdVAddrs[pack(ldstq_tag)];
 
                     Addr paddr =
-                        objIdPAddrs[
-                            pack(ldstq_tag)
-                        ];
-
-                    /*
-                     * Normal ObjID buffer.
-                     */
-                    updateObjIdBuf(
-                        vaddr,
-                        d
-                    );
-
-                    /*
-                     * PA-line -> VA-word reverse map.
-                     */
-                    memObjIdRespLdQ.enq(
-                        tuple3(tag, d, paddr)
-                    );
+                        objIdPAddrs[pack(ldstq_tag)];
+                    //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
+                    updateObjIdBuf(vaddr, paddr, d);
                 end
                 else if (objSealRdType == St) begin
                     StQTag tag = truncate(id);
-                        
-                    LdStQTag ldstq_tag =
-                        tagged St tag;
-                        
+                    memObjIdRespStQ.enq(tuple2(tag, d));
+                    LdStQTag ldstq_tag = tagged St tag;
                     Addr vaddr =
-                        objIdVAddrs[
-                            pack(ldstq_tag)
-                        ];
-                        
+                        objIdVAddrs[pack(ldstq_tag)];
+
                     Addr paddr =
-                        objIdPAddrs[
-                            pack(ldstq_tag)
-                        ];
-                        
-                    updateObjIdBuf(
-                        vaddr,
-                        d
-                    );
-                        
-                    memObjIdRespStQ.enq(
-                        tuple3(tag, d, paddr)
-                    );
+                        objIdPAddrs[pack(ldstq_tag)];
+                    //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
+                    updateObjIdBuf(vaddr, paddr, d);
                 end
                 else begin
                     doAssert(False, "unknown objSealRdType");
@@ -670,44 +608,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             return tuple2(unpack(pack(e.byteEn)), e.line); // return SB entry
         endmethod
 `endif
-        method Action evict(
-            LineAddr lineAddr,
-            Bool flushObjIDbuf1k,
-            Bool flushObjIDbuf4k
-        );
-
-        `ifdef TSO_MM
-
-            if(verbose)
-                $display(
-                    "[cache evict] ",
-                    fshow(lineAddr)
-                );
-
+        
+        method Action evict(LineAddr lineAddr);
+`ifdef TSO_MM
+            if(verbose) $display("[cache evict] ", fshow(lineAddr));
             lsq.cacheEvict(lineAddr);
-
-        `else
-
+`else
             noAction;
+`endif
+            objIdEvictPAddr <=
+                zeroExtend(lineAddr) << valueOf(LgLineSzBytes);
 
-        `endif
-
-            if(flushObjIDbuf1k || flushObjIDbuf4k) begin
-
-                Addr evictPAddr =
-                    zeroExtend(lineAddr) <<
-                    valueOf(LgLineSzBytes);
-
-                objIdEvictWire.wset(
-                    tuple3(
-                        evictPAddr,
-                        flushObjIDbuf1k,
-                        flushObjIDbuf4k
-                    )
-                );
-
-            end
-
+            objIdInvalidatePending <= True;
         endmethod
     endinterface);
     // non-blocking coherent D$
@@ -1294,8 +1206,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             else 
                 objIdPAddr = x.objIdAddr;
         end 
+        if(objIdPAddr matches tagged Valid .pa) begin
 
-
+            objIdPAddrs[
+                pack(x.ldstq_tag)
+            ] <= pa;
+            
+        end
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy, 
             (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset
@@ -1519,24 +1436,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     // (* descending_urgency = "doObjIdRespLdMem, doRespLdMem" *)
     rule doObjIdRespLdMem;
-        let {tag, d, paddr} =
-            memObjIdRespLdQ.first;
-
         memObjIdRespLdQ.deq;
-
-        lsq.updateLdObjIdSeal(tag, d);
-
-        objIdPAddrFilterLdUpdate.wset(
-            paddr
-        );
-
-        if (verbose)
-            $display(
-                "[doObjIdRespLdMem] ",
-                fshow(tag),
-                "; ",
-                fshow(d)
-            );
+        let {t, d} = memObjIdRespLdQ.first;
+        lsq.updateLdObjIdSeal(t, d);
+        if (verbose) $display("[doObjIdRespLdMem] ", fshow(t), "; ", fshow(d));
     endrule
 
     rule doObjIdRespLdForward;
@@ -1546,83 +1449,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         } = memObjIdLdForwardQ.first;
 
         memObjIdLdForwardQ.deq;
-        lsq.updateLdObjIdSeal(
-            requesterTag,
-            forwardedData
-        );
+        
+        lsq.updateLdObjIdSeal(requesterTag,
+                forwardedData);
 
     endrule 
 
 
-    (* descending_urgency =
-        "doObjIdFlush, doUpdateObjIdPAddrFilter"
-    *)
-    rule doUpdateObjIdPAddrFilter;
-
-        let ldUpdate =
-            objIdPAddrFilterLdUpdate.wget;
-
-        let stUpdate =
-            objIdPAddrFilterStUpdate.wget;
-
-        Bit#(256) nextFilter =
-            objIdPAddrFilter;
-
-        Bool updateFilter = False;
-
-        if(ldUpdate matches tagged Valid .paddr) begin
-
-            Bit#(8) idx =
-                objIdPAddrFilterIndex(
-                    paddr
-                );
-
-            Bit#(256) mask =
-                256'b1 << idx;
-
-            nextFilter =
-                nextFilter | mask;
-
-            updateFilter = True;
-
-        end
-
-        if(stUpdate matches tagged Valid .paddr) begin
-
-            Bit#(8) idx =
-                objIdPAddrFilterIndex(
-                    paddr
-                );
-
-            Bit#(256) mask =
-                256'b1 << idx;
-
-            nextFilter =
-                nextFilter | mask;
-
-            updateFilter = True;
-
-        end
-
-        if(updateFilter)
-            objIdPAddrFilter <=
-                nextFilter;
-
-    endrule
-
-
     (* descending_urgency = "doObjIdRespStMem, doObjIdRespStForward" *) // prioritize mem resp
     rule doObjIdRespStMem;
-        let {t, d, paddr} =
-            memObjIdRespStQ.first;
-
         memObjIdRespStQ.deq;
-
-        objIdPAddrFilterStUpdate.wset(
-            paddr
-        );
-        let mInstInfo <-
-            lsq.updateStObjIdSeal(t, d);
+        let {t, d} = memObjIdRespStQ.first;
+        let mInstInfo <- lsq.updateStObjIdSeal(t, d);
         if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(d), "; instTagReady=", fshow(isValid(mInstInfo)));
 
         // If this ObjID response made a non-MMIO store become “done”,
@@ -2397,85 +2235,56 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doAssert(!isValid(lsqDeqSt.fault), "no fault");
     endrule
 
-    rule doObjIdReverseLookup(
-        objIdEvictWire.wget matches tagged Valid .evictInfo
-        &&& !objIdFlushAfterLookup
+    rule doObjIdBufInvalidate(
+        objIdInvalidatePending
     );
 
-        let {
-            evictPAddr,
-            flushObjIDbuf1k,
-            flushObjIDbuf4k
-        } = evictInfo;
+        Addr pLineAddr =
+            objIdEvictPAddr & ~64'h3F;
 
-        Bool shouldCheck =
-            flushObjIDbuf4k ||
-            (objIdBufMayContainMode3 &&
-             flushObjIDbuf1k);
+        let mapping =
+            objIdPAddrBuf.lookup(
+                MapKeyIndex {
+                    key: pLineAddr,
+                    index: hash(pLineAddr)
+                }
+            );
+        $display("objIDPaddr evict rule", fshow(pLineAddr), fshow(mapping));
+        if(mapping matches tagged Valid .mVAddr) begin
 
-        if(shouldCheck) begin
+            if(mVAddr matches tagged Valid .vWordAddr) begin
 
-            Bit#(8) idx =
-                objIdPAddrFilterIndex(
-                    evictPAddr
+                /*
+                 * Invalidate only the corresponding ObjID-buffer
+                 * virtual line.
+                 */
+                objIdBuf.update(
+                    MapKeyIndex {
+                        key: vWordAddr,
+                        index: hash(vWordAddr)
+                    },
+                    Invalid
                 );
 
-            Bool maybePresent =
-                objIdPAddrFilter[idx] == 1'b1;
+                /*
+                 * Remove the reverse mapping too.
+                 */
+                objIdPAddrBuf.update(
+                    MapKeyIndex {
+                        key: pLineAddr,
+                        index: hash(pLineAddr)
+                    },
+                    Invalid
+                );
 
-
-            /*
-             * Also check PA updates arriving in this same cycle.
-             *
-             * This prevents an eviction from missing an ObjID entry
-             * whose filter bit has not yet been committed to the Reg.
-             */
-            let ldUpdate =
-                objIdPAddrFilterLdUpdate.wget;
-
-            let stUpdate =
-                objIdPAddrFilterStUpdate.wget;
-
-            if(ldUpdate matches tagged Valid .paddr) begin
-
-                if(objIdPAddrFilterIndex(paddr) == idx)
-                    maybePresent = True;
-
+                
             end
-
-            if(stUpdate matches tagged Valid .paddr) begin
-
-                if(objIdPAddrFilterIndex(paddr) == idx)
-                    maybePresent = True;
-
-            end
-
-
-            if(maybePresent)
-                objIdFlushAfterLookup <= True;
 
         end
 
-    endrule
-
-    rule doObjIdFlush(
-        objIdFlushAfterLookup
-    );
-
-        objIdBuf.clear;
-
-        /*
-         * Whole ObjID buffer is gone, so reset the lossy
-         * PA-presence filter too.
-         */
-        objIdPAddrFilter <= 0;
-
-        objIdBufMayContainMode3 <= False;
-        objIdFlushAfterLookup <= False;
+        objIdInvalidatePending <= False;
 
     endrule
-
-
 
     // send req to D$
     rule sendLdObjSealRdToMem;
@@ -2497,13 +2306,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         //end else if (result matches tagged ObjIdToCache .toCache) begin 
         end else begin 
             reqObjIdSealLdQ.deq;
-            LdStQTag ldstq_tag =
-                tagged Ld lsqTag;
-
-            objIdPAddrs[
-                pack(ldstq_tag)
-            ] <= addr;
-
             dMem.procReq.req(ProcRq {
             id: dId,
             addr: addr,
@@ -2557,13 +2359,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(result matches tagged ObjIdForward .forward) begin
             memObjIdForwardQ.enq(tuple4(tag, forward, objIdVAddr, offset));
         end else begin 
-            LdStQTag ldstq_tag =
-                tagged St lsqTag;
-            
-            objIdPAddrs[
-                pack(ldstq_tag)
-            ] <= addr;
-
             dMem.procReq.req(ProcRq {
                 id: dId,
                 addr: addr,
