@@ -610,16 +610,33 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
         
         method Action evict(LineAddr lineAddr);
-`ifdef TSO_MM
-            if(verbose) $display("[cache evict] ", fshow(lineAddr));
-            lsq.cacheEvict(lineAddr);
-`else
-            noAction;
-`endif
-            objIdEvictPAddr <=
-                zeroExtend(lineAddr) << valueOf(LgLineSzBytes);
 
+        `ifdef TSO_MM
+            if(verbose)
+                $display("[cache evict] ", fshow(lineAddr));
+
+            lsq.cacheEvict(lineAddr);
+        `else
+            noAction;
+        `endif
+
+        endmethod
+
+        method Action objIdEvict(
+            LineAddr lineAddr,
+            Bool flushObjIDbuf1k,
+            Bool flushObjIDbuf4k
+        );
+            
+            objIdEvictPAddr <=
+                zeroExtend(lineAddr) <<
+                valueOf(LgLineSzBytes);
+            
             objIdInvalidatePending <= True;
+            
+            flushObjIDbuf1k_reg <= flushObjIDbuf1k;
+            flushObjIDbuf4k_reg <= flushObjIDbuf4k;
+        
         endmethod
     endinterface);
     // non-blocking coherent D$
@@ -2239,50 +2256,84 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdInvalidatePending
     );
 
-        Addr pLineAddr =
-            objIdEvictPAddr & ~64'h3F;
+        /*
+         * Preserve old filter semantics.
+         *
+         * 4-KiB candidate is always relevant to the modes
+         * handled by this filter.
+         *
+         * 1-KiB candidate only matters if mode 3 has appeared.
+         */
+        Bool shouldCheck =
+            flushObjIDbuf4k_reg ||
+            (objIdBufMayContainMode3 &&
+             flushObjIDbuf1k_reg);
 
-        let mapping =
-            objIdPAddrBuf.lookup(
-                MapKeyIndex {
-                    key: pLineAddr,
-                    index: hash(pLineAddr)
-                }
-            );
-        $display("objIDPaddr evict rule", fshow(pLineAddr), fshow(mapping));
-        if(mapping matches tagged Valid .mVAddr) begin
+        /*
+         * Consume filter state immediately.
+         */
+        objIdInvalidatePending <= False;
 
-            if(mVAddr matches tagged Valid .vWordAddr) begin
+        flushObjIDbuf1k_reg <= False;
+        flushObjIDbuf4k_reg <= False;
 
-                /*
-                 * Invalidate only the corresponding ObjID-buffer
-                 * virtual line.
-                 */
-                objIdBuf.update(
-                    MapKeyIndex {
-                        key: vWordAddr,
-                        index: hash(vWordAddr)
-                    },
-                    Invalid
-                );
+        if(shouldCheck) begin
 
-                /*
-                 * Remove the reverse mapping too.
-                 */
-                objIdPAddrBuf.update(
+            Addr pLineAddr =
+                objIdEvictPAddr & ~64'h3F;
+
+            /*
+             * Stage 2:
+             * precise physical -> virtual reverse lookup.
+             */
+            let mapping =
+                objIdPAddrBuf.lookup(
                     MapKeyIndex {
                         key: pLineAddr,
                         index: hash(pLineAddr)
-                    },
-                    Invalid
+                    }
                 );
 
-                
+            if(verbose)
+                $display(
+                    "ObjID filtered eviction: PA=",
+                    fshow(pLineAddr),
+                    " mapping=",
+                    fshow(mapping)
+                );
+
+            if(mapping matches tagged Valid .mVAddr) begin
+
+                if(mVAddr matches tagged Valid .vWordAddr) begin
+
+                    /*
+                     * Current one-entry version.
+                     *
+                     * If you have already moved to the
+                     * four-word walker, replace this part
+                     * with the walker start instead.
+                     */
+                    objIdBuf.update(
+                        MapKeyIndex {
+                            key: vWordAddr,
+                            index: hash(vWordAddr)
+                        },
+                        Invalid
+                    );
+
+                    objIdPAddrBuf.update(
+                        MapKeyIndex {
+                            key: pLineAddr,
+                            index: hash(pLineAddr)
+                        },
+                        Invalid
+                    );
+
+                end
+
             end
 
         end
-
-        objIdInvalidatePending <= False;
 
     endrule
 

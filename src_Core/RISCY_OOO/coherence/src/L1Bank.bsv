@@ -467,12 +467,37 @@ endfunction
             waitP: True // we have req parent at the same time
         });
         // inform processor of line eviction
+        // inform processor of line eviction
         LineAddr lineAddr = getLineAddr(resp.addr);
 
+        /*
+         * Old cheap ObjID address filter.
+         *
+         * 1 KiB candidate:
+         *     one out of every 16 cache lines
+         *
+         * 4 KiB candidate:
+         *     one out of every 64 cache lines
+         */
+        Bool flushObjIDbuf1k =
+            (lineAddr[3:0] == 4'hF);
+
+        Bool flushObjIDbuf4k =
+            (lineAddr[5:0] == 6'h3F);
+        
+        if(flushObjIDbuf1k) begin
+            procResp.objIdEvict(
+                lineAddr,
+                flushObjIDbuf1k,
+                flushObjIDbuf4k
+            );
+        end
 
         procResp.evict(
             lineAddr
         );
+
+
        if (verbose)
         $display("%t L1 %m sendRsToP: ", $time,
             fshow(rsToPIndexQ.first)," ; ",
@@ -495,8 +520,32 @@ endfunction
         rsToPQ.enq(resp);
         pRqMshr.sendRsToP_pRq.releaseEntry(n); // mshr entry released
         // inform processor of line eviction
+        // inform processor of line eviction
+        // inform processor of line eviction
         LineAddr lineAddr = getLineAddr(resp.addr);
+            
+        /*
+         * A parent request matters for ObjID coherence only
+         * when this L1 actually loses the line.
+         */
+        Bool actuallyInvalidated =
+            (req.toState == I);
+            
+        Bool flushObjIDbuf1k =
+            actuallyInvalidated &&
+            (lineAddr[3:0] == 4'hF);
+            
+        Bool flushObjIDbuf4k =
+            actuallyInvalidated &&
+            (lineAddr[5:0] == 6'h3F);
 
+        if(flushObjIDbuf1k) begin
+            procResp.objIdEvict(
+                lineAddr,
+                flushObjIDbuf1k,
+                flushObjIDbuf4k
+            );
+        end
             
         procResp.evict(
             lineAddr
