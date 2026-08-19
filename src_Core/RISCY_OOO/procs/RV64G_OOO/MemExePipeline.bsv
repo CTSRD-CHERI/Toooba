@@ -425,6 +425,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Reg#(Bool) flushObjIDbuf1k_reg <- mkReg(False);
     Reg#(Bool) flushObjIDbuf4k_reg <- mkReg(False);
     Reg#(Addr) objIdEvictPAddr <- mkRegU;
+    Reg#(Maybe#(Tuple2#(Addr, Addr))) objIdInvalidateResult <- mkReg(Invalid);
 
 
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
@@ -2252,25 +2253,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doAssert(!isValid(lsqDeqSt.fault), "no fault");
     endrule
 
-    rule doObjIdBufInvalidate(
-        objIdInvalidatePending
+    rule doObjIdReverseLookup(
+        objIdInvalidatePending &&
+        !isValid(objIdInvalidateResult)
     );
 
-        /*
-         * Preserve old filter semantics.
-         *
-         * 4-KiB candidate is always relevant to the modes
-         * handled by this filter.
-         *
-         * 1-KiB candidate only matters if mode 3 has appeared.
-         */
         Bool shouldCheck =
             flushObjIDbuf4k_reg ||
             (objIdBufMayContainMode3 &&
              flushObjIDbuf1k_reg);
 
         /*
-         * Consume filter state immediately.
+         * Consume current request.
          */
         objIdInvalidatePending <= False;
 
@@ -2282,10 +2276,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Addr pLineAddr =
                 objIdEvictPAddr & ~64'h3F;
 
-            /*
-             * Stage 2:
-             * precise physical -> virtual reverse lookup.
-             */
             let mapping =
                 objIdPAddrBuf.lookup(
                     MapKeyIndex {
@@ -2296,7 +2286,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
             if(verbose)
                 $display(
-                    "ObjID filtered eviction: PA=",
+                    "ObjID reverse lookup: PA=",
                     fshow(pLineAddr),
                     " mapping=",
                     fshow(mapping)
@@ -2306,28 +2296,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
                 if(mVAddr matches tagged Valid .vWordAddr) begin
 
-                    /*
-                     * Current one-entry version.
-                     *
-                     * If you have already moved to the
-                     * four-word walker, replace this part
-                     * with the walker start instead.
-                     */
-                    objIdBuf.update(
-                        MapKeyIndex {
-                            key: vWordAddr,
-                            index: hash(vWordAddr)
-                        },
-                        Invalid
-                    );
-
-                    objIdPAddrBuf.update(
-                        MapKeyIndex {
-                            key: pLineAddr,
-                            index: hash(pLineAddr)
-                        },
-                        Invalid
-                    );
+                    objIdInvalidateResult <=
+                        Valid(
+                            tuple2(
+                                pLineAddr,
+                                vWordAddr
+                            )
+                        );
 
                 end
 
@@ -2336,6 +2311,44 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
 
     endrule
+
+    rule doObjIdBufInvalidate(
+        objIdInvalidateResult matches
+            tagged Valid {.pLineAddr, .vWordAddr}
+    );
+    
+        /*
+         * Do the actual map modifications in a separate cycle
+         * from the reverse-map lookup.
+         */
+        objIdBuf.update(
+            MapKeyIndex {
+                key: vWordAddr,
+                index: hash(vWordAddr)
+            },
+            Invalid
+        );
+    
+        objIdPAddrBuf.update(
+            MapKeyIndex {
+                key: pLineAddr,
+                index: hash(pLineAddr)
+            },
+            Invalid
+        );
+    
+        objIdInvalidateResult <= Invalid;
+    
+        if(verbose)
+            $display(
+                "ObjID invalidate: PA=",
+                fshow(pLineAddr),
+                " VA=",
+                fshow(vWordAddr)
+            );
+    
+    endrule
+
 
     // send req to D$
     rule sendLdObjSealRdToMem;
