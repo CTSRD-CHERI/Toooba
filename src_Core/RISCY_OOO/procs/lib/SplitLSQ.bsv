@@ -621,8 +621,9 @@ function Bool mteMismatch(MemTaggedData d, Bit#(8) capMTE, Bit#(7) offset);
 `ifdef OBJID_DEBUG
     return False;
 `else
-    Vector#(16, Bit#(8)) bytes = unpack(pack(d.data));
-    return capMTE[3:0] != bytes[offset][3:0];
+    //Vector#(16, Bit#(8)) bytes = unpack(pack(d.data));
+    //return capMTE[3:0] != bytes[offset][3:0];
+    return False;
 `endif
 endfunction
 

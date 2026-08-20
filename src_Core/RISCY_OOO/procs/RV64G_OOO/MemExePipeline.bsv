@@ -425,6 +425,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Reg#(Bool) flushObjIDbuf1k_reg <- mkReg(False);
     Reg#(Bool) flushObjIDbuf4k_reg <- mkReg(False);
 
+    Reg#(Addr) objIdEvictPAddr <- mkRegU;
+    Reg#(Bool) objIdFlushAfterLookup <- mkReg(False);
 
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
     // 4-bit index == 16 entries per set.
@@ -432,6 +434,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // 4-way associative, so 64 entries total
     // Default value of Invalid
     Map#(Addr, Bit#(4), Maybe#(MemTaggedData), 4) objIdBuf <- mkMapLossy(Invalid);
+    Map#(Addr, Bit#(4), Bool, 4) objIdPAddrBuf <- mkMapLossy(False);
+
+    Fifo#(2, Addr) objIdPAddrUpdateQ <- mkCFFifo;
 
     function Action updateObjIdBuf(
         Addr objIDAddr,
@@ -452,6 +457,25 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endaction
     endfunction
 
+    function Action updateObjIdPAddrBuf(
+        Addr objIDPAddr
+    );
+    action
+
+        Addr pLineAddr =
+            objIDPAddr & ~64'h3F;
+
+        objIdPAddrBuf.update(
+            MapKeyIndex {
+                key: pLineAddr,
+                index: hash(pLineAddr)
+            },
+            True
+        );
+
+    endaction
+    endfunction
+
     // fifo for Lr/Sc/Amo resp
     Fifo#(1, MemResp) respLrScAmoQ <- mkCFFifo;
     // resp ifc to D$
@@ -467,18 +491,58 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                     LdQTag tag = truncate(id);
                     memObjIdRespLdQ.enq(tuple2(tag, d));
                     // Save read in buffer.  Should do for both load and store responses, but I haven't figured out a store ID.
-                    LdStQTag ldstq_tag = tagged Ld tag;
-                    Addr addr = objIdVAddrs[pack(ldstq_tag)];
-                    //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
-                    updateObjIdBuf(addr, d);
+                    LdStQTag ldstq_tag =
+                        tagged Ld tag;
+
+                    Addr vaddr =
+                        objIdVAddrs[
+                            pack(ldstq_tag)
+                        ];
+
+                    Addr paddr =
+                        objIdPAddrs[
+                            pack(ldstq_tag)
+                        ];
+
+                    /*
+                     * Normal ObjID buffer.
+                     */
+                    updateObjIdBuf(
+                        vaddr,
+                        d
+                    );
+
+                    /*
+                     * PA-line -> VA-word reverse map.
+                     */
+                    objIdPAddrUpdateQ.enq(
+                        paddr
+                    );
                 end
                 else if (objSealRdType == St) begin
                     StQTag tag = truncate(id);
                     memObjIdRespStQ.enq(tuple2(tag, d));
-                    LdStQTag ldstq_tag = tagged St tag;
-                    Addr addr = objIdVAddrs[pack(ldstq_tag)];
-                    //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
-                    updateObjIdBuf(addr, d);
+                    LdStQTag ldstq_tag =
+                        tagged St tag;
+
+                    Addr vaddr =
+                        objIdVAddrs[
+                            pack(ldstq_tag)
+                        ];
+
+                    Addr paddr =
+                        objIdPAddrs[
+                            pack(ldstq_tag)
+                        ];
+
+                    updateObjIdBuf(
+                        vaddr,
+                        d
+                    );
+
+                    objIdPAddrUpdateQ.enq(
+                        paddr
+                    );
                 end
                 else begin
                     doAssert(False, "unknown objSealRdType");
@@ -568,16 +632,44 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             return tuple2(unpack(pack(e.byteEn)), e.line); // return SB entry
         endmethod
 `endif
-        method Action evict(LineAddr lineAddr, Bool flushObjIDbuf1k, flushObjIDbuf4k);
-`ifdef TSO_MM
-            if(verbose) $display("[cache evict] ", fshow(lineAddr));
+        method Action evict(
+            LineAddr lineAddr,
+            Bool flushObjIDbuf1k,
+            Bool flushObjIDbuf4k
+        );
+            
+        `ifdef TSO_MM
+            
+            if(verbose)
+                $display(
+                    "[cache evict] ",
+                    fshow(lineAddr)
+                );
+            
             lsq.cacheEvict(lineAddr);
-`else
+            
+        `else
+            
             noAction;
-`endif
-            objIdInvalidatePending <= True;
-            flushObjIDbuf1k_reg <= flushObjIDbuf1k;
-            flushObjIDbuf4k_reg <= flushObjIDbuf4k;
+            
+        `endif
+            
+            if(flushObjIDbuf1k || flushObjIDbuf4k) begin
+
+                objIdEvictPAddr <=
+                    zeroExtend(lineAddr) <<
+                    valueOf(LgLineSzBytes);
+
+                objIdInvalidatePending <= True;
+
+                flushObjIDbuf1k_reg <=
+                    flushObjIDbuf1k;
+
+                flushObjIDbuf4k_reg <=
+                    flushObjIDbuf4k;
+
+            end
+            
         endmethod
     endinterface);
     // non-blocking coherent D$
@@ -1164,6 +1256,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             else 
                 objIdPAddr = x.objIdAddr;
         end 
+
+        if(objIdPAddr matches tagged Valid .pa) begin
+
+            objIdPAddrs[
+                pack(x.ldstq_tag)
+            ] <= pa;
+
+        end
+
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy, 
             (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset
@@ -2186,9 +2287,29 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doAssert(!isValid(lsqDeqSt.fault), "no fault");
     endrule
 
-    rule doObjIdBufInvalidate(objIdInvalidatePending);
+    (* descending_urgency =
+        "doUpdateObjIdPAddrBuf, doObjIdReverseLookup"
+    *)
+    rule doUpdateObjIdPAddrBuf;
 
-        Bool shouldFlush =
+        let paddr =
+            objIdPAddrUpdateQ.first;
+
+        objIdPAddrUpdateQ.deq;
+
+        updateObjIdPAddrBuf(
+            paddr
+        );
+
+    endrule
+
+
+    rule doObjIdReverseLookup(
+        objIdInvalidatePending &&
+        !objIdFlushAfterLookup
+    );
+
+        Bool shouldCheck =
             flushObjIDbuf4k_reg ||
             (objIdBufMayContainMode3 &&
              flushObjIDbuf1k_reg);
@@ -2197,12 +2318,44 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         flushObjIDbuf1k_reg <= False;
         flushObjIDbuf4k_reg <= False;
 
-        if (shouldFlush) begin
-            objIdBuf.clear;
-            objIdBufMayContainMode3 <= False;
+        if(shouldCheck) begin
+
+            Addr pLineAddr =
+                objIdEvictPAddr & ~64'h3F;
+
+            let mapping =
+                objIdPAddrBuf.lookup(
+                    MapKeyIndex {
+                        key: pLineAddr,
+                        index: hash(pLineAddr)
+                    }
+                );
+            
+            if(mapping matches tagged Valid .present) begin
+            
+                if(present) begin
+                    objIdFlushAfterLookup <= True;
+                end
+            
+            end
+
         end
 
     endrule
+
+    rule doObjIdFlush(
+        objIdFlushAfterLookup
+    );
+
+        objIdBuf.clear;
+        //objIdPAddrBuf.clear;
+
+        objIdBufMayContainMode3 <= False;
+        objIdFlushAfterLookup <= False;
+
+    endrule
+
+
 
     // send req to D$
     rule sendLdObjSealRdToMem;
