@@ -1295,13 +1295,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 objIdPAddr = x.objIdAddr;
         end 
 
-        if(objIdPAddr matches tagged Valid .pa) begin
-
-            objIdPAddrs[
-                pack(x.ldstq_tag)
-            ] <= pa;
-
-        end
 
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy, 
@@ -2504,6 +2497,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         //end else if (result matches tagged ObjIdToCache .toCache) begin 
         end else begin 
             reqObjIdSealLdQ.deq;
+            LdStQTag ldstq_tag =
+                tagged Ld lsqTag;
+
+            objIdPAddrs[
+                pack(ldstq_tag)
+            ] <= addr;
+
             dMem.procReq.req(ProcRq {
             id: dId,
             addr: addr,
@@ -2557,6 +2557,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(result matches tagged ObjIdForward .forward) begin
             memObjIdForwardQ.enq(tuple4(tag, forward, objIdVAddr, offset));
         end else begin 
+            LdStQTag ldstq_tag =
+                tagged St lsqTag;
+            
+            objIdPAddrs[
+                pack(ldstq_tag)
+            ] <= addr;
+
             dMem.procReq.req(ProcRq {
                 id: dId,
                 addr: addr,
