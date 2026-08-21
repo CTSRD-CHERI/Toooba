@@ -416,8 +416,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(2, Tuple2#(LdQTag, MemTaggedData))  memObjIdLdForwardQ <- mkCFFifo;
 
     Fifo#(2, Tuple2#(LdQTag, MemResp)) memRespLdQ <- mkCFFifo;
-    Fifo#(2, Tuple2#(LdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
-    Fifo#(2, Tuple2#(StQTag, MemTaggedData)) memObjIdRespStQ <- mkCFFifo;
+    Fifo#(2, Tuple4#(LdQTag, MemTaggedData, Addr, Addr)) memObjIdRespLdQ <- mkCFFifo;
+    Fifo#(2, Tuple4#(StQTag, MemTaggedData, Addr, Addr)) memObjIdRespStQ <- mkCFFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdPAddrs <- replicateM(mkRegU);
     Reg#(Bool) objIdInvalidatePending <- mkReg(False);
@@ -426,6 +426,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Reg#(Bool) flushObjIDbuf4k_reg <- mkReg(False);
     Reg#(Addr) objIdEvictPAddr <- mkRegU;
     Reg#(Maybe#(Tuple2#(Addr, Addr))) objIdInvalidateResult <- mkReg(Invalid);
+    PulseWire objIdMode3Seen <- mkPulseWire;
 
 
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
@@ -498,7 +499,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 // TODO: figure out if obj ID seal is ok here
                 if (objSealRdType == Ld) begin
                     LdQTag tag = truncate(id);
-                    memObjIdRespLdQ.enq(tuple2(tag, d));
+
                     // Save read in buffer.  Should do for both load and store responses, but I haven't figured out a store ID.
                     LdStQTag ldstq_tag = tagged Ld tag;
                     Addr vaddr =
@@ -506,20 +507,34 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
                     Addr paddr =
                         objIdPAddrs[pack(ldstq_tag)];
+                    memObjIdRespLdQ.enq(
+                        tuple4(
+                            tag,
+                            d,
+                            vaddr,
+                            paddr
+                        )
+                    );
                     //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
-                    updateObjIdBuf(vaddr, paddr, d);
                 end
                 else if (objSealRdType == St) begin
                     StQTag tag = truncate(id);
-                    memObjIdRespStQ.enq(tuple2(tag, d));
+
                     LdStQTag ldstq_tag = tagged St tag;
                     Addr vaddr =
                         objIdVAddrs[pack(ldstq_tag)];
 
                     Addr paddr =
                         objIdPAddrs[pack(ldstq_tag)];
+                    memObjIdRespStQ.enq(
+                        tuple4(
+                            tag,
+                            d,
+                            vaddr,
+                            paddr
+                        )
+                    );
                     //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
-                    updateObjIdBuf(vaddr, paddr, d);
                 end
                 else begin
                     doAssert(False, "unknown objSealRdType");
@@ -908,7 +923,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         $fflush;
 `endif
         if(getTmode(x.rVal1) == 'h3)
-            objIdBufMayContainMode3 <= True;
+            objIdMode3Seen.send;
 
         if (objIdVAddr matches tagged Valid .objIdAddr) begin
 
@@ -1224,13 +1239,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             else 
                 objIdPAddr = x.objIdAddr;
         end 
-        if(objIdPAddr matches tagged Valid .pa) begin
 
-            objIdPAddrs[
-                pack(x.ldstq_tag)
-            ] <= pa;
-            
-        end
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy, 
             (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset
@@ -1454,10 +1463,26 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     // (* descending_urgency = "doObjIdRespLdMem, doRespLdMem" *)
     rule doObjIdRespLdMem;
+        let {
+            tag,
+            d,
+            vaddr,
+            paddr
+        } = memObjIdRespLdQ.first;
+
         memObjIdRespLdQ.deq;
-        let {t, d} = memObjIdRespLdQ.first;
-        lsq.updateLdObjIdSeal(t, d);
-        if (verbose) $display("[doObjIdRespLdMem] ", fshow(t), "; ", fshow(d));
+
+        updateObjIdBuf(
+            vaddr,
+            paddr,
+            d
+        );
+
+        lsq.updateLdObjIdSeal(
+            tag,
+            d
+        );
+        if (verbose) $display("[doObjIdRespLdMem] ", fshow(tag), "; ", fshow(d));
     endrule
 
     rule doObjIdRespLdForward;
@@ -1476,8 +1501,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     (* descending_urgency = "doObjIdRespStMem, doObjIdRespStForward" *) // prioritize mem resp
     rule doObjIdRespStMem;
+        let {t, d, vaddr, paddr} = memObjIdRespStQ.first;
         memObjIdRespStQ.deq;
-        let {t, d} = memObjIdRespStQ.first;
+        updateObjIdBuf(
+            vaddr,
+            paddr,
+            d
+        );
         let mInstInfo <- lsq.updateStObjIdSeal(t, d);
         if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(d), "; instTagReady=", fshow(isValid(mInstInfo)));
 
@@ -2253,6 +2283,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doAssert(!isValid(lsqDeqSt.fault), "no fault");
     endrule
 
+    rule setObjIdBufMayContainMode3(
+        objIdMode3Seen
+    );
+        objIdBufMayContainMode3 <= True;
+    endrule
+
     rule doObjIdReverseLookup(
         objIdInvalidatePending &&
         !isValid(objIdInvalidateResult)
@@ -2370,6 +2406,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         //end else if (result matches tagged ObjIdToCache .toCache) begin 
         end else begin 
             reqObjIdSealLdQ.deq;
+            LdStQTag ldstq_tag =
+                tagged Ld lsqTag;
+            
+            objIdPAddrs[
+                pack(ldstq_tag)
+            ] <= addr;
+
             dMem.procReq.req(ProcRq {
             id: dId,
             addr: addr,
@@ -2423,6 +2466,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(result matches tagged ObjIdForward .forward) begin
             memObjIdForwardQ.enq(tuple4(tag, forward, objIdVAddr, offset));
         end else begin 
+            LdStQTag ldstq_tag =
+                tagged St lsqTag;
+
+            objIdPAddrs[
+                pack(ldstq_tag)
+            ] <= addr;
+
             dMem.procReq.req(ProcRq {
                 id: dId,
                 addr: addr,
