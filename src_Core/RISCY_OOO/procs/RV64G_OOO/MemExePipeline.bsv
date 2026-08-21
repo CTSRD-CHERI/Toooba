@@ -996,7 +996,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                               !isMMIO && x.objIdCheck;
         Bool access_at_commit = !isValid(cause) && (isMMIO || isLrScAmo);
         Bool non_mmio_st_done = !isValid(cause) && !isMMIO && (x.mem_func == St) && !needsObjIdCheck;
-        inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
+        Bool wasObjIdTranslation =
+            x.objIdVirtual && !x.objIdTransDone;
+        Addr faultVAddr =
+            (isValid(cause) && wasObjIdTranslation)
+                ? x.objIdAddr
+                : getAddr(x.vaddr);
+        inIfc.rob_setExecuted_doFinishMem(x.tag, faultVAddr,
 `ifdef INCLUDE_TANDEM_VERIF
                                           store_data, store_data_BE,
 `endif
