@@ -163,10 +163,19 @@ typedef struct {
 
 typedef Bit#(TSub#(SizeOf#(Addr), 12)) ObjIdPhysTag;
 
+typedef Bit#(
+    TSub#(SizeOf#(Addr), 6)
+) ObjIdPLine;
+
 typedef struct {
-    ObjIdPhysTag physTag;
-    Vector#(4, Maybe#(MemTaggedData)) words;
-} ObjIdBufLine deriving(Bits, FShow);
+    LineAddr line;
+    Bool flush1k;
+    Bool flush4k;
+} ObjIdEvictReq deriving(Bits, FShow);
+
+typedef Bit#(
+    TSub#(SizeOf#(Addr), 4)
+) ObjIdVWord;
 
 typedef union tagged {
     void Invalid;
@@ -420,12 +429,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(2, Tuple4#(StQTag, MemTaggedData, Addr, Addr)) memObjIdRespStQ <- mkCFFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
     Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdPAddrs <- replicateM(mkRegU);
-    Reg#(Bool) objIdInvalidatePending <- mkReg(False);
     Reg#(Bool) objIdBufMayContainMode3 <- mkReg(False);
-    Reg#(Bool) flushObjIDbuf1k_reg <- mkReg(False);
-    Reg#(Bool) flushObjIDbuf4k_reg <- mkReg(False);
-    Reg#(Addr) objIdEvictPAddr <- mkRegU;
-    Reg#(Maybe#(Tuple2#(Addr, Addr))) objIdInvalidateResult <- mkReg(Invalid);
+
+
+    Fifo#(2, ObjIdEvictReq)
+        objIdEvictQ <- mkCFFifo;
+
+
+    Reg#(Maybe#(Tuple2#(ObjIdPLine, ObjIdVWord))) objIdInvalidateResult <- mkReg(Invalid);
     PulseWire objIdMode3Seen <- mkPulseWire;
 
 
@@ -435,8 +446,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // 4-way associative, so 64 entries total
     // Default value of Invalid
     Map#(Addr, Bit#(4), Maybe#(MemTaggedData), 4) objIdBuf <- mkMapLossy(Invalid);
-    Map#(Addr, Bit#(4), Maybe#(Addr), 4) objIdPAddrBuf <- mkMapLossy(Invalid);
-
+    Map#(ObjIdPLine, Bit#(4), Maybe#(ObjIdVWord), 4) objIdPAddrBuf <- mkMapLossy(Invalid);
+    
     function Action updateObjIdBuf(
         Addr objIDVAddr,
         Addr objIDPAddr,
@@ -444,43 +455,26 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
     action
 
-        /*
-         * Existing ObjID buffer is indexed at 16-byte granularity.
-         */
-        Addr vWordAddr =
-            objIDVAddr & ~64'hF;
+        ObjIdPLine pLine =
+            truncate(objIDPAddr >> 6);
 
-        /*
-         * Physical cache line used for reverse lookup.
-         */
-        Addr pLineAddr =
-            objIDPAddr & ~64'h3F;
+        ObjIdVWord vWord =
+            truncate(objIDVAddr >> 4);
+        Addr vWordAddr = objIDVAddr & ~64'hF;
 
-        /*
-         * Preserve the existing ObjID-buffer representation:
-         *
-         *     VA word -> MemTaggedData
-         */
+        objIdPAddrBuf.update(
+            MapKeyIndex {
+                key: pLine,
+                index: hash(pLine)
+            },
+            Valid(vWord)
+        );
         objIdBuf.update(
             MapKeyIndex {
                 key: vWordAddr,
                 index: hash(vWordAddr)
             },
             Valid(idData)
-        );
-
-        /*
-         * Remember the VA corresponding to this physical line.
-         *
-         * NOTE: this minimal version assumes only one relevant
-         * ObjID-buffer entry per physical metadata line.
-         */
-        objIdPAddrBuf.update(
-            MapKeyIndex {
-                key: pLineAddr,
-                index: hash(pLineAddr)
-            },
-            Valid(vWordAddr)
         );
 
     endaction
@@ -643,17 +637,17 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Bool flushObjIDbuf1k,
             Bool flushObjIDbuf4k
         );
-            
-            objIdEvictPAddr <=
-                zeroExtend(lineAddr) <<
-                valueOf(LgLineSzBytes);
-            
-            objIdInvalidatePending <= True;
-            
-            flushObjIDbuf1k_reg <= flushObjIDbuf1k;
-            flushObjIDbuf4k_reg <= flushObjIDbuf4k;
-        
+
+            objIdEvictQ.enq(
+                ObjIdEvictReq {
+                    line: lineAddr,
+                    flush1k: flushObjIDbuf1k,
+                    flush4k: flushObjIDbuf4k
+                }
+            );
+
         endmethod
+
     endinterface);
     // non-blocking coherent D$
     DCoCache dMem <- mkDCoCache(procRespIfc);
@@ -2290,57 +2284,45 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     rule doObjIdReverseLookup(
-        objIdInvalidatePending &&
         !isValid(objIdInvalidateResult)
     );
 
+        let req = objIdEvictQ.first;
+        objIdEvictQ.deq;
+
         Bool shouldCheck =
-            flushObjIDbuf4k_reg ||
-            (objIdBufMayContainMode3 &&
-             flushObjIDbuf1k_reg);
-
-        /*
-         * Consume current request.
-         */
-        objIdInvalidatePending <= False;
-
-        flushObjIDbuf1k_reg <= False;
-        flushObjIDbuf4k_reg <= False;
+            req.flush4k ||
+            (
+                objIdBufMayContainMode3 &&
+                req.flush1k
+            );
 
         if(shouldCheck) begin
 
-            Addr pLineAddr =
-                objIdEvictPAddr & ~64'h3F;
+            ObjIdPLine pLine =
+                truncate(pack(req.line));
 
             let mapping =
                 objIdPAddrBuf.lookup(
                     MapKeyIndex {
-                        key: pLineAddr,
-                        index: hash(pLineAddr)
+                        key: pLine,
+                        index: hash(pLine)
                     }
                 );
 
-            if(verbose)
-                $display(
-                    "ObjID reverse lookup: PA=",
-                    fshow(pLineAddr),
-                    " mapping=",
-                    fshow(mapping)
-                );
+            if (
+                mapping matches
+                    tagged Valid
+                        (tagged Valid .vWord)
+            ) begin
 
-            if(mapping matches tagged Valid .mVAddr) begin
-
-                if(mVAddr matches tagged Valid .vWordAddr) begin
-
-                    objIdInvalidateResult <=
-                        Valid(
-                            tuple2(
-                                pLineAddr,
-                                vWordAddr
-                            )
-                        );
-
-                end
+                objIdInvalidateResult <=
+                    Valid(
+                        tuple2(
+                            pLine,
+                            vWord
+                        )
+                    );
 
             end
 
@@ -2350,13 +2332,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     rule doObjIdBufInvalidate(
         objIdInvalidateResult matches
-            tagged Valid {.pLineAddr, .vWordAddr}
+            tagged Valid {.pLine, .vWord}
     );
-    
-        /*
-         * Do the actual map modifications in a separate cycle
-         * from the reverse-map lookup.
-         */
+
+        Addr vWordAddr =
+            zeroExtend(vWord) << 4;
+
         objIdBuf.update(
             MapKeyIndex {
                 key: vWordAddr,
@@ -2364,25 +2345,17 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             },
             Invalid
         );
-    
+
         objIdPAddrBuf.update(
             MapKeyIndex {
-                key: pLineAddr,
-                index: hash(pLineAddr)
+                key: pLine,
+                index: hash(pLine)
             },
             Invalid
         );
-    
+
         objIdInvalidateResult <= Invalid;
-    
-        if(verbose)
-            $display(
-                "ObjID invalidate: PA=",
-                fshow(pLineAddr),
-                " VA=",
-                fshow(vWordAddr)
-            );
-    
+
     endrule
 
 
