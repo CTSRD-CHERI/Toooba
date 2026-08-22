@@ -194,6 +194,11 @@ typedef struct {
     MemTaggedData shiftedData;
 } WaitStResp deriving(Bits, Eq, FShow);
 
+typedef struct {
+    ObjIdPLine pLine;
+    ObjIdVWord vWord;
+} ObjIdReverseUpdate deriving(Bits, FShow);
+
 //SpecFifo#(2,IncorrectSpec,1,1) incorrectSpec_ff <- mkSpecFifoCF(True);
 // synthesized pipeline fifos
 typedef SpecFifo_SB_deq_enq_C_deq_enq#(1, MemDispatchToRegRead) MemDispToRegFifo;
@@ -439,6 +444,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Reg#(Maybe#(Tuple2#(ObjIdPLine, ObjIdVWord))) objIdInvalidateResult <- mkReg(Invalid);
     PulseWire objIdMode3Seen <- mkPulseWire;
 
+    Fifo#(2, ObjIdReverseUpdate)
+    objIdReverseUpdateQ <- mkCFFifo;
+
+    Fifo#(1, Bool)
+        objIdFullFlushQ <- mkCFFifo;
+    
+    Reg#(Bit#(2))
+        objIdInvalidateWordIdx <- mkReg(0);
+
 
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
     // 4-bit index == 16 entries per set.
@@ -450,25 +464,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     
     function Action updateObjIdBuf(
         Addr objIDVAddr,
-        Addr objIDPAddr,
         MemTaggedData idData
     );
     action
 
-        ObjIdPLine pLine =
-            truncate(objIDPAddr >> 6);
+        Addr vWordAddr =
+            objIDVAddr & ~64'hF;
 
-        ObjIdVWord vWord =
-            truncate(objIDVAddr >> 4);
-        Addr vWordAddr = objIDVAddr & ~64'hF;
-
-        objIdPAddrBuf.update(
-            MapKeyIndex {
-                key: pLine,
-                index: hash(pLine)
-            },
-            Valid(vWord)
-        );
         objIdBuf.update(
             MapKeyIndex {
                 key: vWordAddr,
@@ -1456,6 +1458,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endfunction
 
     // (* descending_urgency = "doObjIdRespLdMem, doRespLdMem" *)
+    (* descending_urgency =
+    "doObjIdFullFlush, doObjIdRespLdMem"*)
+
     rule doObjIdRespLdMem;
         let {
             tag,
@@ -1468,8 +1473,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         updateObjIdBuf(
             vaddr,
-            paddr,
             d
+        );
+
+        objIdReverseUpdateQ.enq(
+            ObjIdReverseUpdate {
+                pLine: truncate(paddr >> 6),
+                vWord: truncate(vaddr >> 4)
+            }
         );
 
         lsq.updateLdObjIdSeal(
@@ -1479,6 +1490,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (verbose) $display("[doObjIdRespLdMem] ", fshow(tag), "; ", fshow(d));
     endrule
 
+ 
     rule doObjIdRespLdForward;
         let {
             requesterTag,
@@ -1493,14 +1505,24 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule 
 
 
+    
+    (* descending_urgency =
+    "doObjIdFullFlush, doObjIdRespStMem"*)
     (* descending_urgency = "doObjIdRespStMem, doObjIdRespStForward" *) // prioritize mem resp
+
     rule doObjIdRespStMem;
         let {t, d, vaddr, paddr} = memObjIdRespStQ.first;
         memObjIdRespStQ.deq;
         updateObjIdBuf(
             vaddr,
-            paddr,
             d
+        );
+
+        objIdReverseUpdateQ.enq(
+            ObjIdReverseUpdate {
+                pLine: truncate(paddr >> 6),
+                vWord: truncate(vaddr >> 4)
+            }
         );
         let mInstInfo <- lsq.updateStObjIdSeal(t, d);
         if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(d), "; instTagReady=", fshow(isValid(mInstInfo)));
@@ -1524,6 +1546,72 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
     endrule
 
+    rule doObjIdReverseUpdate;
+
+        let u = objIdReverseUpdateQ.first;
+        objIdReverseUpdateQ.deq;
+
+        let key =
+            MapKeyIndex {
+                key: u.pLine,
+                index: hash(u.pLine)
+            };
+
+        let oldMapping =
+            objIdPAddrBuf.lookup(key);
+
+        Bool hasAlias = False;
+
+        if (
+            oldMapping matches
+                tagged Valid
+                    (tagged Valid .oldVWord)
+        ) begin
+
+            /*
+             * One ObjID entry represents 16 bytes.
+             *
+             * Therefore:
+             *
+             *     vWord >> 2
+             *
+             * identifies the surrounding 64-byte
+             * virtual line.
+             */
+            if (
+                (oldVWord >> 2) !=
+                (u.vWord >> 2)
+            ) begin
+
+                hasAlias = True;
+
+            end
+
+        end
+
+        if(hasAlias) begin
+
+            /*
+             * Same physical 64B line has been
+             * observed through a different
+             * virtual 64B line.
+             *
+             * Conservatively flush everything.
+             */
+            objIdFullFlushQ.enq(True);
+
+        end
+        else begin
+
+            objIdPAddrBuf.update(
+                key,
+                Valid(u.vWord)
+            );
+
+        end
+
+    endrule
+
 
     function MemTaggedData clearObjIdByte(
         MemTaggedData oldData,
@@ -1544,6 +1632,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         return newData;
     endfunction
 
+    (* descending_urgency =
+        "doObjIdFullFlush, doObjIdRespStForward"
+    *)
     rule doObjIdRespStForward;
 
         let {
@@ -2277,6 +2368,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doAssert(!isValid(lsqDeqSt.fault), "no fault");
     endrule
 
+    (* descending_urgency =
+        "setObjIdBufMayContainMode3, doObjIdFullFlush"
+    *)
     rule setObjIdBufMayContainMode3(
         objIdMode3Seen
     );
@@ -2323,6 +2417,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                             vWord
                         )
                     );
+                objIdInvalidateWordIdx <= 0;
 
             end
 
@@ -2330,14 +2425,34 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     endrule
 
+
     rule doObjIdBufInvalidate(
         objIdInvalidateResult matches
             tagged Valid {.pLine, .vWord}
     );
 
-        Addr vWordAddr =
-            zeroExtend(vWord) << 4;
+        /*
+         * vWord is a 16-byte-word address.
+         *
+         * Clear its bottom two bits to obtain
+         * the first 16-byte word in the
+         * corresponding 64-byte virtual line.
+         */
+        ObjIdVWord baseWord =
+            (vWord >> 2) << 2;
 
+        ObjIdVWord currentWord =
+            baseWord +
+            zeroExtend(
+                objIdInvalidateWordIdx
+            );
+
+        Addr vWordAddr =
+            zeroExtend(currentWord) << 4;
+
+        /*
+         * Invalidate ONE entry this cycle.
+         */
         objIdBuf.update(
             MapKeyIndex {
                 key: vWordAddr,
@@ -2346,16 +2461,44 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Invalid
         );
 
-        objIdPAddrBuf.update(
-            MapKeyIndex {
-                key: pLine,
-                index: hash(pLine)
-            },
-            Invalid
-        );
+        if(objIdInvalidateWordIdx == 3) begin
 
+            /*
+             * Four 16-byte entries have now
+             * been invalidated.
+             */
+            objIdPAddrBuf.update(
+                MapKeyIndex {
+                    key: pLine,
+                    index: hash(pLine)
+                },
+                Invalid
+            );
+
+            objIdInvalidateResult <= Invalid;
+            objIdInvalidateWordIdx <= 0;
+
+        end
+        else begin
+
+            objIdInvalidateWordIdx <=
+                objIdInvalidateWordIdx + 1;
+
+        end
+
+    endrule
+
+    rule doObjIdFullFlush;
+
+        objIdFullFlushQ.deq;
+
+        objIdBuf.clear;
+        objIdPAddrBuf.clear;
+
+        objIdReverseUpdateQ.clear; 
         objIdInvalidateResult <= Invalid;
-
+        objIdInvalidateWordIdx <= 0;
+        objIdBufMayContainMode3 <= False;
     endrule
 
 
