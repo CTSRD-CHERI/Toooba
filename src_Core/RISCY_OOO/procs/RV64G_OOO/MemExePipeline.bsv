@@ -1458,8 +1458,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endfunction
 
     // (* descending_urgency = "doObjIdRespLdMem, doRespLdMem" *)
-    (* descending_urgency =
-    "doObjIdFullFlush, doObjIdRespLdMem"*)
+    //(* descending_urgency =
+    //"doObjIdFullFlush, doObjIdRespLdMem"*)
 
     rule doObjIdRespLdMem;
         let {
@@ -1506,8 +1506,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
 
     
-    (* descending_urgency =
-    "doObjIdFullFlush, doObjIdRespStMem"*)
+    //(* descending_urgency =
+    //"doObjIdFullFlush, doObjIdRespStMem"*)
     (* descending_urgency = "doObjIdRespStMem, doObjIdRespStForward" *) // prioritize mem resp
 
     rule doObjIdRespStMem;
@@ -1598,7 +1598,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
              *
              * Conservatively flush everything.
              */
-            objIdFullFlushQ.enq(True);
+            //objIdFullFlushQ.enq(True);
+            noAction;
 
         end
         else begin
@@ -1632,9 +1633,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         return newData;
     endfunction
 
-    (* descending_urgency =
-        "doObjIdFullFlush, doObjIdRespStForward"
-    *)
+    //(* descending_urgency =
+    //    "doObjIdFullFlush, doObjIdRespStForward"
+    //*)
     rule doObjIdRespStForward;
 
         let {
@@ -2368,9 +2369,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doAssert(!isValid(lsqDeqSt.fault), "no fault");
     endrule
 
-    (* descending_urgency =
-        "setObjIdBufMayContainMode3, doObjIdFullFlush"
-    *)
+    //(* descending_urgency =
+    //    "setObjIdBufMayContainMode3, doObjIdFullFlush"
+    //*)
     rule setObjIdBufMayContainMode3(
         objIdMode3Seen
     );
@@ -2487,7 +2488,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
 
     endrule
-
+    /*
     rule doObjIdFullFlush;
 
         objIdFullFlushQ.deq;
@@ -2500,7 +2501,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdInvalidateWordIdx <= 0;
         objIdBufMayContainMode3 <= False;
     endrule
-
+    */
 
     // send req to D$
     rule sendLdObjSealRdToMem;
