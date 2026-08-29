@@ -1599,7 +1599,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
              * Conservatively flush everything.
              */
             //objIdFullFlushQ.enq(True);
-            noAction;
+            objIdPAddrBuf.update(
+                key,
+                Valid(u.vWord)
+            );
 
         end
         else begin
