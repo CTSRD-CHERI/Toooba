@@ -169,6 +169,7 @@ module mkLLBank#(
     Alias#(ramDataT, RamData#(tagT, Msi, dirT, cacheOwnerT, void, Line)),
     Alias#(cRqFromCT, CRqMsg#(cRqIdT, childT)),
     Alias#(cRsFromCT, CRsMsg#(childT)),
+    Alias#(cRsAccessFromCT, CRsAccessMsg#(childT)),
     Alias#(pRqRsToCT, PRqRsMsg#(cRqIdT, childT)),
     Alias#(dmaRqT, DmaRq#(dmaRqIdT)),
     Alias#(dmaRsT, DmaRs#(dmaRqIdT)),
@@ -199,6 +200,7 @@ module mkLLBank#(
 
     Fifo#(2, cRqFromCT) rqFromCQ <- mkCFFifo;
     Fifo#(2, cRsFromCT) rsFromCQ <- mkCFFifo;
+    Fifo#(2, cRsAccessFromCT) rsAccessFromCQ <- mkCFFifo;
     Fifo#(2, pRqRsToCT) toCQ <- mkCFFifo;
 
     Fifo#(2, dmaRqT) rqFromDmaQ <- mkCFFifo;
@@ -569,6 +571,51 @@ endfunction
         end
     endrule
 `endif
+
+    // Assemble access-width child-response flits at the LL boundary. This is
+    // the compatibility point that will be replaced by direct LLPipe bank
+    // writes once metadata-only pipeline commit is available.
+    Vector#(childNum, Reg#(Line)) cRsPartial <- replicateM(mkReg(unpack(0)));
+    Vector#(childNum, Reg#(CLineAccessSel)) cRsExpectedAccess <- replicateM(mkReg(0));
+    Vector#(childNum, Reg#(Maybe#(Tuple2#(Addr, Msi)))) cRsMetadata <- replicateM(mkReg(Invalid));
+    rule assembleCRsAccess;
+        let r = rsAccessFromCQ.first;
+        doAssert(r.access == cRsExpectedAccess[r.child], "child response access arrived out of order");
+        if (cRsMetadata[r.child] matches tagged Valid .metadata) begin
+            doAssert(r.addr == tpl_1(metadata) && r.toState == tpl_2(metadata),
+                     "child response metadata changed within a burst");
+        end
+        else if (!r.last) begin
+            cRsMetadata[r.child] <= Valid(tuple2(r.addr, r.toState));
+        end
+        rsAccessFromCQ.deq;
+        Line newLine = cRsPartial[r.child];
+        Maybe#(Line) responseData = Invalid;
+        if (r.data matches tagged Valid .accessData) begin
+            let accesses = clineToAccessVector(newLine);
+            accesses[r.access] = accessData;
+            newLine = accessVectorToCline(accesses);
+            responseData = Valid(newLine);
+        end
+        if (r.last) begin
+            doAssert(!isValid(r.data) || r.access == fromInteger(valueOf(CLineNumAccesses) - 1),
+                     "data-bearing child response ended before the final access");
+            rsFromCQ.enq(CRsMsg {
+                addr: r.addr,
+                toState: r.toState,
+                data: responseData,
+                child: r.child
+            });
+            cRsPartial[r.child] <= unpack(0);
+            cRsExpectedAccess[r.child] <= 0;
+            cRsMetadata[r.child] <= Invalid;
+        end
+        else begin
+            doAssert(isValid(r.data), "non-final child response flit must carry data");
+            cRsPartial[r.child] <= newLine;
+            cRsExpectedAccess[r.child] <= cRsExpectedAccess[r.child] + 1;
+        end
+    endrule
 
     // send downgrade resp from child to pipeline
     rule cRsTransfer;
@@ -1620,6 +1667,7 @@ endfunction
     interface ParentCacheToChild to_child;
         interface rqFromC = toFifoEnq(rqFromCQ);
         interface rsFromC = toFifoEnq(rsFromCQ);
+        interface rsAccessFromC = toFifoEnq(rsAccessFromCQ);
         interface toC = toFifoDeq(toCQ);
     endinterface
 

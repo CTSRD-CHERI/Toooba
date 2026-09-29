@@ -35,14 +35,6 @@ import Fifos::*;
 
 // Access-width transport flits. Metadata is repeated on each data flit so the
 // link remains independently routable and can later support interleaving.
-typedef struct {
-    Addr addr;
-    Msi toState;
-    Maybe#(CLineAccess) data;
-    CLineAccessSel access;
-    Bool last;
-    LLChild child;
-} CRsAccessMsg deriving(Bits, Eq, FShow);
 
 typedef struct {
     Addr addr;
@@ -77,7 +69,7 @@ module mkL1LLConnect#(
     mkXBar(getCRqDst, map(cRqGet, l1), vec(toPut(llc.rqFromC)));
 
     // Serialize child responses into access-width flits before arbitration.
-    Vector#(L1Num, Fifo#(1, CRsAccessMsg)) cRsAccessQ <- replicateM(mkBypassFifo);
+    Vector#(L1Num, Fifo#(1, CRsAccessMsg#(LLChild))) cRsAccessQ <- replicateM(mkBypassFifo);
     Vector#(L1Num, Reg#(CLineAccessSel)) cRsAccess <- replicateM(mkReg(0));
     for(Integer i = 0; i < valueof(L1Num); i = i+1) begin
         rule serializeCRs;
@@ -107,37 +99,16 @@ module mkL1LLConnect#(
         endrule
     end
 
-    Fifo#(2, CRsAccessMsg) cRsLinkQ <- mkCFFifo;
-    function XBarDstInfo#(Bit#(0), CRsAccessMsg) getCRsAccessDst(LLChild child, CRsAccessMsg r);
+    Fifo#(2, CRsAccessMsg#(LLChild)) cRsLinkQ <- mkCFFifo;
+    function XBarDstInfo#(Bit#(0), CRsAccessMsg#(LLChild)) getCRsAccessDst(LLChild child, CRsAccessMsg#(LLChild) r);
         return XBarDstInfo {idx: 0, data: r};
     endfunction
-    function Get#(CRsAccessMsg) cRsAccessGet(Fifo#(1, CRsAccessMsg) f) = toGet(f);
+    function Get#(CRsAccessMsg#(LLChild)) cRsAccessGet(Fifo#(1, CRsAccessMsg#(LLChild)) f) = toGet(f);
     mkXBar(getCRsAccessDst, map(cRsAccessGet, cRsAccessQ), vec(toPut(cRsLinkQ)));
 
-    Vector#(L1Num, Reg#(Line)) cRsPartial <- replicateM(mkReg(unpack(0)));
-    rule assembleCRs;
-        let r = cRsLinkQ.first;
+    rule forwardCRsAccess;
+        llc.rsAccessFromC.enq(cRsLinkQ.first);
         cRsLinkQ.deq;
-        Line newLine = cRsPartial[r.child];
-        Maybe#(Line) responseData = Invalid;
-        if (r.data matches tagged Valid .accessData) begin
-            let accesses = clineToAccessVector(newLine);
-            accesses[r.access] = accessData;
-            newLine = accessVectorToCline(accesses);
-            responseData = Valid(newLine);
-        end
-        if (r.last) begin
-            llc.rsFromC.enq(CRsMsg {
-                addr: r.addr,
-                toState: r.toState,
-                data: responseData,
-                child: r.child
-            });
-            cRsPartial[r.child] <= unpack(0);
-        end
-        else begin
-            cRsPartial[r.child] <= newLine;
-        end
     endrule
 
     // Serialize parent responses onto the access-width return link.

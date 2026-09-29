@@ -267,6 +267,15 @@ typedef struct {
 typedef struct {
     Addr addr;
     Msi toState;
+    Maybe#(CLineAccess) data;
+    CLineAccessSel access;
+    Bool last;
+    childT child;
+} CRsAccessMsg#(type childT) deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Addr addr;
+    Msi toState;
     childT child; // to which child
 } PRqMsg#(type childT) deriving(Bits, Eq, FShow);
 
@@ -291,6 +300,7 @@ endinterface
 
 interface ParentCacheToChild#(type cRqIdT, type childT);
     interface FifoEnq#(CRsMsg#(childT)) rsFromC;
+    interface FifoEnq#(CRsAccessMsg#(childT)) rsAccessFromC;
     interface FifoEnq#(CRqMsg#(cRqIdT, childT)) rqFromC;
     interface FifoDeq#(PRqRsMsg#(cRqIdT, childT)) toC;
 endinterface
