@@ -46,6 +46,7 @@ import CCTypes     :: *;
 import AXI4 :: *;
 import SourceSink :: *;
 import Fabric_Defs  :: *;
+import Memory_Config :: *;
 import SoC_Map      :: *;
 
 import VnD :: *;
@@ -73,8 +74,11 @@ typedef struct {
 
 typedef 16 OutstandingWrites;
 typedef 16 WriteAddressHashW;
+typedef TDiv#(AccessWidth, 8) AccessBytes;
+typedef TDiv#(CLineDataNumBytes, AccessBytes) AccessesPerCLine;
 
 Bit#(LogCLineNumMemDataBytes) zeroOffset = 0;
+AXI4_Size axiAccessSize = unpack(fromInteger(valueOf(TLog#(AccessBytes))));
 
 module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
                           (LLC_AXI4_Adapter_IFC)
@@ -82,7 +86,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
             Bits#(childT, childSz),
             FShow#(ToMemMsg#(idT, childT)),
             FShow#(MemRsMsg#(idT, childT)),
-            //Add#(SizeOf#(Line), 0, TAdd#(512, 4)), // assert Line sz = 512 + 4 tags
+
             Add#(a__, SizeOf#(LLC_AXI_ID#(idT, childT)), Wd_MId) // LLC_AXI_ID must fit into the external ID.
            );
 
@@ -109,8 +113,8 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          Bit#(Wd_MId) arid = zeroExtend(pack(id));
          let mem_req_rd_addr = AXI4_ARFlit {arid:     arid,
                                             araddr:   addr,
-                                            arlen:    (fromInteger(valueOf(CLineDataNumBytes))/64)-1, // burst len = arlen+1
-                                            arsize:   id.tag_req ? 1 : 64,
+                                            arlen:    fromInteger(valueOf(AccessesPerCLine) - 1),
+                                            arsize:   id.tag_req ? 1 : axiAccessSize,
                                             arburst:  INCR,
                                             arlock:   fabric_default_lock,
                                             arcache:  fabric_default_arcache,
@@ -131,7 +135,8 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
    // ================================================================
    // Handle read requests and responses
 
-   // Each beat handles 512-bits; e.g. 512b cache line takes 1 beat.  Counter >3 to allow larger than 512b.
+   // Assemble one cache line from access-width AXI beats. The counter is
+   // deliberately wider than required to allow larger future configurations.
    Reg #(Bit #(6)) rg_rd_rsp_beat <- mkReg (0);
 
    FIFOF #(LdMemRq #(idT, childT)) f_pending_reads <- mkFIFOF;
@@ -164,10 +169,10 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          $finish (1);
       end
 
-      // Shift next 64 bits from fabric into the cache line being assembled
+      // Shift the next AXI beat into the cache line being assembled.
       let new_cline_tag = { mem_rsp.ruser, truncateLSB(pack(rg_cline.tag)) };
       let new_cline_data = { mem_rsp.rdata, truncateLSB(pack(rg_cline.data)) };
-      let new_cline = CLine { tag: rg_rd_rsp_beat[0] == 0 ? unpack(new_cline_tag) : rg_cline.tag
+      let new_cline = CLine { tag: unpack(new_cline_tag)
                             , data: unpack(new_cline_data) };
       //let new_cline = shiftOutFrom0(mem_rsp.rdata, rg_cline, 1);
 
@@ -193,7 +198,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
    // ================================================================
    // Handle write requests and responses
 
-   // Each beat handles 512-bits; e.g. 512b cache line takes 1 beat.
+   // Select successive access-width slices from a cache line.
    Reg #(Bit #(6)) rg_wr_req_beat <- mkReg (0);
    Reg#(Bit#(Wd_MId)) wid_reg <- mkRegU;
    Addr wAddr = ?;
@@ -218,8 +223,8 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          masterPortShim.slave.aw.put (AXI4_AWFlit {
            awid:     wid_reg,
            awaddr:   wAddr,
-           awlen:    (fromInteger(valueOf(CLineDataNumBytes)/64))-1, // burst len = awlen+1
-           awsize:   64,
+           awlen:    fromInteger(valueOf(AccessesPerCLine) - 1),
+           awsize:   axiAccessSize,
            awburst:  INCR,
            awlock:   fabric_default_lock,
            awcache:  fabric_default_awcache,
@@ -235,7 +240,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
 
       // on last flit...
       // ===============
-      if (rg_wr_req_beat == (fromInteger(valueOf(CLineDataNumBytes)/64))-1) begin
+      if (rg_wr_req_beat == fromInteger(valueOf(AccessesPerCLine) - 1)) begin
          llc.toM.deq;
          rg_wr_req_beat <= 0;
       end else // increment flit counter
@@ -243,22 +248,15 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
 
       // on each flit ...
       // ================
-      Vector #(TDiv#(CLineDataNumBytes,64), Bit #(64)) line_strb = unpack(pack(wb.byteEn));
-      Vector #(CLineNumMemTaggedData, MemTaggedData) line_data = clineToMemTaggedDataVector(wb.data);
+      Vector #(AccessesPerCLine, Bit #(AccessBytes)) line_strb = unpack(pack(wb.byteEn));
+      Vector #(AccessesPerCLine, Bit #(AccessWidth)) line_data = unpack(pack(wb.data.data));
+      Vector #(AccessesPerCLine, Bit #(Wd_W_User)) line_tags = unpack(pack(wb.data.tag));
       // send AXI4 W flit
       masterPortShim.slave.w.put(AXI4_WFlit {
-        wdata:  {pack(line_data[{rg_wr_req_beat,2'd3}].data),
-                 pack(line_data[{rg_wr_req_beat,2'd2}].data),
-                 pack(line_data[{rg_wr_req_beat,2'd1}].data),
-                 pack(line_data[{rg_wr_req_beat,2'd0}].data)
-                },
+        wdata:  line_data[rg_wr_req_beat],
         wstrb:  line_strb[rg_wr_req_beat],
-        wlast:  rg_wr_req_beat == (fromInteger(valueOf(CLineDataNumBytes)/64))-1,
-        wuser:  {pack(line_data[{rg_wr_req_beat,2'd3}].tag),
-                 pack(line_data[{rg_wr_req_beat,2'd2}].tag),
-                 pack(line_data[{rg_wr_req_beat,2'd1}].tag),
-                 pack(line_data[{rg_wr_req_beat,2'd0}].tag)
-                }
+        wlast:  rg_wr_req_beat == fromInteger(valueOf(AccessesPerCLine) - 1),
+        wuser:  line_tags[rg_wr_req_beat]
       });
    endrule
 

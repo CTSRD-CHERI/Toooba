@@ -31,6 +31,7 @@ package Fabric_Defs;
 
 import AXI4 :: *;
 import ISA_Decls_CHERI :: *;
+import Memory_Config :: *;
 
 // ================================================================
 // Core local Fabric parameters
@@ -61,13 +62,13 @@ typedef  TDiv #(Wd_Addr, 8)  Bytes_per_Fabric_Addr;
 Integer  bytes_per_fabric_addr = valueOf (Bytes_per_Fabric_Addr);
 
 // ----------------
-// Widths of the main bus data are 128 bits. Peripherals each have a shim
-// converting this down to 64 bits (and stripping tags).
+// Width of each cached-memory access. Peripherals have a shim converting this
+// down to Wd_Data_Periph bits (and stripping tags).
 // (caches <==> Bus <==> (tag controller) <==> main memory
 //               |
 //             Periph
 
-typedef 512  Wd_Data;
+typedef AccessWidth Wd_Data;
 
 // ----------------
 // Width of fabric 'user' datapaths. Carry capability tags on data lines.

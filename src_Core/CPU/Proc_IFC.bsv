@@ -80,8 +80,8 @@ interface Proc_IFC;
 
    // Fabric master interface for IO (from MMIOPlatform)
    interface AXI4_Master #( Wd_CoreW_Bus_MId, Wd_Addr, Wd_Data_Periph
-                          , Wd_AW_User, Wd_W_User, Wd_B_User
-                          , Wd_AR_User, Wd_R_User) master1;
+                          , Wd_AW_User_Periph, Wd_W_User_Periph, Wd_B_User_Periph
+                          , Wd_AR_User_Periph, Wd_R_User_Periph) master1;
 
    // ----------------
    // External interrupts

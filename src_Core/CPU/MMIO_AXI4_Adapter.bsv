@@ -67,8 +67,8 @@ interface MMIO_AXI4_Adapter_IFC;
 
    // Fabric master interface for IO
    interface AXI4_Master #( Wd_CoreW_Bus_MId, Wd_Addr, Wd_Data_Periph
-                          , Wd_AW_User, Wd_W_User, Wd_B_User
-                          , Wd_AR_User, Wd_R_User) mmio_master;
+                          , Wd_AW_User_Periph, Wd_W_User_Periph, Wd_B_User_Periph
+                          , Wd_AR_User_Periph, Wd_R_User_Periph) mmio_master;
 endinterface
 
 // ================================================================
@@ -137,7 +137,7 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
                                             arprot:   fabric_default_prot,
                                             arqos:    fabric_default_qos,
                                             arregion: fabric_default_region,
-                                            aruser:   fabric_default_aruser};
+                                            aruser:   fabric_default_aruser_periph};
 
          master_shim.slave.ar.put(mem_req_rd_addr);
          read_req_addr <= req.addr;
@@ -220,7 +220,7 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
          // on first flit...
          // ================
          if (first) begin
-            AXI4_AWFlit #(Wd_CoreW_Bus_MId, Wd_Addr, Wd_AW_User)
+            AXI4_AWFlit #(Wd_CoreW_Bus_MId, Wd_Addr, Wd_AW_User_Periph)
                 mem_req_wr_addr = AXI4_AWFlit {awid:     fabric_corew_bus_default_mid,
                                                awaddr:   req.addr,
                                                awlen:    (burst) ? 1:0,           // burst len = awlen+1
@@ -251,7 +251,7 @@ module mkMMIO_AXI4_Adapter (MMIO_AXI4_Adapter_IFC);
 
         // on each flit...
         // ===============
-        AXI4_WFlit #(Wd_Data_Periph, Wd_W_User)
+        AXI4_WFlit #(Wd_Data_Periph, Wd_W_User_Periph)
             wflit = AXI4_WFlit {wdata:  req.data.data[whichHalf],
                                 wstrb:  line_strb[whichHalf],
                                 wlast:  last,
