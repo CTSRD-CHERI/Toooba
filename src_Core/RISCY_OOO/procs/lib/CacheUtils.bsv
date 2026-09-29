@@ -50,6 +50,7 @@ import FIFOF::*;
 import Performance::*;
 import FShow::*;
 import MsgFifo::*;
+import Memory_Config::*;
 
 // 128B cache line
 typedef 8 CLineNumMemTaggedData;
@@ -102,6 +103,32 @@ endfunction
 typedef TMul#(CLineNumMemTaggedData, MemDataSz) CLineDataSz;
 typedef TDiv#(CLineDataSz, 8) CLineDataNumBytes;
 typedef TLog#(CLineDataNumBytes) LogCLineDataNumBytes;
+
+// Cache-line representation at the configured cached-memory access width.
+typedef TDiv#(AccessWidth, MemDataSz) CLineMemDataPerAccess;
+typedef TDiv#(CLineDataSz, AccessWidth) CLineNumAccesses;
+typedef Bit#(TMax#(TLog#(CLineNumAccesses), 1)) CLineAccessSel;
+typedef struct {
+  Vector#(CLineMemDataPerAccess, MemTag) tag;
+  Bit#(AccessWidth) data;
+} CLineAccess deriving (Bits, Eq, FShow);
+
+function Vector#(CLineNumAccesses, CLineAccess) clineToAccessVector(CLine line);
+  Vector#(CLineNumAccesses, Bit#(AccessWidth)) data = unpack(pack(line.data));
+  Vector#(CLineNumAccesses, Vector#(CLineMemDataPerAccess, MemTag)) tags = unpack(pack(line.tag));
+  Vector#(CLineNumAccesses, CLineAccess) accesses = newVector;
+  for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1)
+    accesses[i] = CLineAccess {tag: tags[i], data: data[i]};
+  return accesses;
+endfunction
+
+function CLine accessVectorToCline(Vector#(CLineNumAccesses, CLineAccess) accesses);
+  function Bit#(AccessWidth) getAccessData(CLineAccess access) = access.data;
+  function Vector#(CLineMemDataPerAccess, MemTag) getAccessTags(CLineAccess access) = access.tag;
+  Vector#(CLineNumAccesses, Bit#(AccessWidth)) data = map(getAccessData, accesses);
+  Vector#(CLineNumAccesses, Vector#(CLineMemDataPerAccess, MemTag)) tags = map(getAccessTags, accesses);
+  return CLine {tag: unpack(pack(tags)), data: unpack(pack(data))};
+endfunction
 
 typedef TMul#(CLineNumMemTaggedData, MemDataSz) CLineMemDataSz;
 typedef TMul#(CLineNumMemTaggedData, MemDataBytes) CLineNumMemDataBytes;

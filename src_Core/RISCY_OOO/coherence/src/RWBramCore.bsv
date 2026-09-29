@@ -36,6 +36,10 @@
 
 import BRAMCore::*;
 import Fifos::*;
+import Vector::*;
+import Types::*;
+import CacheUtils::*;
+import Memory_Config::*;
 
 interface RWBramCore#(type addrT, type dataT);
     method Action wrReq(addrT a, dataT d);
@@ -115,6 +119,7 @@ module mkRWBramCoreForwarded(RWBramCore#(addrT, dataT)) provisos(
     // BRAMCore should not change output if no req is made
     Fifo#(1, void) rdReqQ <- mkPipelineFifo;
     Reg#(addrT) readAddr[2] <- mkCReg(2,?);
+    Reg#(Bool) currentWriteValid <- mkReg(False);
     Reg#(addrT) currentWriteAddr <- mkRegU;
     Reg#(dataT) currentWriteData <- mkRegU;
 
@@ -124,7 +129,8 @@ module mkRWBramCoreForwarded(RWBramCore#(addrT, dataT)) provisos(
 
     method Action wrReq(addrT a, dataT d);
         wrPort.put(True, a, d);
-        currentWriteAddr <= a; //Forward data, if read happens on same cycle
+        currentWriteValid <= True;
+        currentWriteAddr <= a; // Forward data if a read happens on the same cycle.
         currentWriteData <= d;
     endmethod
 
@@ -134,13 +140,101 @@ module mkRWBramCoreForwarded(RWBramCore#(addrT, dataT)) provisos(
     endmethod
 
     method dataT rdResp if(rdReqQ.notEmpty);
-        return (readAddr[0] == currentWriteAddr) ? currentWriteData : rdPort.read;
+        return (currentWriteValid && readAddr[0] == currentWriteAddr) ? currentWriteData : rdPort.read;
     endmethod
 
     method rdRespValid = rdReqQ.notEmpty;
 
     method Action deqRdResp;
         rdReqQ.deq;
+    endmethod
+endmodule
+
+// Line-wide compatibility interface backed by parallel AccessWidth-wide data
+// memories and separate capability-tag memories.
+module mkRWBramCoreLine(RWBramCore#(addrT, CLine)) provisos(
+    Bits#(addrT, addrSz), Eq#(addrT)
+);
+    Vector#(CLineNumAccesses, RWBramCore#(addrT, Bit#(AccessWidth))) dataRam <- replicateM(mkRWBramCore);
+    Vector#(CLineNumAccesses, RWBramCore#(addrT, Vector#(CLineMemDataPerAccess, MemTag))) tagRam <- replicateM(mkRWBramCore);
+
+    method Action wrReq(addrT a, CLine line);
+        let accesses = clineToAccessVector(line);
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1) begin
+            dataRam[i].wrReq(a, accesses[i].data);
+            tagRam[i].wrReq(a, accesses[i].tag);
+        end
+    endmethod
+
+    method Action rdReq(addrT a);
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1) begin
+            dataRam[i].rdReq(a);
+            tagRam[i].rdReq(a);
+        end
+    endmethod
+
+    method CLine rdResp;
+        Vector#(CLineNumAccesses, CLineAccess) accesses = newVector;
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1)
+            accesses[i] = CLineAccess {data: dataRam[i].rdResp, tag: tagRam[i].rdResp};
+        return accessVectorToCline(accesses);
+    endmethod
+
+    method Bool rdRespValid;
+        Bool valid = True;
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1)
+            valid = valid && dataRam[i].rdRespValid && tagRam[i].rdRespValid;
+        return valid;
+    endmethod
+
+    method Action deqRdResp;
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1) begin
+            dataRam[i].deqRdResp;
+            tagRam[i].deqRdResp;
+        end
+    endmethod
+endmodule
+
+module mkRWBramCoreLineForwarded(RWBramCore#(addrT, CLine)) provisos(
+    Bits#(addrT, addrSz), Eq#(addrT)
+);
+    Vector#(CLineNumAccesses, RWBramCore#(addrT, Bit#(AccessWidth))) dataRam <- replicateM(mkRWBramCoreForwarded);
+    Vector#(CLineNumAccesses, RWBramCore#(addrT, Vector#(CLineMemDataPerAccess, MemTag))) tagRam <- replicateM(mkRWBramCoreForwarded);
+
+    method Action wrReq(addrT a, CLine line);
+        let accesses = clineToAccessVector(line);
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1) begin
+            dataRam[i].wrReq(a, accesses[i].data);
+            tagRam[i].wrReq(a, accesses[i].tag);
+        end
+    endmethod
+
+    method Action rdReq(addrT a);
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1) begin
+            dataRam[i].rdReq(a);
+            tagRam[i].rdReq(a);
+        end
+    endmethod
+
+    method CLine rdResp;
+        Vector#(CLineNumAccesses, CLineAccess) accesses = newVector;
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1)
+            accesses[i] = CLineAccess {data: dataRam[i].rdResp, tag: tagRam[i].rdResp};
+        return accessVectorToCline(accesses);
+    endmethod
+
+    method Bool rdRespValid;
+        Bool valid = True;
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1)
+            valid = valid && dataRam[i].rdRespValid && tagRam[i].rdRespValid;
+        return valid;
+    endmethod
+
+    method Action deqRdResp;
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1) begin
+            dataRam[i].deqRdResp;
+            tagRam[i].deqRdResp;
+        end
     endmethod
 endmodule
 

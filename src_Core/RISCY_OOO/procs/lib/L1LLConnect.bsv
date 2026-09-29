@@ -25,11 +25,34 @@ import Connectable::*;
 import Vector::*;
 import BuildVector::*;
 import GetPut::*;
+import Types::*;
 import CacheUtils::*;
 import CCTypes::*;
 import L1CoCache::*;
 import LLCache::*;
 import CrossBar::*;
+import Fifos::*;
+
+// Access-width transport flits. Metadata is repeated on each data flit so the
+// link remains independently routable and can later support interleaving.
+typedef struct {
+    Addr addr;
+    Msi toState;
+    Maybe#(CLineAccess) data;
+    CLineAccessSel access;
+    Bool last;
+    LLChild child;
+} CRsAccessMsg deriving(Bits, Eq, FShow);
+
+typedef struct {
+    Addr addr;
+    Msi toState;
+    Maybe#(CLineAccess) data;
+    CLineAccessSel access;
+    Bool last;
+    LLChild child;
+    L1Way id;
+} PRsAccessMsg deriving(Bits, Eq, FShow);
 
 module mkL1LLConnect#(
     ParentCacheToChild#(L1Way, LLChild) llc,
@@ -53,24 +76,105 @@ module mkL1LLConnect#(
     function Get#(CRqMsg#(L1Way, void)) cRqGet(ChildCacheToParent#(L1Way, void) ifc) = toGet(ifc.rqToP);
     mkXBar(getCRqDst, map(cRqGet, l1), vec(toPut(llc.rqFromC)));
 
-    // connect cRs
-    function XBarDstInfo#(Bit#(0), CRsMsg#(LLChild)) getCRsDst(LLChild child, CRsMsg#(void) r);
-        return XBarDstInfo {
-            idx: 0,
-            data: CRsMsg {
+    // Serialize child responses into access-width flits before arbitration.
+    Vector#(L1Num, Fifo#(1, CRsAccessMsg)) cRsAccessQ <- replicateM(mkBypassFifo);
+    Vector#(L1Num, Reg#(CLineAccessSel)) cRsAccess <- replicateM(mkReg(0));
+    for(Integer i = 0; i < valueof(L1Num); i = i+1) begin
+        rule serializeCRs;
+            let r = l1[i].rsToP.first;
+            Bool hasData = isValid(r.data);
+            Bool last = !hasData || cRsAccess[i] == fromInteger(valueOf(CLineNumAccesses) - 1);
+            Maybe#(CLineAccess) accessData = Invalid;
+            if (hasData) begin
+                let accesses = clineToAccessVector(validValue(r.data));
+                accessData = Valid(accesses[cRsAccess[i]]);
+            end
+            cRsAccessQ[i].enq(CRsAccessMsg {
                 addr: r.addr,
                 toState: r.toState,
-                data: r.data,
-                child: child 
-            }
-        };
-    endfunction
-    function Get#(CRsMsg#(void)) cRsGet(ChildCacheToParent#(L1Way, void) ifc) = toGet(ifc.rsToP);
-    mkXBar(getCRsDst, map(cRsGet, l1), vec(toPut(llc.rsFromC)));
+                data: accessData,
+                access: cRsAccess[i],
+                last: last,
+                child: fromInteger(i)
+            });
+            if (last) begin
+                l1[i].rsToP.deq;
+                cRsAccess[i] <= 0;
+            end
+            else begin
+                cRsAccess[i] <= cRsAccess[i] + 1;
+            end
+        endrule
+    end
 
-    // connect pRq/pRs
+    Fifo#(2, CRsAccessMsg) cRsLinkQ <- mkCFFifo;
+    function XBarDstInfo#(Bit#(0), CRsAccessMsg) getCRsAccessDst(LLChild child, CRsAccessMsg r);
+        return XBarDstInfo {idx: 0, data: r};
+    endfunction
+    function Get#(CRsAccessMsg) cRsAccessGet(Fifo#(1, CRsAccessMsg) f) = toGet(f);
+    mkXBar(getCRsAccessDst, map(cRsAccessGet, cRsAccessQ), vec(toPut(cRsLinkQ)));
+
+    Vector#(L1Num, Reg#(Line)) cRsPartial <- replicateM(mkReg(unpack(0)));
+    rule assembleCRs;
+        let r = cRsLinkQ.first;
+        cRsLinkQ.deq;
+        Line newLine = cRsPartial[r.child];
+        Maybe#(Line) responseData = Invalid;
+        if (r.data matches tagged Valid .accessData) begin
+            let accesses = clineToAccessVector(newLine);
+            accesses[r.access] = accessData;
+            newLine = accessVectorToCline(accesses);
+            responseData = Valid(newLine);
+        end
+        if (r.last) begin
+            llc.rsFromC.enq(CRsMsg {
+                addr: r.addr,
+                toState: r.toState,
+                data: responseData,
+                child: r.child
+            });
+            cRsPartial[r.child] <= unpack(0);
+        end
+        else begin
+            cRsPartial[r.child] <= newLine;
+        end
+    endrule
+
+    // Serialize parent responses onto the access-width return link.
+    Fifo#(2, PRsAccessMsg) pRsLinkQ <- mkCFFifo;
+    Reg#(CLineAccessSel) pRsAccess <- mkReg(0);
+    rule serializePRs(llc.toC.first matches tagged PRs .rs);
+        Bool hasData = isValid(rs.data);
+        Bool last = !hasData || pRsAccess == fromInteger(valueOf(CLineNumAccesses) - 1);
+        Maybe#(CLineAccess) accessData = Invalid;
+        if (hasData) begin
+            let accesses = clineToAccessVector(validValue(rs.data));
+            accessData = Valid(accesses[pRsAccess]);
+        end
+        pRsLinkQ.enq(PRsAccessMsg {
+            addr: rs.addr,
+            toState: rs.toState,
+            data: accessData,
+            access: pRsAccess,
+            last: last,
+            child: rs.child,
+            id: rs.id
+        });
+        if (last) begin
+            llc.toC.deq;
+            pRsAccess <= 0;
+        end
+        else begin
+            pRsAccess <= pRsAccess + 1;
+        end
+    endrule
+
+    Vector#(L1Num, Reg#(Line)) pRsPartial <- replicateM(mkReg(unpack(0)));
     for(Integer i = 0; i < valueof(L1Num); i = i+1) begin
-        rule sendPRq(llc.toC.first matches tagged PRq .rq &&& rq.child == fromInteger(i));
+        rule sendPRq(llc.toC.first matches tagged PRq .rq
+                     &&& rq.child == fromInteger(i)
+                     &&& !pRsLinkQ.notEmpty
+                     &&& pRsAccess == 0);
             llc.toC.deq;
             l1[i].fromP.enq(PRq (PRqMsg {
                 addr: rq.addr,
@@ -78,15 +182,31 @@ module mkL1LLConnect#(
                 child: ?
             }));
         endrule
-        rule sendPRs(llc.toC.first matches tagged PRs .rs &&& rs.child == fromInteger(i));
-            llc.toC.deq;
-            l1[i].fromP.enq(PRs (PRsMsg {
-                addr: rs.addr,
-                toState: rs.toState,
-                child: ?,
-                data: rs.data,
-                id: rs.id
-            }));
+
+        rule assemblePRs(pRsLinkQ.first.child == fromInteger(i));
+            let r = pRsLinkQ.first;
+            pRsLinkQ.deq;
+            Line newLine = pRsPartial[i];
+            Maybe#(Line) responseData = Invalid;
+            if (r.data matches tagged Valid .accessData) begin
+                let accesses = clineToAccessVector(newLine);
+                accesses[r.access] = accessData;
+                newLine = accessVectorToCline(accesses);
+                responseData = Valid(newLine);
+            end
+            if (r.last) begin
+                l1[i].fromP.enq(PRs (PRsMsg {
+                    addr: r.addr,
+                    toState: r.toState,
+                    child: ?,
+                    data: responseData,
+                    id: r.id
+                }));
+                pRsPartial[i] <= unpack(0);
+            end
+            else begin
+                pRsPartial[i] <= newLine;
+            end
         endrule
     end
 endmodule

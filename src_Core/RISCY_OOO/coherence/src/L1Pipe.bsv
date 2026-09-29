@@ -190,7 +190,7 @@ module mkL1Pipe(
     // RAMs
     Vector#(wayNum, RWBramCore#(indexT, infoT)) infoRam <- replicateM(mkRWBramCoreForwarded);
     RWBramCore#(indexT, repT) repRam <- mkRandRepRam;
-    Vector#(wayNum, RWBramCore#(indexT, Line)) dataRam <- replicateM(mkRWBramCoreForwarded);
+    Vector#(wayNum, RWBramCore#(indexT, Line)) dataRam <- replicateM(mkRWBramCoreLineForwarded);
     RWBramCore#(indexT, setAuxT) queueRam <- mkRWBramCoreForwarded;
 
     // initialize RAM

@@ -164,7 +164,7 @@ module mkLLPipe(
     // RAMs
     Vector#(wayNum, RWBramCore#(indexT, infoT)) infoRam <- replicateM(mkRWBramCore);
     RWBramCore#(indexT, repT) repRam <- mkRandRepRam;
-    RWBramCore#(dataIndexT, Line) dataRam <- mkRWBramCore;
+    RWBramCore#(dataIndexT, Line) dataRam <- mkRWBramCoreLine;
     RWBramCore#(indexT, void) setAuxDataRam <- mkDummyBramCore;
 
     // initialize RAM
