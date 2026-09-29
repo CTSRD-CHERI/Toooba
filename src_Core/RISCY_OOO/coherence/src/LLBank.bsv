@@ -572,49 +572,21 @@ endfunction
     endrule
 `endif
 
-    // Assemble access-width child-response flits at the LL boundary. This is
-    // the compatibility point that will be replaced by direct LLPipe bank
-    // writes once metadata-only pipeline commit is available.
-    Vector#(childNum, Reg#(Line)) cRsPartial <- replicateM(mkReg(unpack(0)));
-    Vector#(childNum, Reg#(CLineAccessSel)) cRsExpectedAccess <- replicateM(mkReg(0));
-    Vector#(childNum, Reg#(Maybe#(Tuple2#(Addr, Msi)))) cRsMetadata <- replicateM(mkReg(Invalid));
-    rule assembleCRsAccess;
+    // Retain the first flit while LLPipe performs tag/directory lookup. Once
+    // the selected way is available, each flit is dequeued as its access bank
+    // is written. Metadata becomes visible only after the final flit commits.
+    Reg#(Bool) cRsAccessStarted <- mkReg(False);
+    rule startCRsAccess(!cRsAccessStarted);
+        pipeline.startCRsAccess(rsAccessFromCQ.first);
+        cRsAccessStarted <= True;
+    endrule
+
+    rule transferCRsAccess(cRsAccessStarted && pipeline.crsAccessReady);
         let r = rsAccessFromCQ.first;
-        doAssert(r.access == cRsExpectedAccess[r.child], "child response access arrived out of order");
-        if (cRsMetadata[r.child] matches tagged Valid .metadata) begin
-            doAssert(r.addr == tpl_1(metadata) && r.toState == tpl_2(metadata),
-                     "child response metadata changed within a burst");
-        end
-        else if (!r.last) begin
-            cRsMetadata[r.child] <= Valid(tuple2(r.addr, r.toState));
-        end
+        pipeline.putCRsAccess(r);
         rsAccessFromCQ.deq;
-        Line newLine = cRsPartial[r.child];
-        Maybe#(Line) responseData = Invalid;
-        if (r.data matches tagged Valid .accessData) begin
-            let accesses = clineToAccessVector(newLine);
-            accesses[r.access] = accessData;
-            newLine = accessVectorToCline(accesses);
-            responseData = Valid(newLine);
-        end
-        if (r.last) begin
-            doAssert(!isValid(r.data) || r.access == fromInteger(valueOf(CLineNumAccesses) - 1),
-                     "data-bearing child response ended before the final access");
-            rsFromCQ.enq(CRsMsg {
-                addr: r.addr,
-                toState: r.toState,
-                data: responseData,
-                child: r.child
-            });
-            cRsPartial[r.child] <= unpack(0);
-            cRsExpectedAccess[r.child] <= 0;
-            cRsMetadata[r.child] <= Invalid;
-        end
-        else begin
-            doAssert(isValid(r.data), "non-final child response flit must carry data");
-            cRsPartial[r.child] <= newLine;
-            cRsExpectedAccess[r.child] <= cRsExpectedAccess[r.child] + 1;
-        end
+        if (r.last)
+            cRsAccessStarted <= False;
     endrule
 
     // send downgrade resp from child to pipeline

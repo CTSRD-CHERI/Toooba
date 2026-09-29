@@ -97,6 +97,12 @@ interface CCPipe#(
         setAuxT setAuxData,
         Bool updateRep // update replacement info
     );
+    method Action deqWriteNoData(
+        Maybe#(pipeCmdT) newCmd,
+        RamData#(tagT, msiT, dirT, ownerT, otherT, lineT) wrRam,
+        setAuxT setAuxData,
+        Bool updateRep // update replacement info
+    );
     // empty signal when we need to flush self-invalidate cache
     method Bool emptyForFlush;
 endinterface
@@ -438,6 +444,41 @@ module mkCCPipe#(
         end
     endmethod
 
+    method Action deqWriteNoData(Maybe#(pipeCmdT) newCmd, ramDataT wrRam, setAuxT setAuxData, Bool updateRep) if(deq_guard);
+        match2OutT m2o = fromMaybe(?, mat2Out_out);
+        wayT way = m2o.way;
+        indexT index = getIndex(m2o.cmd);
+        repT repInfo = m2o.repInfo;
+        if(updateRep) begin
+            repInfo <- updateRepInfo(m2o.repInfo, way);
+        end
+        infoRam[way].wrReq(index, wrRam.info);
+        repRam.wrReq(index, repInfo);
+        setAuxDataRam.wrReq(index, setAuxData);
+        bypass.wset(BypassInfo {
+            index: index,
+            way: way,
+            ram: wrRam,
+            repInfo: repInfo,
+            setAuxData: setAuxData
+        });
+        if(newCmd matches tagged Valid .cmd) begin
+            mat2Out_out <= Valid (Match2Out {
+                cmd: cmd,
+                way: way,
+                pRqMiss: False,
+                info: wrRam.info,
+                repInfo: repInfo,
+                line: Valid (wrRam.line),
+                setAuxData: setAuxData
+            });
+        end
+        else begin
+            dataRam.deqRdResp;
+            mat2Out_out <= Invalid;
+        end
+    endmethod
+
     method Bool emptyForFlush;
         return !isValid(mat2Out[0]) && !isValid(enq2Mat[0]);
     endmethod
@@ -648,6 +689,33 @@ module mkCCPipeSingleCycle#(
         end
         else begin
             // reset pipeline reg
+            mat2Out_out <= Invalid;
+        end
+    endmethod
+
+    method Action deqWriteNoData(Maybe#(pipeCmdT) newCmd, ramDataT wrRam, setAuxT setAuxData, Bool updateRep) if(deq_guard);
+        match2OutT m2o = fromMaybe(?, mat2Out_out);
+        wayT way = m2o.way;
+        indexT index = getIndex(m2o.cmd);
+        repT repInfo = m2o.repInfo;
+        if(updateRep) begin
+            repInfo <- updateRepInfo(m2o.repInfo, way);
+        end
+        infoRam[way].wrReq(index, wrRam.info);
+        repRam.wrReq(index, repInfo);
+        setAuxDataRam.wrReq(index, setAuxData);
+        if(newCmd matches tagged Valid .cmd) begin
+            mat2Out_out <= Valid (Match2Out {
+                cmd: cmd,
+                way: way,
+                pRqMiss: False,
+                info: wrRam.info,
+                repInfo: repInfo,
+                line: Valid(wrRam.line),
+                setAuxData: setAuxData
+            });
+        end
+        else begin
             mat2Out_out <= Invalid;
         end
     endmethod

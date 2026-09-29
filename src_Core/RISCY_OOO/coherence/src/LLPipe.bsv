@@ -38,6 +38,7 @@ import Vector::*;
 import FShow::*;
 import Types::*;
 import CCTypes::*;
+import CacheUtils::*;
 import CCPipe::*;
 import RWBramCore::*;
 import RandomReplace::*;
@@ -90,6 +91,9 @@ interface LLPipe#(
     type cRqIdxT
 );
     method Action send(LLPipeIn#(Bit#(TLog#(childNum)), Bit#(TLog#(wayNum)), cRqIdxT) r);
+    method Action startCRsAccess(CRsAccessMsg#(Bit#(TLog#(childNum))) first);
+    method Bool crsAccessReady;
+    method Action putCRsAccess(CRsAccessMsg#(Bit#(TLog#(childNum))) flit);
     method Bool notEmpty;
     method PipeOut#(
         Bit#(TLog#(wayNum)),
@@ -164,7 +168,14 @@ module mkLLPipe(
     // RAMs
     Vector#(wayNum, RWBramCore#(indexT, infoT)) infoRam <- replicateM(mkRWBramCore);
     RWBramCore#(indexT, repT) repRam <- mkRandRepRam;
-    RWBramCore#(dataIndexT, Line) dataRam <- mkRWBramCoreLine;
+    RWBramCoreLineDirectWrite#(dataIndexT) dataRamDirect <- mkRWBramCoreLineDirectWrite;
+    RWBramCore#(dataIndexT, Line) dataRam = interface RWBramCore;
+        method wrReq = dataRamDirect.wrReq;
+        method rdReq = dataRamDirect.rdReq;
+        method rdResp = dataRamDirect.rdResp;
+        method rdRespValid = dataRamDirect.rdRespValid;
+        method deqRdResp = dataRamDirect.deqRdResp;
+    endinterface;
     RWBramCore#(indexT, void) setAuxDataRam <- mkDummyBramCore;
 
     // initialize RAM
@@ -192,6 +203,13 @@ module mkLLPipe(
     RandomReplace#(wayNum) randRep <- mkRandomReplace;
 
     // functions
+    function Bool isCRsCmd(pipeCmdT cmd);
+        return case (cmd) matches
+            tagged CRs .*: True;
+            default: False;
+        endcase;
+    endfunction
+
     function Addr getAddrFromCmd(pipeCmdT cmd);
         return (case(cmd) matches
             tagged CRq .r: r.addr;
@@ -329,9 +347,24 @@ module mkLLPipe(
         infoRam, repRam, dataRam, setAuxDataRam
     );
 
+    // State for a child response whose data is written one access at a time.
+    Reg#(Bool) crsActive <- mkReg(False);
+    Reg#(Bool) crsComplete <- mkReg(False);
+    Reg#(Bool) crsHasData <- mkReg(False);
+    Reg#(Addr) crsAddr <- mkReg(0);
+    Reg#(childT) crsChild <- mkReg(0);
+    Reg#(Msi) crsToState <- mkReg(I);
+    Reg#(CLineAccessSel) crsExpectedAccess <- mkReg(0);
+    Vector#(CLineNumAccesses, Reg#(CLineAccess)) crsLine <- replicateM(mkReg(unpack(0)));
+
+    function Line getCRsLine;
+        Vector#(CLineNumAccesses, CLineAccess) accesses = readVReg(crsLine);
+        return accessVectorToCline(accesses);
+    endfunction
+
     // get first output from CCPipe output
     function pipeOutT getFirst(PipeOut#(wayT, tagT, Msi, dirT, ownerT, otherT, repT, Line, void, pipeCmdT) pout);
-        return PipeOut {
+        let result = PipeOut {
             cmd: (case(pout.cmd) matches
                 tagged CRq .rq: LLCRq (rq.mshrIdx);
                 tagged CRs .rs: LLCRs (rs.child);
@@ -344,9 +377,12 @@ module mkLLPipe(
             repInfo: pout.repInfo,
             setAuxData: ?
         };
+        if (crsActive && crsComplete && crsHasData && isCRsCmd(pout.cmd))
+            result.ram.line = getCRsLine;
+        return result;
     endfunction
 
-    method Action send(pipeInT req);
+    method Action send(pipeInT req) if (!crsActive);
         case(req) matches
             tagged CRq .rq: begin
                 pipe.enq(CRq (rq), Invalid, Invalid);
@@ -366,8 +402,50 @@ module mkLLPipe(
         endcase
     endmethod
 
+    method Action startCRsAccess(CRsAccessMsg#(childT) first) if (!crsActive);
+        doAssert(first.access == 0, "streamed child response must start at access zero");
+        crsActive <= True;
+        crsComplete <= False;
+        crsHasData <= isValid(first.data);
+        crsAddr <= first.addr;
+        crsChild <= first.child;
+        crsToState <= first.toState;
+        crsExpectedAccess <= 0;
+        pipe.enq(CRs (LLPipeCRsCmd {addr: first.addr, child: first.child}),
+                 isValid(first.data) ? Valid(unpack(0)) : Invalid,
+                 DownDir(first.toState));
+    endmethod
+
+    method Bool crsAccessReady = crsActive && pipe.notEmpty && !crsComplete;
+
+    method Action putCRsAccess(CRsAccessMsg#(childT) flit)
+        if (crsActive && pipe.notEmpty && !crsComplete);
+        doAssert(flit.addr == crsAddr && flit.child == crsChild && flit.toState == crsToState,
+                 "streamed child response metadata changed within burst");
+        doAssert(flit.access == crsExpectedAccess,
+                 "streamed child response access arrived out of order");
+        doAssert(isValid(flit.data) == crsHasData,
+                 "streamed child response data validity changed within burst");
+        if (flit.data matches tagged Valid .accessData) begin
+            let pout = pipe.first;
+            dataRamDirect.wrAccess(getDataRamIndex(pout.way, getIndex(pout.cmd)), flit.access, accessData);
+            crsLine[flit.access] <= accessData;
+        end
+        if (flit.last) begin
+            doAssert(crsHasData
+                         ? flit.access == fromInteger(valueOf(CLineNumAccesses) - 1)
+                         : flit.access == 0,
+                     "streamed child response ended at an invalid access");
+            crsComplete <= True;
+        end
+        else begin
+            doAssert(crsHasData, "non-final streamed child response must carry data");
+            crsExpectedAccess <= crsExpectedAccess + 1;
+        end
+    endmethod
+
     // need to adapt pipeline output to real output format
-    method pipeOutT first;
+    method pipeOutT first if (pipe.notEmpty && (!crsActive || crsComplete));
         return getFirst(pipe.first); // guarded version
     endmethod
 
@@ -375,7 +453,7 @@ module mkLLPipe(
         return getFirst(pipe.unguard_first); // unguarded version
     endmethod
 
-    method notEmpty = pipe.notEmpty;
+    method notEmpty = pipe.notEmpty && (!crsActive || crsComplete);
 
     method Action deqWrite(Maybe#(cRqIdxT) swapRq, ramDataT wrRam, Bool updateRep);
         // get new cmd
@@ -384,7 +462,16 @@ module mkLLPipe(
         if(swapRq matches tagged Valid .idx) begin
             newCmd = Valid (CRq (LLPipeCRqIn {addr: addr, mshrIdx: idx}));
         end
-        // call pipe
-        pipe.deqWrite(newCmd, wrRam, ?, updateRep);
+        // Streamed CRs data has already been written bank-by-bank.
+        if (crsActive && isCRsCmd(pipe.first.cmd)) begin
+            pipe.deqWriteNoData(newCmd, wrRam, ?, updateRep);
+            crsActive <= False;
+            crsComplete <= False;
+            crsHasData <= False;
+            crsExpectedAccess <= 0;
+        end
+        else begin
+            pipe.deqWrite(newCmd, wrRam, ?, updateRep);
+        end
     endmethod
 endmodule
