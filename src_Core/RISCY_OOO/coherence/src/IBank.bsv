@@ -854,6 +854,7 @@ module mkIBank#(
         interface rsToP = toFifoDeq(rsToPQ);
         interface rqToP = toFifoDeq(rqToPQ);
         interface fromP = toFifoEnq(fromPQ);
+        interface rsAccessFromP = nullFifoEnq;
     endinterface
 
     interface InstServer to_proc;

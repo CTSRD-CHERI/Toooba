@@ -287,6 +287,16 @@ typedef struct {
     idT id; // slot id in cache
 } PRsMsg#(type idT, type childT) deriving(Bits, Eq, FShow);
 
+typedef struct {
+    Addr addr;
+    Msi toState;
+    Maybe#(CLineAccess) data;
+    CLineAccessSel access;
+    Bool last;
+    childT child;
+    idT id;
+} PRsAccessMsg#(type idT, type childT) deriving(Bits, Eq, FShow);
+
 typedef union tagged {
     PRqMsg#(childT) PRq;
     PRsMsg#(idT, childT) PRs;
@@ -296,6 +306,7 @@ interface ChildCacheToParent#(type cRqIdT, type childT);
     interface FifoDeq#(CRsMsg#(childT)) rsToP;
     interface FifoDeq#(CRqMsg#(cRqIdT, childT)) rqToP;
     interface FifoEnq#(PRqRsMsg#(cRqIdT, childT)) fromP;
+    interface FifoEnq#(PRsAccessMsg#(cRqIdT, childT)) rsAccessFromP;
 endinterface
 
 interface ParentCacheToChild#(type cRqIdT, type childT);

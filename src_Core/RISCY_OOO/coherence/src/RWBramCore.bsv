@@ -254,6 +254,54 @@ module mkRWBramCoreLineDirectWrite(RWBramCoreLineDirectWrite#(addrT)) provisos(
     endmethod
 endmodule
 
+module mkRWBramCoreLineDirectWriteForwarded(RWBramCoreLineDirectWrite#(addrT)) provisos(
+    Bits#(addrT, addrSz), Eq#(addrT)
+);
+    Vector#(CLineNumAccesses, RWBramCore#(addrT, Bit#(AccessWidth))) dataRam <- replicateM(mkRWBramCoreForwarded);
+    Vector#(CLineNumAccesses, RWBramCore#(addrT, Vector#(CLineMemDataPerAccess, MemTag))) tagRam <- replicateM(mkRWBramCoreForwarded);
+
+    method Action wrReq(addrT a, CLine line);
+        let accesses = clineToAccessVector(line);
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1) begin
+            dataRam[i].wrReq(a, accesses[i].data);
+            tagRam[i].wrReq(a, accesses[i].tag);
+        end
+    endmethod
+
+    method Action wrAccess(addrT a, CLineAccessSel access, CLineAccess data);
+        dataRam[access].wrReq(a, data.data);
+        tagRam[access].wrReq(a, data.tag);
+    endmethod
+
+    method Action rdReq(addrT a);
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1) begin
+            dataRam[i].rdReq(a);
+            tagRam[i].rdReq(a);
+        end
+    endmethod
+
+    method CLine rdResp;
+        Vector#(CLineNumAccesses, CLineAccess) accesses = newVector;
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1)
+            accesses[i] = CLineAccess {data: dataRam[i].rdResp, tag: tagRam[i].rdResp};
+        return accessVectorToCline(accesses);
+    endmethod
+
+    method Bool rdRespValid;
+        Bool valid = True;
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1)
+            valid = valid && dataRam[i].rdRespValid && tagRam[i].rdRespValid;
+        return valid;
+    endmethod
+
+    method Action deqRdResp;
+        for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1) begin
+            dataRam[i].deqRdResp;
+            tagRam[i].deqRdResp;
+        end
+    endmethod
+endmodule
+
 module mkRWBramCoreLineForwarded(RWBramCore#(addrT, CLine)) provisos(
     Bits#(addrT, addrSz), Eq#(addrT)
 );

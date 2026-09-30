@@ -983,6 +983,7 @@ module mkSelfInvL1Bank#(
         interface rsToP = toFifoDeq(rsToPQ);
         interface rqToP = toFifoDeq(rqToPQ);
         interface fromP = toFifoEnq(fromPQ);
+        interface rsAccessFromP = nullFifoEnq;
     endinterface
 
     interface L1ProcReq procReq;
@@ -1212,6 +1213,7 @@ module mkSelfInvL1Cache#(
             interface rqToP = toFifoDeq(cRqToPQ);
             interface rsToP = toFifoDeq(cRsToPQ);
             interface fromP = toFifoEnq(pRqRsFromPQ);
+            interface rsAccessFromP = nullFifoEnq;
         endinterface);
     end
 

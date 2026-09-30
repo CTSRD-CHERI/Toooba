@@ -146,6 +146,7 @@ module mkL1Bank#(
     Alias#(cRsToPT, CRsMsg#(void)),
     Alias#(pRqFromPT, PRqMsg#(void)),
     Alias#(pRsFromPT, PRsMsg#(wayT, void)),
+    Alias#(pRsAccessFromPT, PRsAccessMsg#(wayT, void)),
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(cRqSlotT, L1CRqSlot#(wayT, tagT)), // cRq MSHR slot
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
@@ -171,6 +172,7 @@ module mkL1Bank#(
     Fifo#(2, cRsToPT) rsToPQ <- mkCFFifo;
     Fifo#(2, cRqToPT) rqToPQ <- mkCFFifo;
     Fifo#(2, pRqRsFromPT) fromPQ <- mkCFFifo;
+    Fifo#(2, pRsAccessFromPT) rsAccessFromPQ <- mkCFFifo;
 
     FIFO#(MshrIndex#(cRqIdxT, pRqIdxT)) rsToPIndexQ <- mkSizedFIFO(valueOf(TAdd#(cRqNum, pRqNum)));
 
@@ -335,7 +337,6 @@ endfunction
         );
     endrule
 
-    (* descending_urgency = "pRqTransfer, cRqTransfer_retry, cRqTransfer_new" *)
     rule pRqTransfer(fromPQ.first matches tagged PRq .req);
         fromPQ.deq;
         pRqIdxT n <- pRqMshr.getEmptyEntryInit(req);
@@ -351,7 +352,21 @@ endfunction
         );
     endrule
 
-    (* descending_urgency = "pRsTransfer, cRqTransfer_retry, cRqTransfer_new" *)
+    Reg#(Bool) pRsAccessStarted <- mkReg(False);
+
+    rule startPRsAccessTransfer(!pRsAccessStarted);
+        pipeline.startPRsAccess(rsAccessFromPQ.first);
+        pRsAccessStarted <= True;
+    endrule
+
+    rule transferPRsAccessFlit(pRsAccessStarted && pipeline.prsAccessReady);
+        let r = rsAccessFromPQ.first;
+        pipeline.putPRsAccess(r);
+        rsAccessFromPQ.deq;
+        if (r.last)
+            pRsAccessStarted <= False;
+    endrule
+
     rule pRsTransfer(fromPQ.first matches tagged PRs .resp);
         fromPQ.deq;
         pipeline.send(PRs (L1PipePRsIn {
@@ -365,8 +380,6 @@ endfunction
     endrule
 
 
-    (* descending_urgency = "pRsTransfer, cRqTransfer_retry, cRqTransfer_new, createPrefetchRq" *)
-    (* descending_urgency = "pRqTransfer, cRqTransfer_retry, cRqTransfer_new, createPrefetchRq" *)
     rule createPrefetchRq(flushDone);
         Addr addr <- prefetcher.getNextPrefetchAddr;
         procRqT r = ProcRq {
@@ -1195,6 +1208,7 @@ endfunction
         interface rsToP = toFifoDeq(rsToPQ);
         interface rqToP = toFifoDeq(rqToPQ);
         interface fromP = toFifoEnq(fromPQ);
+        interface rsAccessFromP = toFifoEnq(rsAccessFromPQ);
     endinterface
 
     interface L1ProcReq procReq;
@@ -1369,6 +1383,7 @@ module mkL1Cache#(
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
     Alias#(cRsToPT, CRsMsg#(void)),
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
+    Alias#(pRsAccessFromPT, PRsAccessMsg#(wayT, void)),
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
     Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, void, cacheOwnerT, void, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
     // requirements
@@ -1401,6 +1416,7 @@ module mkL1Cache#(
         Fifo#(2, cRqToPT) cRqToPQ <- mkCFFifo;
         Fifo#(2, cRsToPT) cRsToPQ <- mkCFFifo;
         Fifo#(2, pRqRsFromPT) pRqRsFromPQ <- mkCFFifo;
+        Fifo#(2, pRsAccessFromPT) pRsAccessFromPQ <- mkCFFifo;
 
         function XBarDstInfo#(Bit#(0), cRqToPT) getCRqDstInfo(bankIdT bid, cRqToPT cRq);
             return XBarDstInfo {idx: 0, data: cRq};
@@ -1423,12 +1439,17 @@ module mkL1Cache#(
                 let r <- toGet(pRqRsFromPQ).get;
                 banks[i].to_parent.fromP.enq(r);
             endrule
+            rule sendPRsAccess(getBankId(pRsAccessFromPQ.first.addr) == fromInteger(i));
+                let r <- toGet(pRsAccessFromPQ).get;
+                banks[i].to_parent.rsAccessFromP.enq(r);
+            endrule
         end
 
         toParentIfc = (interface ChildCacheToParent;
             interface rqToP = toFifoDeq(cRqToPQ);
             interface rsToP = toFifoDeq(cRsToPQ);
             interface fromP = toFifoEnq(pRqRsFromPQ);
+            interface rsAccessFromP = toFifoEnq(pRsAccessFromPQ);
         endinterface);
     end
 

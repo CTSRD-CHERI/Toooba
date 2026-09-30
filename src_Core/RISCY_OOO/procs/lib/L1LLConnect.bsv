@@ -26,6 +26,7 @@ import Vector::*;
 import BuildVector::*;
 import GetPut::*;
 import Types::*;
+import ProcTypes::*;
 import CacheUtils::*;
 import CCTypes::*;
 import L1CoCache::*;
@@ -33,18 +34,8 @@ import LLCache::*;
 import CrossBar::*;
 import Fifos::*;
 
-// Access-width transport flits. Metadata is repeated on each data flit so the
-// link remains independently routable and can later support interleaving.
-
-typedef struct {
-    Addr addr;
-    Msi toState;
-    Maybe#(CLineAccess) data;
-    CLineAccessSel access;
-    Bool last;
-    LLChild child;
-    L1Way id;
-} PRsAccessMsg deriving(Bits, Eq, FShow);
+// Access-width transport flits repeat metadata so the link remains
+// independently routable and can later support interleaving.
 
 module mkL1LLConnect#(
     ParentCacheToChild#(L1Way, LLChild) llc,
@@ -112,7 +103,7 @@ module mkL1LLConnect#(
     endrule
 
     // Serialize parent responses onto the access-width return link.
-    Fifo#(2, PRsAccessMsg) pRsLinkQ <- mkCFFifo;
+    Fifo#(2, PRsAccessMsg#(L1Way, LLChild)) pRsLinkQ <- mkCFFifo;
     Reg#(CLineAccessSel) pRsAccess <- mkReg(0);
     rule serializePRs(llc.toC.first matches tagged PRs .rs);
         Bool hasData = isValid(rs.data);
@@ -141,6 +132,11 @@ module mkL1LLConnect#(
     endrule
 
     Vector#(L1Num, Reg#(Line)) pRsPartial <- replicateM(mkReg(unpack(0)));
+`ifdef SELF_INV_CACHE
+    Integer streamedDataCaches = 0;
+`else
+    Integer streamedDataCaches = valueof(CoreNum);
+`endif
     for(Integer i = 0; i < valueof(L1Num); i = i+1) begin
         rule sendPRq(llc.toC.first matches tagged PRq .rq
                      &&& rq.child == fromInteger(i)
@@ -154,31 +150,48 @@ module mkL1LLConnect#(
             }));
         endrule
 
-        rule assemblePRs(pRsLinkQ.first.child == fromInteger(i));
-            let r = pRsLinkQ.first;
-            pRsLinkQ.deq;
-            Line newLine = pRsPartial[i];
-            Maybe#(Line) responseData = Invalid;
-            if (r.data matches tagged Valid .accessData) begin
-                let accesses = clineToAccessVector(newLine);
-                accesses[r.access] = accessData;
-                newLine = accessVectorToCline(accesses);
-                responseData = Valid(newLine);
-            end
-            if (r.last) begin
-                l1[i].fromP.enq(PRs (PRsMsg {
+        if (i < streamedDataCaches) begin
+            rule forwardPRsAccess(pRsLinkQ.first.child == fromInteger(i));
+                let r = pRsLinkQ.first;
+                pRsLinkQ.deq;
+                l1[i].rsAccessFromP.enq(PRsAccessMsg {
                     addr: r.addr,
                     toState: r.toState,
+                    data: r.data,
+                    access: r.access,
+                    last: r.last,
                     child: ?,
-                    data: responseData,
                     id: r.id
-                }));
-                pRsPartial[i] <= unpack(0);
-            end
-            else begin
-                pRsPartial[i] <= newLine;
-            end
-        endrule
+                });
+            endrule
+        end
+        else begin
+            rule assembleIPRs(pRsLinkQ.first.child == fromInteger(i));
+                let r = pRsLinkQ.first;
+                pRsLinkQ.deq;
+                Line newLine = pRsPartial[i];
+                Maybe#(Line) responseData = Invalid;
+                if (r.data matches tagged Valid .accessData) begin
+                    let accesses = clineToAccessVector(newLine);
+                    accesses[r.access] = accessData;
+                    newLine = accessVectorToCline(accesses);
+                    responseData = Valid(newLine);
+                end
+                if (r.last) begin
+                    l1[i].fromP.enq(PRs (PRsMsg {
+                        addr: r.addr,
+                        toState: r.toState,
+                        child: ?,
+                        data: responseData,
+                        id: r.id
+                    }));
+                    pRsPartial[i] <= unpack(0);
+                end
+                else begin
+                    pRsPartial[i] <= newLine;
+                end
+            endrule
+        end
     end
 endmodule
 

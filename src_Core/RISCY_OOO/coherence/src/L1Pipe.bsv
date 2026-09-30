@@ -38,6 +38,7 @@ import Vector::*;
 import FShow::*;
 import Types::*;
 import CCTypes::*;
+import CacheUtils::*;
 import CCPipe::*;
 import RWBramCore::*;
 import RandomReplace::*;
@@ -122,6 +123,9 @@ interface L1Pipe#(
     type pRqIdxT
 );
     method Action send(L1PipeIn#(Bit#(TLog#(wayNum)), indexT, cRqIdxT, pRqIdxT) r);
+    method Action startPRsAccess(PRsAccessMsg#(Bit#(TLog#(wayNum)), void) first);
+    method Bool prsAccessReady;
+    method Action putPRsAccess(PRsAccessMsg#(Bit#(TLog#(wayNum)), void) flit);
     method PipeOut#(
         Bit#(TLog#(wayNum)),
         tagT, Msi, void, // no dir
@@ -190,7 +194,17 @@ module mkL1Pipe(
     // RAMs
     Vector#(wayNum, RWBramCore#(indexT, infoT)) infoRam <- replicateM(mkRWBramCoreForwarded);
     RWBramCore#(indexT, repT) repRam <- mkRandRepRam;
-    Vector#(wayNum, RWBramCore#(indexT, Line)) dataRam <- replicateM(mkRWBramCoreLineForwarded);
+    Vector#(wayNum, RWBramCoreLineDirectWrite#(indexT)) dataRamDirect <- replicateM(mkRWBramCoreLineDirectWriteForwarded);
+    Vector#(wayNum, RWBramCore#(indexT, Line)) dataRam = newVector;
+    for (Integer i = 0; i < valueOf(wayNum); i = i + 1) begin
+        dataRam[i] = interface RWBramCore;
+            method wrReq = dataRamDirect[i].wrReq;
+            method rdReq = dataRamDirect[i].rdReq;
+            method rdResp = dataRamDirect[i].rdResp;
+            method rdRespValid = dataRamDirect[i].rdRespValid;
+            method deqRdResp = dataRamDirect[i].deqRdResp;
+        endinterface;
+    end
     RWBramCore#(indexT, setAuxT) queueRam <- mkRWBramCoreForwarded;
 
     // initialize RAM
@@ -352,7 +366,27 @@ module mkL1Pipe(
         infoRam, repRam, dataRam, queueRam
     );
 
-    method Action send(pipeInT req);
+    Reg#(Bool) prsActive <- mkReg(False);
+    Reg#(Bool) prsComplete <- mkReg(False);
+    Reg#(Bool) prsHasData <- mkReg(False);
+    Reg#(Addr) prsAddr <- mkReg(0);
+    Reg#(Msi) prsToState <- mkReg(I);
+    Reg#(wayT) prsWay <- mkReg(0);
+    Reg#(CLineAccessSel) prsExpectedAccess <- mkReg(0);
+    Vector#(CLineNumAccesses, Reg#(CLineAccess)) prsLine <- replicateM(mkReg(unpack(0)));
+
+    function Bool isPRsCmd(pipeCmdT cmd);
+        return case (cmd) matches
+            tagged PRs .*: True;
+            default: False;
+        endcase;
+    endfunction
+
+    function Line getPRsLine;
+        return accessVectorToCline(readVReg(prsLine));
+    endfunction
+
+    method Action send(pipeInT req) if (!prsActive);
         case(req) matches
             tagged CRq .rq: begin
                 pipe.enq(CRq (rq), Invalid, Invalid);
@@ -374,10 +408,53 @@ module mkL1Pipe(
         endcase
     endmethod
 
-    // need to adapt pipeline output to real output format
-    method pipeOutT first;
+    method Action startPRsAccess(PRsAccessMsg#(wayT, void) first) if (!prsActive);
+        doAssert(first.access == 0, "streamed parent response must start at access zero");
+        prsActive <= True;
+        prsComplete <= False;
+        prsHasData <= isValid(first.data);
+        prsAddr <= first.addr;
+        prsToState <= first.toState;
+        prsWay <= first.id;
+        prsExpectedAccess <= 0;
+        pipe.enq(PRs (L1PipePRsCmd {addr: first.addr, way: first.id}),
+                 isValid(first.data) ? Valid(unpack(0)) : Invalid,
+                 UpCs(first.toState));
+    endmethod
+
+    method Bool prsAccessReady = prsActive && pipe.notEmpty && !prsComplete;
+
+    method Action putPRsAccess(PRsAccessMsg#(wayT, void) flit)
+        if (prsActive && pipe.notEmpty && !prsComplete);
+        doAssert(flit.addr == prsAddr && flit.id == prsWay && flit.toState == prsToState,
+                 "streamed parent response metadata changed within burst");
+        doAssert(flit.access == prsExpectedAccess,
+                 "streamed parent response access arrived out of order");
+        doAssert(isValid(flit.data) == prsHasData,
+                 "streamed parent response data validity changed within burst");
         let pout = pipe.first;
-        return PipeOut {
+        doAssert(pout.way == prsWay, "streamed parent response selected wrong way");
+        if (flit.data matches tagged Valid .accessData) begin
+            dataRamDirect[pout.way].wrAccess(getIndex(pout.cmd), flit.access, accessData);
+            prsLine[flit.access] <= accessData;
+        end
+        if (flit.last) begin
+            doAssert(prsHasData
+                         ? flit.access == fromInteger(valueOf(CLineNumAccesses) - 1)
+                         : flit.access == 0,
+                     "streamed parent response ended at an invalid access");
+            prsComplete <= True;
+        end
+        else begin
+            doAssert(prsHasData, "non-final streamed parent response must carry data");
+            prsExpectedAccess <= prsExpectedAccess + 1;
+        end
+    endmethod
+
+    // need to adapt pipeline output to real output format
+    method pipeOutT first if (pipe.notEmpty && (!prsActive || prsComplete));
+        let pout = pipe.first;
+        let result = PipeOut {
             cmd: (case(pout.cmd) matches
                 tagged CRq .rq: L1CRq (rq.mshrIdx);
                 tagged PRq .rq: L1PRq (rq.mshrIdx);
@@ -396,6 +473,9 @@ module mkL1Pipe(
             repInfo: pout.repInfo,
             setAuxData: pout.setAuxData
         };
+        if (prsActive && prsComplete && prsHasData && isPRsCmd(pout.cmd))
+            result.ram.line = getPRsLine;
+        return result;
     endmethod
 
     method Action deqWrite(Maybe#(cRqIdxT) swapRq, ramDataT wrRam, Maybe#(cRqIdxT) nextInQueue, Bool updateRep);
@@ -409,7 +489,21 @@ module mkL1Pipe(
                      "Cannot swap after a flush req");
 `endif
         end
-        // call pipe
-        pipe.deqWrite(newCmd, wrRam, nextInQueue, updateRep);
+        // Streamed response data is already in RAM. Avoid rewriting it when
+        // response processing leaves the line unchanged, but retain the normal
+        // whole-line write for stores, successful SCs, and AMOs.
+        if (prsActive && isPRsCmd(pipe.first.cmd)) begin
+            if (prsHasData && wrRam.line == getPRsLine)
+                pipe.deqWriteNoData(newCmd, wrRam, nextInQueue, updateRep);
+            else
+                pipe.deqWrite(newCmd, wrRam, nextInQueue, updateRep);
+            prsActive <= False;
+            prsComplete <= False;
+            prsHasData <= False;
+            prsExpectedAccess <= 0;
+        end
+        else begin
+            pipe.deqWrite(newCmd, wrRam, nextInQueue, updateRep);
+        end
     endmethod
 endmodule
