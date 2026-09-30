@@ -135,6 +135,7 @@ typedef struct {
     // result
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
+    Bool translateObjId; // True for the first (metadata) translation only.
     Maybe#(Addr) objIdAddr;
     Bit#(7) objIdOffset;
 `ifdef INCLUDE_TANDEM_VERIF
@@ -218,7 +219,9 @@ endmodule
 typedef SpecFifo_SB_deq_enq_C_deq_enq#(1, MemExeToFinish) DTlbReqFifo;
 (* synthesize *)
 module mkDTlbReqFifo(DTlbReqFifo);
-    let m <- mkSpecFifo_SB_deq_enq_C_deq_enq(False);
+    // Do not make response acceptance depend on a same-cycle retry dequeue:
+    // DTlb requires response dequeue to schedule before request enqueue.
+    let m <- mkSpecFifo_SB_deq_enq_C_deq_enq(True);
     return m;
 endmodule
 
@@ -227,33 +230,14 @@ typedef DTlb#(MemExeToFinish) DTlbSynth;
 module mkDTlbSynth(DTlbSynth);
     function Maybe#(TlbReq) getTlbReq(MemExeToFinish x);
         return Valid(TlbReq {
-            addr: getAddr(x.vaddr),
-            write: (case(x.mem_func)
+            addr: x.translateObjId ? fromMaybe(?, x.objIdAddr) : getAddr(x.vaddr),
+            write: !x.translateObjId && (case(x.mem_func)
                         St, Sc, Amo: True;
                         default: False;
                     endcase),
-            capStore: x.capStore,
-            potentialCapLoad: x.allowCapLoad
+            capStore: !x.translateObjId && x.capStore,
+            potentialCapLoad: !x.translateObjId && x.allowCapLoad
         });
-    endfunction
-    let m <- mkDTlb(getTlbReq);
-    return m;
-endmodule
-
-typedef DTlb#(MemExeToFinish) ObjIdTlbSynth;
-(* synthesize *)
-module mkObjIdTlbSynth(ObjIdTlbSynth);
-    function Maybe#(TlbReq) getTlbReq(MemExeToFinish x);
-        Maybe#(TlbReq) r = Invalid;
-        if (x.objIdAddr matches tagged Valid .a) begin
-            r = Valid(TlbReq{
-                addr: a,
-                write: False,
-                capStore: False,
-                potentialCapLoad: False
-            });
-        end
-        return r;
     endfunction
     let m <- mkDTlb(getTlbReq);
     return m;
@@ -318,7 +302,7 @@ interface MemExePipeline;
     interface Vector#(TMul#(2, AluExeNum), RecvBypass) recvBypass;
     interface ReservationStationMem rsMemIfc;
     interface DTlbSynth dTlbIfc;
-    interface ObjIdTlbSynth objIdTlbIfc;
+    method Bool tlbNoPendingReq;
     interface SplitLSQ lsqIfc;
     interface StoreBuffer stbIfc;
     interface DCoCache dMemIfc;
@@ -391,9 +375,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     // TLBs
     DTlbSynth dTlb <- mkDTlbSynth;
-    DTlbSynth objIdTlb <- mkObjIdTlbSynth;
 
     let dTlbReqQ <- mkDTlbReqFifo;
+    // Reserve the retry slot before admitting a metadata translation. Ordinary
+    // data requests remain nonblocking; a metadata request holds admission only
+    // until its data retry is issued (or it faults/is squashed).
+    SpecFifo_SB_deq_enq_C_deq_enq#(1, Bool) objIdTranslation <-
+        mkSpecFifo_SB_deq_enq_C_deq_enq(True);
 
     // store buffer only used in WEAK model
 `ifdef TSO_MM
@@ -640,13 +628,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Bool flushObjIDbuf4k
         );
 
-            objIdEvictQ.enq(
-                ObjIdEvictReq {
-                    line: lineAddr,
-                    flush1k: flushObjIDbuf1k,
-                    flush4k: flushObjIDbuf4k
-                }
-            );
+            //objIdEvictQ.enq(
+              //  ObjIdEvictReq {
+              //      line: lineAddr,
+              //      flush1k: flushObjIDbuf1k,
+              //      flush4k: flushObjIDbuf4k
+              //  }
+           // );
 
         endmethod
 
@@ -828,7 +816,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         });
     endrule
 
-    rule doExeMem;
+    // A speculation-aware reservation guarantees room to consume the ObjID
+    // response even when all TLB request slots are occupied. A one-entry
+    // reservation has no invalid head holes after selective speculation kills.
+    rule doExeMem (!objIdTranslation.notEmpty);
         regToExeQ.deq;
         let regToExe = regToExeQ.first;
         let x = regToExe.data;
@@ -951,9 +942,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end
         end
 
-        if (isValid(objIdVAddr) && getTmode(x.rVal1) > 1) begin // go to next stage by sending to TLB
-            objIdTlb.procReq(DTlbReq {
+        if (isValid(objIdVAddr) && getTmode(x.rVal1) > 1) begin
+            objIdTranslation.enq(ToSpecFifo { data: True, spec_bits: regToExe.spec_bits });
+            dTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
+                    translateObjId: True,
                     mem_func: x.mem_func,
                     tag: x.tag,
                     ldstq_tag: x.ldstq_tag,
@@ -984,6 +977,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         else begin
             dTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
+                    translateObjId: False,
                     mem_func: x.mem_func,
                     tag: x.tag,
                     ldstq_tag: x.ldstq_tag,
@@ -1036,10 +1030,17 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             });
         end
     endrule
-    (* descending_urgency = "doObjIdTlb, doExeMem" *)
-    rule doObjIdTlb;
-        objIdTlb.deqProcResp;
-        let objIdTlbResp = objIdTlb.procResp;
+    (* descending_urgency = "doObjIdTlb, sendDataTranslation, doExeMem" *)
+    rule sendDataTranslation;
+        let r = dTlbReqQ.first;
+        dTlbReqQ.deq;
+        objIdTranslation.deq;
+        dTlb.procReq(DTlbReq { inst: r.data, specBits: r.spec_bits });
+    endrule
+
+    rule doObjIdTlb (dTlb.procResp.inst.translateObjId);
+        dTlb.deqProcResp;
+        let objIdTlbResp = dTlb.procResp;
         let x = objIdTlbResp.inst;
         Maybe#(Addr) objIdPAddr = Invalid;
         Bool allowCapPTE = False;
@@ -1056,6 +1057,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(isValid(cause) && verbose) $display("  [doObjIdTlb - objIdTlb response] PAGEFAULT!");
 
         if(isValid(cause)) begin
+            objIdTranslation.deq;
             // update LSQ with fault
             doAssert(isValid(x.objIdAddr), "fault must have come from translation of valid objId VAddr");
             inIfc.rob_setExecuted_doFinishMem(x.tag, fromMaybe(0, x.objIdAddr),
@@ -1076,40 +1078,19 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         );
         end
         else begin
-            // dTlb.procReq(
-            dTlb.procReq(DTlbReq {
-                inst: MemExeToFinish {
-                    mem_func: x.mem_func,
-                    tag: x.tag,
-                    ldstq_tag: x.ldstq_tag,
-                    shiftedBE: x.shiftedBE,
-                    vaddr: x.vaddr,
-                    // objIdAddr: isValid(cause) ? Valid('h80000100) : objIdPAddr,
-                    objIdAddr: isValid(cause) ? Invalid : objIdPAddr,
-                    objIdOffset: x.objIdOffset,
-                    tmode: x.tmode,
-                    mte: x.mte,
-                    alloc_policy: x.alloc_policy,
-`ifdef INCLUDE_TANDEM_VERIF
-                    store_data: x.store_data,
-                    store_data_BE: x.store_data_BE,
-`endif
-                    misaligned: x.misaligned,
-                    capStore: x.capStore,
-                    allowCapLoad: x.allowCapLoad,
-                    capException: x.capException,
-                    check: x.check
-`ifdef KONATA
-                    , u_id: x.u_id
-`endif
-                },
-                specBits: objIdTlbResp.specBits
+            // Release the metadata slot before requesting the data translation.
+            // Direct procResp -> procReq recirculation deadlocks on a full TLB.
+            x.translateObjId = False;
+            x.objIdAddr = objIdPAddr;
+            dTlbReqQ.enq(ToSpecFifo {
+                data: x,
+                spec_bits: objIdTlbResp.specBits
             });
         end
     endrule
     
 
-    rule doFinishMem;
+    rule doFinishMem (!dTlb.procResp.inst.translateObjId);
         dTlb.deqProcResp;
         let dTlbResp = dTlb.procResp;
         let x = dTlbResp.inst;
@@ -2644,7 +2625,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     interface recvBypass = map(getRecvBypassIfc, bypassWire);
     interface rsMemIfc = rsMem;
     interface dTlbIfc = dTlb;
-    interface objIdTlbIfc = objIdTlb;
+    method tlbNoPendingReq = dTlb.noPendingReq && !objIdTranslation.notEmpty;
     interface lsqIfc = lsq;
     interface stbIfc = stb;
     interface dMemIfc = dMem;
@@ -2653,8 +2634,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         dispToRegQ.specUpdate,
         regToExeQ.specUpdate,
         dTlbReqQ.specUpdate,
+        objIdTranslation.specUpdate,
         dTlb.specUpdate,
-        objIdTlb.specUpdate,
         lsq.specUpdate
     ));
 

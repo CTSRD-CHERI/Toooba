@@ -546,14 +546,15 @@ module mkCore#(CoreId coreId)(Core);
     end
     ReservationStationMem reservationStationMem = coreFix.memExeIfc.rsMemIfc;
     DTlbSynth dTlb = coreFix.memExeIfc.dTlbIfc;
-    ObjIdTlbSynth objIdTlb = coreFix.memExeIfc.objIdTlbIfc;
+    // Retain the legacy counter selector, reporting zero for the removed TLB.
+    Fifo#(1, ProcPerfResp) objIdPerfRespQ <- mkCFFifo;
     SplitLSQ lsq = coreFix.memExeIfc.lsqIfc;
     StoreBuffer stb = coreFix.memExeIfc.stbIfc;
     DCoCache dMem = coreFix.memExeIfc.dMemIfc;
 
     // L2 TLB
     L2Tlb l2Tlb <- mkL2Tlb;
-    mkTlbConnect(iTlb.toParent, dTlb.toParent, objIdTlb.toParent, l2Tlb.toChildren);
+    mkTlbConnect(iTlb.toParent, dTlb.toParent, l2Tlb.toChildren);
 
     // flags to flush
     Reg#(Bool)  flush_tlbs <- mkReg(False);
@@ -670,7 +671,7 @@ module mkCore#(CoreId coreId)(Core);
         method lsqSetAtCommit = lsq.setAtCommit;
         method lookupPAddr = lsq.lookupPAddr;
         method pauseCommit = coreFix.pendingIncorrectSpec;
-        method tlbNoPendingReq = iTlb.noPendingReq && dTlb.noPendingReq && objIdTlb.noPendingReq;
+        method tlbNoPendingReq = iTlb.noPendingReq && coreFix.memExeIfc.tlbNoPendingReq;
 
         method setFlushTlbs;
            action
@@ -802,7 +803,6 @@ module mkCore#(CoreId coreId)(Core);
             flush_tlbs <= False;
             iTlb.flush;
             dTlb.flush;
-            objIdTlb.flush;
            // $display ("%0d: %m.rule prepareCachesAndTlbs: flushing iTlb and dTlb", cur_cycle);
         end
         if (update_vm_info) begin
@@ -811,7 +811,6 @@ module mkCore#(CoreId coreId)(Core);
             let vmD = csrf.vmD;
             iTlb.updateVMInfo(vmI);
             dTlb.updateVMInfo(vmD);
-            objIdTlb.updateVMInfo(vmD);
             l2Tlb.updateVMInfo(vmI, vmD);
            // $display ("%0d: %m.rule prepareCachesAndTlbs: updating VMInfo", cur_cycle);
         end
@@ -893,7 +892,7 @@ module mkCore#(CoreId coreId)(Core);
 
     rule readyToFetch(
         !flush_reservation && !flush_tlbs && !update_vm_info
-        && iTlb.flush_done && dTlb.flush_done && objIdTlb.flush_done
+        && iTlb.flush_done && dTlb.flush_done
 `ifdef SECURITY_OR_INCLUDE_GDB_CONTROL
         && !flush_caches && !flush_brpred
         && iMem.flush_done && dMem.flush_done
@@ -974,7 +973,6 @@ module mkCore#(CoreId coreId)(Core);
         dMem.perf.setStatus(stats);
         iTlb.perf.setStatus(stats);
         dTlb.perf.setStatus(stats);
-        objIdTlb.perf.setStatus(stats);
         l2Tlb.perf.setStatus(stats);
         fetchStage.perf.setStatus(stats);
 
@@ -1004,7 +1002,7 @@ module mkCore#(CoreId coreId)(Core);
                 dTlb.perf.req(unpack(truncate(r.pType)));
             end
             ObjIdTlb: begin
-                objIdTlb.perf.req(unpack(truncate(r.pType)));
+                objIdPerfRespQ.enq(ProcPerfResp { loc: ObjIdTlb, pType: r.pType, data: 0 });
             end
             L2Tlb: begin
                 l2Tlb.perf.req(unpack(truncate(r.pType)));
@@ -1135,13 +1133,9 @@ module mkCore#(CoreId coreId)(Core);
                 data: r.data
             });
         end
-        else if(objIdTlb.perf.respValid) begin
-            let r <- objIdTlb.perf.resp;
-            resp = Valid(ProcPerfResp {
-                loc: ObjIdTlb,
-                pType: zeroExtend(pack(r.pType)),
-                data: r.data
-            });
+        else if(objIdPerfRespQ.notEmpty) begin
+            let r <- toGet(objIdPerfRespQ).get;
+            resp = Valid(r);
         end
         else if(l2Tlb.perf.respValid) begin
             let r <- l2Tlb.perf.resp;
@@ -1477,12 +1471,10 @@ module mkCore#(CoreId coreId)(Core);
       // The following TLB actions update to a consistent state.
       iTlb.flush;
       dTlb.flush;
-      objIdTlb.flush;
       let vmI = csrf.vmI;
       let vmD = csrf.vmD;
       iTlb.updateVMInfo(vmI);
       dTlb.updateVMInfo(vmD);
-      objIdTlb.updateVMInfo(vmD);
       l2Tlb.updateVMInfo(vmI, vmD);
 
       let startpc = csrf.dpc_read;
