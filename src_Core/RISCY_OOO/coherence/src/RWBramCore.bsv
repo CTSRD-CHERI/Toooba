@@ -49,8 +49,20 @@ interface RWBramCore#(type addrT, type dataT);
     method Action deqRdResp;
 endinterface
 
-// Extended line-RAM interface for non-forwarded users that need to update a
-// single AccessWidth data/tag bank without reading and rewriting the whole line.
+// A cache-line RAM with an explicit, access-granular port.  Each way contains
+// one deep AccessWidth-wide data RAM and one deep capability-tag RAM.  The
+// physical RAM address is the concatenation of the line index and access
+// selector.
+interface RWBramCoreLineAccess#(type addrT);
+    method Action wrAccess(addrT line, CLineAccessSel access, CLineAccess data);
+    method Action rdAccessReq(addrT line, CLineAccessSel access);
+    method CLineAccess rdAccessResp;
+    method Bool rdAccessRespValid;
+    method Action deqRdAccessResp;
+endinterface
+
+// Compatibility interface.  Whole-line requests are serialized over the
+// access-granular RAM; wrAccess is the preferred interface for streamed fills.
 interface RWBramCoreLineDirectWrite#(type addrT);
     method Action wrReq(addrT a, CLine line);
     method Action wrAccess(addrT a, CLineAccessSel access, CLineAccess data);
@@ -161,8 +173,74 @@ module mkRWBramCoreForwarded(RWBramCore#(addrT, dataT)) provisos(
     endmethod
 endmodule
 
-// Line-wide compatibility interface backed by parallel AccessWidth-wide data
-// memories and separate capability-tag memories.
+typedef Bit#(TAdd#(addrSz, TMax#(TLog#(CLineNumAccesses), 1))) CLineRamAddr#(numeric type addrSz);
+
+function CLineRamAddr#(addrSz) getCLineRamAddr(addrT line, CLineAccessSel access)
+    provisos(Bits#(addrT, addrSz));
+    return {pack(line), pack(access)};
+endfunction
+
+module mkRWBramCoreLineAccess(RWBramCoreLineAccess#(addrT)) provisos(
+    Bits#(addrT, addrSz)
+);
+    RWBramCore#(CLineRamAddr#(addrSz), Bit#(AccessWidth)) dataRam <- mkRWBramCore;
+    RWBramCore#(CLineRamAddr#(addrSz), Vector#(CLineMemDataPerAccess, MemTag)) tagRam <- mkRWBramCore;
+
+    method Action wrAccess(addrT line, CLineAccessSel access, CLineAccess data);
+        let ramAddr = getCLineRamAddr(line, access);
+        dataRam.wrReq(ramAddr, data.data);
+        tagRam.wrReq(ramAddr, data.tag);
+    endmethod
+
+    method Action rdAccessReq(addrT line, CLineAccessSel access);
+        let ramAddr = getCLineRamAddr(line, access);
+        dataRam.rdReq(ramAddr);
+        tagRam.rdReq(ramAddr);
+    endmethod
+
+    method CLineAccess rdAccessResp;
+        return CLineAccess {data: dataRam.rdResp, tag: tagRam.rdResp};
+    endmethod
+
+    method Bool rdAccessRespValid = dataRam.rdRespValid && tagRam.rdRespValid;
+
+    method Action deqRdAccessResp;
+        dataRam.deqRdResp;
+        tagRam.deqRdResp;
+    endmethod
+endmodule
+
+module mkRWBramCoreLineAccessForwarded(RWBramCoreLineAccess#(addrT)) provisos(
+    Bits#(addrT, addrSz), Eq#(addrT)
+);
+    RWBramCore#(CLineRamAddr#(addrSz), Bit#(AccessWidth)) dataRam <- mkRWBramCoreForwarded;
+    RWBramCore#(CLineRamAddr#(addrSz), Vector#(CLineMemDataPerAccess, MemTag)) tagRam <- mkRWBramCoreForwarded;
+
+    method Action wrAccess(addrT line, CLineAccessSel access, CLineAccess data);
+        let ramAddr = getCLineRamAddr(line, access);
+        dataRam.wrReq(ramAddr, data.data);
+        tagRam.wrReq(ramAddr, data.tag);
+    endmethod
+
+    method Action rdAccessReq(addrT line, CLineAccessSel access);
+        let ramAddr = getCLineRamAddr(line, access);
+        dataRam.rdReq(ramAddr);
+        tagRam.rdReq(ramAddr);
+    endmethod
+
+    method CLineAccess rdAccessResp;
+        return CLineAccess {data: dataRam.rdResp, tag: tagRam.rdResp};
+    endmethod
+
+    method Bool rdAccessRespValid = dataRam.rdRespValid && tagRam.rdRespValid;
+
+    method Action deqRdAccessResp;
+        dataRam.deqRdResp;
+        tagRam.deqRdResp;
+    endmethod
+endmodule
+
+
 module mkRWBramCoreLine(RWBramCore#(addrT, CLine)) provisos(
     Bits#(addrT, addrSz), Eq#(addrT)
 );

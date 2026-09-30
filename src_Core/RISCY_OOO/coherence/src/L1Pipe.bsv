@@ -35,6 +35,7 @@
 // SOFTWARE.
 
 import Vector::*;
+import Ehr::*;
 import FShow::*;
 import Types::*;
 import CCTypes::*;
@@ -358,13 +359,22 @@ module mkL1Pipe(
     endactionvalue
     endfunction
 
+    // CCPipe performs metadata lookup and way selection only. Data is read
+    // explicitly from the selected way after tag match.
+    Vector#(wayNum, RWBramCore#(indexT, void)) dummyDataRam <- replicateM(mkDummyBramCore);
     CCPipe#(
-        wayNum, indexT, tagT, Msi, dirT, ownerT, otherT, repT, Line, setAuxT, pipeCmdT
+        wayNum, indexT, tagT, Msi, dirT, ownerT, otherT, repT, void, setAuxT, pipeCmdT
     ) pipe <- mkCCPipeSingleCycle(
         regToReadOnly(initDone), getIndex, tagMatch,
         updateByUpCs, updateByDownDir, updateRepInfo,
-        infoRam, repRam, dataRam, queueRam
+        infoRam, repRam, dummyDataRam, queueRam
     );
+
+    Reg#(Bool) lineReadIssued <- mkReg(False);
+    Ehr#(2, Maybe#(Line)) lineReadDataEhr <- mkEhr(Invalid);
+    Reg#(Maybe#(Line)) lineReadData = lineReadDataEhr[0];
+    Reg#(Maybe#(Line)) lineReadDataDeq = lineReadDataEhr[1];
+    Reg#(Maybe#(Line)) legacyPRsLine <- mkReg(Invalid);
 
     Reg#(Bool) prsActive <- mkReg(False);
     Reg#(Bool) prsComplete <- mkReg(False);
@@ -386,6 +396,33 @@ module mkL1Pipe(
         return accessVectorToCline(readVReg(prsLine));
     endfunction
 
+    function Bool isActivePRsCmd(pipeCmdT cmd);
+        return case (cmd) matches
+            tagged PRs .rs: prsActive && rs.addr == prsAddr && rs.way == prsWay;
+            default: False;
+        endcase;
+    endfunction
+
+    function Bool responseSuppliesLine(pipeCmdT cmd);
+        return (isActivePRsCmd(cmd) && prsHasData)
+               || (isPRsCmd(cmd) && isValid(legacyPRsLine));
+    endfunction
+
+    rule issueSelectedLineRead(pipe.notEmpty && !lineReadIssued && !isValid(lineReadData)
+                               && !responseSuppliesLine(pipe.first.cmd));
+        let pout = pipe.first;
+        dataRam[pout.way].rdReq(getIndex(pout.cmd));
+        lineReadIssued <= True;
+    endrule
+
+    rule collectSelectedLineRead(pipe.notEmpty && lineReadIssued);
+        let pout = pipe.first;
+        let line = dataRam[pout.way].rdResp;
+        dataRam[pout.way].deqRdResp;
+        lineReadData <= Valid(line);
+        lineReadIssued <= False;
+    endrule
+
     method Action send(pipeInT req) if (!prsActive);
         case(req) matches
             tagged CRq .rq: begin
@@ -395,10 +432,11 @@ module mkL1Pipe(
                 pipe.enq(PRq (rq), Invalid, Invalid);
             end
             tagged PRs .rs: begin
+                legacyPRsLine <= rs.data;
                 pipe.enq(PRs (L1PipePRsCmd {
                     addr: rs.addr,
                     way: rs.way
-                }), rs.data, UpCs (rs.toState));
+                }), isValid(rs.data) ? Valid(?) : Invalid, UpCs (rs.toState));
             end
 `ifdef SECURITY_CACHES
             tagged Flush .flush: begin
@@ -417,15 +455,18 @@ module mkL1Pipe(
         prsToState <= first.toState;
         prsWay <= first.id;
         prsExpectedAccess <= 0;
+        legacyPRsLine <= Invalid;
         pipe.enq(PRs (L1PipePRsCmd {addr: first.addr, way: first.id}),
-                 isValid(first.data) ? Valid(unpack(0)) : Invalid,
+                 isValid(first.data) ? Valid(?) : Invalid,
                  UpCs(first.toState));
     endmethod
 
-    method Bool prsAccessReady = prsActive && pipe.notEmpty && !prsComplete;
+    method Bool prsAccessReady = prsActive && pipe.notEmpty && !prsComplete
+                                 && isActivePRsCmd(pipe.first.cmd);
 
     method Action putPRsAccess(PRsAccessMsg#(wayT, void) flit)
-        if (prsActive && pipe.notEmpty && !prsComplete);
+        if (prsActive && pipe.notEmpty && !prsComplete
+            && isActivePRsCmd(pipe.first.cmd));
         doAssert(flit.addr == prsAddr && flit.id == prsWay && flit.toState == prsToState,
                  "streamed parent response metadata changed within burst");
         doAssert(flit.access == prsExpectedAccess,
@@ -452,8 +493,15 @@ module mkL1Pipe(
     endmethod
 
     // need to adapt pipeline output to real output format
-    method pipeOutT first if (pipe.notEmpty && (!prsActive || prsComplete));
+    method pipeOutT first if (pipe.notEmpty
+                              && (!isActivePRsCmd(pipe.first.cmd) || prsComplete)
+                              && (responseSuppliesLine(pipe.first.cmd) || isValid(lineReadData)));
         let pout = pipe.first;
+        Line selectedLine = fromMaybe(?, lineReadData);
+        if (isActivePRsCmd(pout.cmd) && prsHasData)
+            selectedLine = getPRsLine;
+        else if (isValid(legacyPRsLine) && isPRsCmd(pout.cmd))
+            selectedLine = validValue(legacyPRsLine);
         let result = PipeOut {
             cmd: (case(pout.cmd) matches
                 tagged CRq .rq: L1CRq (rq.mshrIdx);
@@ -469,12 +517,10 @@ module mkL1Pipe(
             endcase),
             way: pout.way,
             pRqMiss: pout.pRqMiss,
-            ram: pout.ram,
+            ram: RamData {info: pout.ram.info, line: selectedLine},
             repInfo: pout.repInfo,
             setAuxData: pout.setAuxData
         };
-        if (prsActive && prsComplete && prsHasData && isPRsCmd(pout.cmd))
-            result.ram.line = getPRsLine;
         return result;
     endmethod
 
@@ -489,21 +535,26 @@ module mkL1Pipe(
                      "Cannot swap after a flush req");
 `endif
         end
-        // Streamed response data is already in RAM. Avoid rewriting it when
-        // response processing leaves the line unchanged, but retain the normal
-        // whole-line write for stores, successful SCs, and AMOs.
-        if (prsActive && isPRsCmd(pipe.first.cmd)) begin
-            if (prsHasData && wrRam.line == getPRsLine)
-                pipe.deqWriteNoData(newCmd, wrRam, nextInQueue, updateRep);
-            else
-                pipe.deqWrite(newCmd, wrRam, nextInQueue, updateRep);
+        let pout = pipe.first;
+        Bool streamedUnchanged = isActivePRsCmd(pout.cmd)
+                                 && prsHasData && wrRam.line == getPRsLine;
+        if (!streamedUnchanged)
+            dataRamDirect[pout.way].wrReq(getIndex(pout.cmd), wrRam.line);
+
+        RamData#(tagT, Msi, dirT, ownerT, otherT, void) metaRam = RamData {
+            info: wrRam.info,
+            line: ?
+        };
+        pipe.deqWriteNoData(newCmd, metaRam, nextInQueue, updateRep);
+
+        lineReadIssued <= False;
+        lineReadDataDeq <= Invalid;
+        legacyPRsLine <= Invalid;
+        if (isActivePRsCmd(pout.cmd)) begin
             prsActive <= False;
             prsComplete <= False;
             prsHasData <= False;
             prsExpectedAccess <= 0;
-        end
-        else begin
-            pipe.deqWrite(newCmd, wrRam, nextInQueue, updateRep);
         end
     endmethod
 endmodule
