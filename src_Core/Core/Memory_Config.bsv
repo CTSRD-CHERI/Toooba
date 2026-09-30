@@ -1,6 +1,8 @@
 package Memory_Config;
 
-// Width in bits of one cached-memory access and of the cached AXI datapath.
-typedef 128 AccessWidth;
+`include "ProcConfig.bsv"
+
+// Public type derived from the processor configuration.
+typedef `ACCESS_WIDTH AccessWidth;
 
 endpackage

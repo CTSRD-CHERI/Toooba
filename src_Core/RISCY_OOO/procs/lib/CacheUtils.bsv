@@ -52,8 +52,8 @@ import FShow::*;
 import MsgFifo::*;
 import Memory_Config::*;
 
-// 128B cache line
-typedef 8 CLineNumMemTaggedData;
+// Derive the cache-line representation from the configured line size.
+typedef TDiv#(TMul#(`CACHE_LINE_BYTES, 8), MemDataSz) CLineNumMemTaggedData;
 typedef TMul#(CLineNumMemTaggedData, 2) CLineNumData;
 typedef TLog#(CLineNumMemTaggedData) LogCLineNumMemTaggedData;
 typedef TLog#(CLineNumData) LogCLineNumData;

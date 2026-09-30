@@ -111,6 +111,13 @@
 // ==== CACHE SIZE ====
 //
 
+// Width in bits of one cached-memory access and of the cached AXI datapath.
+`define ACCESS_WIDTH 128
+
+// Cache-line size in bytes. It must be a power of two and an integer multiple
+// of the configured access width.
+`define CACHE_LINE_BYTES 128
+
 `ifdef CACHE_TEST
 
     // L1
