@@ -118,6 +118,48 @@ typedef struct {
   Vector#(CLineMemDataPerAccess, MemTag) tag;
   Bit#(AccessWidth) data;
 } CLineAccess deriving (Bits, Eq, FShow);
+typedef Bit#(TLog#(CLineMemDataPerAccess)) CLineAccessMemTaggedDataSel;
+typedef Vector#(CLineMemDataPerAccess, Vector#(MemDataBytes, Bool)) CLineAccessByteEn;
+
+function CLineAccessMemTaggedDataSel getCLineAccessMemTaggedDataSel(Addr a) =
+  truncate(a >> valueOf(TLog#(MemDataBytes)));
+
+function MemTaggedData getTaggedDataAtAccess(CLineAccess access, CLineAccessMemTaggedDataSel sel);
+  Vector#(CLineMemDataPerAccess, MemData) data = unpack(access.data);
+  return MemTaggedData {tag: access.tag[sel], data: data[sel]};
+endfunction
+
+function CLineAccess setTaggedDataAtAccess(
+    CLineAccess access, CLineAccessMemTaggedDataSel sel, MemTaggedData taggedData);
+  Vector#(CLineMemDataPerAccess, MemData) data = unpack(access.data);
+  let newAccess = access;
+  newAccess.tag[sel] = taggedData.tag;
+  data[sel] = taggedData.data;
+  newAccess.data = pack(data);
+  return newAccess;
+endfunction
+
+function MemTaggedData getAccessTags(CLineAccess access) = MemTaggedData {
+  tag: False,
+  data: cons(zeroExtend(pack(access.tag)), unpack(0))
+};
+
+function CLineAccess getUpdatedAccess(
+    CLineAccess curAccess, CLineAccessByteEn wrBE, CLineAccess wrAccess);
+  function MemTaggedData makeTaggedData(MemTag tag, MemData data) =
+    MemTaggedData {tag: tag, data: data};
+  Vector#(CLineMemDataPerAccess, MemData) curData = unpack(curAccess.data);
+  Vector#(CLineMemDataPerAccess, MemData) wrData = unpack(wrAccess.data);
+  Vector#(CLineMemDataPerAccess, MemTaggedData) updated = zipWith3(
+    mergeMemTaggedDataBE,
+    zipWith(makeTaggedData, curAccess.tag, curData),
+    zipWith(makeTaggedData, wrAccess.tag, wrData),
+    wrBE);
+  return CLineAccess {
+    tag: map(getTag, updated),
+    data: pack(map(getData, updated))
+  };
+endfunction
 
 function Vector#(CLineNumAccesses, CLineAccess) clineToAccessVector(CLine line);
   Vector#(CLineNumAccesses, Bit#(AccessWidth)) data = unpack(pack(line.data));

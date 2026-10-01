@@ -140,7 +140,7 @@ module mkL1Bank#(
     Alias#(cacheOwnerT, Maybe#(cRqIdxT)), // actually owner cannot be pRq
     Alias#(cacheSetAuxT, Maybe#(cRqIdxT)),
     Alias#(cacheInfoT, CacheInfo#(tagT, Msi, void, cacheOwnerT, void)),
-    Alias#(ramDataT, RamData#(tagT, Msi, void, cacheOwnerT, void, Line)),
+    Alias#(ramDataT, RamData#(tagT, Msi, void, cacheOwnerT, void, CLineAccess)),
     Alias#(procRqT, ProcRq#(procRqIdT)),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
     Alias#(cRsToPT, CRsMsg#(void)),
@@ -565,10 +565,7 @@ endfunction
 
     // pipeline outputs
     pipeOutT pipeOut = pipeline.first;
-    // Until L1Bank itself is access-typed, replicate the selected access into a
-    // compatibility line. Only the addressed access is written back by L1Pipe.
-    Line selectedAccessLine = accessVectorToCline(replicate(pipeOut.ram.line));
-    ramDataT ram = RamData {info: pipeOut.ram.info, line: selectedAccessLine};
+    ramDataT ram = pipeOut.ram;
     // figure out procRq MSHR idx in pipeline output (since there is only one
     // port to select from MSHR)
     cRqIdxT pipeOutCRqIdx = (case(pipeOut.cmd) matches
@@ -582,21 +579,6 @@ endfunction
     Maybe#(cRqIdxT) pipeOutNextInQueue = pipeOut.setAuxData;
     Maybe#(cRqIdxT) pipeOutSecondInQueue = isValid(pipeOutNextInQueue) ? cRqMshr.pipelineResp.getSucc2(fromMaybe(?, pipeOutNextInQueue)) : Invalid;
 
-    function Action deqWriteLine(
-        Maybe#(cRqIdxT) swapRq,
-        ramDataT wrRam,
-        Addr activeAddr,
-        Maybe#(cRqIdxT) nextInQueue,
-        Bool updateRep
-    );
-    action
-        CLineAccess wrAccess = clineToAccessVector(wrRam.line)[getCLineAccessSel(activeAddr)];
-        pipeline.deqWrite(swapRq, RamData {
-            info: wrRam.info,
-            line: wrAccess
-        }, nextInQueue, updateRep);
-    endaction
-    endfunction
 
     // function to process cRq hit (MSHR slot may have garbage)
     function Action cRqHit(cRqIdxT n, procRqT req);
@@ -611,24 +593,23 @@ endfunction
         doAssert(ram.info.tag == getTag(req.addr) && enoughCacheState(ram.info.cs, req.toState),
             "cRqHit but tag or cs incorrect"
         );
-        // process req: resp processor and get new cache line
+        // process req: resp processor and get updated access
         // TODO when we have MESI, cache state may also need update
-        Line curLine = ram.line;
-        Line newLine = curLine;
-        LineMemDataOffset dataSel = getLineMemDataOffset(req.addr);
+        CLineAccess curAccess = ram.line;
+        CLineAccess newAccess = curAccess;
+        CLineAccessMemTaggedDataSel dataSel = getCLineAccessMemTaggedDataSel(req.addr);
         case(req.op) matches
             Ld: begin
                 if (!cRqIsPrefetch[n]) begin
                     if (req.loadTags) begin
-                        procResp.respLd(req.id, getAccessTagsAt(curLine,
-                                                               getCLineAccessSel(req.addr)));
+                        procResp.respLd(req.id, getAccessTags(curAccess));
                     end else begin
-                        procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel));
+                        procResp.respLd(req.id, getTaggedDataAtAccess(curAccess, dataSel));
                     end
                 end
             end
             Lr: begin
-                procResp.respLrScAmo(req.id, getTaggedDataAt(curLine, dataSel));
+                procResp.respLrScAmo(req.id, getTaggedDataAtAccess(curAccess, dataSel));
                 // set link addr
                 linkAddr <= Valid (getLineAddr(req.addr));
             end
@@ -643,10 +624,10 @@ endfunction
                 procResp.respLrScAmo(req.id, respVal);
                 // calculate new data to write
                 if(succeed) begin
-                    let taggedData = getTaggedDataAt(curLine, dataSel);
+                    let taggedData = getTaggedDataAtAccess(curAccess, dataSel);
                     let newTaggedData =
                       mergeMemTaggedDataBE(taggedData, req.data, zeroExtend(pack(req.byteEn)));
-                    newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
+                    newAccess = setTaggedDataAtAccess(newAccess, dataSel, newTaggedData);
                 end
                 // reset link addr
                 linkAddr <= Invalid;
@@ -654,8 +635,11 @@ endfunction
             St: begin
                 // resp processor, get write data & BE
                 let {be, wrLine} <- procResp.respSt(req.id);
-                // calculate new data to write
-                newLine = getUpdatedLine(curLine, be, wrLine);
+                // Slice the whole-line processor response to the addressed access.
+                Vector#(CLineNumAccesses, CLineAccessByteEn) accessBEs = unpack(pack(be));
+                CLineAccessSel accessSel = getCLineAccessSel(req.addr);
+                CLineAccess wrAccess = clineToAccessVector(wrLine)[accessSel];
+                newAccess = getUpdatedAccess(curAccess, accessBEs[accessSel], wrAccess);
             end
             default: begin
                 doAssert(False, "unknown mem op");
@@ -667,7 +651,7 @@ endfunction
         if(req.op != Amo) begin
             // Re-enter successors through the request path so their real byte
             // address selects the correct AccessWidth region.
-            deqWriteLine(Invalid, RamData {
+            pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(req.addr), // should be the same as original tag
                     // use max here. ram.info.cs > req.toState is possible in
@@ -679,9 +663,8 @@ endfunction
                     owner: succ,
                     other: ?
                 },
-                line: newLine // write new data into cache
-            }, req.addr,
-               isValid(succ) ? pipeOutNextInQueue : pipeOutSecondInQueue,
+                line: newAccess // write new data into cache
+            }, isValid(succ) ? pipeOutNextInQueue : pipeOutSecondInQueue,
                True); // hit, so update rep info
             if (succ matches tagged Valid .successor)
                 cRqRetryIndexQ.enq(successor);
@@ -701,7 +684,7 @@ endfunction
             end
            if (verbose)
             $display("%t L1 %m pipelineResp: Hit func: update ram: ", $time,
-                fshow(newLine), " ; ",
+                fshow(newAccess), " ; ",
                 fshow(succ)
             );
             // release MSHR entry
@@ -725,11 +708,11 @@ endfunction
         cRqIdxT n = amoHit.n;
         procRqT req = amoHit.req;
         Maybe#(cRqIdxT) succ = amoHit.succ;
-        // get line and sel
-        Line curLine = ram.line;
-        Line newLine = curLine;
-        LineMemDataOffset dataSel = getLineMemDataOffset(req.addr);
-        MemTaggedData current = getTaggedDataAt(curLine, dataSel);
+        // get access and selector within that access
+        CLineAccess curAccess = ram.line;
+        CLineAccess newAccess = curAccess;
+        CLineAccessMemTaggedDataSel dataSel = getCLineAccessMemTaggedDataSel(req.addr);
+        MemTaggedData current = getTaggedDataAtAccess(curAccess, dataSel);
         Vector#(2, Bit#(64)) dwordData = current.data;
         Vector#(4, Bit#(32))  wordData = unpack(pack(current.data));
         Bit#(1) dwordIdx = req.addr[3]; 
@@ -749,11 +732,11 @@ endfunction
         procResp.respLrScAmo(req.id, resp);
         // calculate new data to write
         let newData = amoExec(req.amoInst, wordIdx, current, req.data);
-        newLine = setTaggedDataAt(newLine, dataSel, newData);
+        newAccess = setTaggedDataAtAccess(newAccess, dataSel, newData);
         // deq pipeline or swap in successor
         // Re-enter successors through the request path so their real byte
         // address selects the correct AccessWidth region.
-        deqWriteLine(Invalid, RamData {
+        pipeline.deqWrite(Invalid, RamData {
             info: CacheInfo {
                 tag: getTag(req.addr), // should be the same as original tag
                 cs: M, // AMO always gets to M
@@ -761,14 +744,14 @@ endfunction
                 owner: succ,
                 other: ?
             },
-            line: newLine // write new data into cache
-        }, req.addr, amoHit.nextInQueue, True); // hit, so update rep info
+            line: newAccess // write new data into cache
+        }, amoHit.nextInQueue, True); // hit, so update rep info
         if (succ matches tagged Valid .successor)
             cRqRetryIndexQ.enq(successor);
         doAssert(req.toState == M, "AMO must req for M");
        if (verbose)
         $display("%t L1 %m processAmo: update ram: ", $time,
-            fshow(newLine), " ; ",
+            fshow(newAccess), " ; ",
             fshow(succ)
         );
         // release MSHR entry
@@ -798,7 +781,7 @@ endfunction
             // deq pipeline (we cannot swap in successor because Sc may not
             // occupy a line). We don't touch cache contents, but we may reset
             // line owner.
-            deqWriteLine(Invalid, RamData {
+            pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag,
                     cs: ram.info.cs,
@@ -807,7 +790,7 @@ endfunction
                     other: ram.info.other
                 },
                 line: ram.line
-            }, procRq.addr, pipeOutNextInQueue, False);
+            }, pipeOutNextInQueue, False);
             // retry successor
             Maybe#(cRqIdxT) succ = pipeOutSucc;
             if(succ matches tagged Valid .s) begin
@@ -845,7 +828,7 @@ endfunction
                 waitP: True // we have req parent, so waiting
             });
             // deq pipeline & set owner, tag
-            deqWriteLine(Invalid, RamData {
+            pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // tag may be garbage if cs == I
                     cs: ram.info.cs,
@@ -854,7 +837,7 @@ endfunction
                     other: ?
                 },
                 line: ram.line
-            }, procRq.addr, pipeOutNextInQueue, False);
+            }, pipeOutNextInQueue, False);
             if (!cRqIsPrefetch[n]) begin
                 prefetcher.reportAccess(procRq.addr, procRq.pcHash, MISS);
                 llcPrefetcher.reportAccess(procRq.addr, procRq.pcHash, MISS);
@@ -866,7 +849,7 @@ endfunction
         function Action cRqReplacement;
         action
             // deq pipeline
-            deqWriteLine(Invalid, RamData {
+            pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // set to req tag (old tag is replaced right now)
                     cs: I,
@@ -875,7 +858,7 @@ endfunction
                     other: ?
                 },
                 line: ? // data is no longer used
-            }, procRq.addr, pipeOutNextInQueue, False);
+            }, pipeOutNextInQueue, False);
             // update MSHR: may save replaced line data
             cRqMshr.pipelineResp.setStateSlot(n, WaitNewTag, L1CRqSlot {
                 way: pipeOut.way, // use way from pipeline
@@ -902,21 +885,21 @@ endfunction
         function Action cRqSetDepNoCacheChange;
         action
             cRqMshr.pipelineResp.setStateSlot(n, Depend, defaultValue);
-            deqWriteLine(Invalid, ram, procRq.addr, pipeOutNextInQueue, False);
+            pipeline.deqWrite(Invalid, ram, pipeOutNextInQueue, False);
         endaction
         endfunction
 
         function Action cRqQueue;
         action
             cRqMshr.pipelineResp.setStateSlot(n, Queued, defaultValue);
-            deqWriteLine(Invalid, ram, procRq.addr, Valid(fromMaybe(n, pipeOutNextInQueue)), False);
+            pipeline.deqWrite(Invalid, ram, Valid(fromMaybe(n, pipeOutNextInQueue)), False);
         endaction
         endfunction
 
         function Action cRqDrop;
         action
             cRqMshr.pipelineResp.releaseEntry(n);
-            deqWriteLine(Invalid, ram, procRq.addr, pipeOutNextInQueue, False);
+            pipeline.deqWrite(Invalid, ram, pipeOutNextInQueue, False);
         endaction
         endfunction
 
@@ -1077,7 +1060,7 @@ endfunction
             // pRq can be directly dropped
             // must go through tag match, no successor
             pRqMshr.pipelineResp.releaseEntry(n);
-            deqWriteLine(Invalid, ram, pRq.addr, pipeOutNextInQueue, False);
+            pipeline.deqWrite(Invalid, ram, pipeOutNextInQueue, False);
             // sanity check (ram.info.tag != getTag(pRq.addr) is useless)
             if(!pipeOut.pRqMiss) begin
                 doAssert(ram.info.cs == S && pRq.toState == S && ram.info.tag == getTag(pRq.addr),
@@ -1102,7 +1085,7 @@ endfunction
             );
             // process pRq
             pRqMshr.pipelineResp.setDone_setData(n, Invalid); // S->I, no data needed
-            deqWriteLine(Invalid, RamData {
+            pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag, // keep tag the same (for sake of cRq)
                     cs: I, // downgraded to I
@@ -1111,7 +1094,7 @@ endfunction
                     other: ?
                 },
                 line: ram.line
-            }, pRq.addr, pipeOutNextInQueue, False);
+            }, pipeOutNextInQueue, False);
             rsToPIndexQ.enq(PRq (n));
             // update cRq bookkeeping
             cRqMshr.pipelineResp.setStateSlot(cOwner, WaitSt, L1CRqSlot {
@@ -1133,7 +1116,7 @@ endfunction
                 ("pRq should be processed")
             );
             pRqMshr.pipelineResp.setDone_setData(n, ram.info.cs == M ? Valid (pipeline.fullLine) : Invalid);
-            deqWriteLine(Invalid, RamData {
+            pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag,
                     cs: pRq.toState,
@@ -1141,8 +1124,8 @@ endfunction
                     owner: Invalid, // no successor
                     other: ?
                 },
-                line: ram.info.cs == M ? pipeline.fullLine : ram.line
-            }, pRq.addr, pipeOutSecondInQueue, False);
+                line: ram.line
+            }, pipeOutSecondInQueue, False);
             if (pipeOutNextInQueue matches tagged Valid .nextInQueue) begin
                 if (verbose)
                     $display("%t L1 %m pipelineResp: pRq: dequeuing req: mshr: %d, queueSucc: ",
@@ -1197,7 +1180,7 @@ endfunction
         end
 
         // always clear the cache line
-        deqWriteLine(Invalid, RamData {
+        pipeline.deqWrite(Invalid, RamData {
             info: CacheInfo {
                 tag: ?,
                 cs: I, // downgraded to I
@@ -1206,7 +1189,7 @@ endfunction
                 other: ?
             },
             line: ?
-        }, flushAddr, Invalid, False);
+        }, Invalid, False);
 
         // always reset link addr
         linkAddr <= Invalid;

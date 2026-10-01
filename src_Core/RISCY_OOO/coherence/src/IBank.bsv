@@ -127,7 +127,7 @@ module mkIBank#(
     Alias#(cacheOtherT, void), // owner cannot be pRq
     Alias#(cacheSetAuxT, Maybe#(cRqIdxT)),
     Alias#(cacheInfoT, CacheInfo#(tagT, Msi, void, cacheOwnerT, void)),
-    Alias#(ramDataT, RamData#(tagT, Msi, void, cacheOwnerT, cacheOtherT, Line)),
+    Alias#(ramDataT, RamData#(tagT, Msi, void, cacheOwnerT, cacheOtherT, CLineAccess)),
     Alias#(procRqT, ProcRqToI),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
     Alias#(cRsToPT, CRsMsg#(void)),
@@ -160,6 +160,9 @@ module mkIBank#(
     Fifo#(2, cRsToPT) rsToPQ <- mkCFFifo;
     Fifo#(2, cRqToPT) rqToPQ <- mkCFFifo;
     Fifo#(2, pRqRsFromPT) fromPQ <- mkCFFifo;
+
+    // Existing dependent requests re-enter the pipeline with their own address.
+    Fifo#(cRqNum, cRqIdxT) cRqRetryIndexQ <- mkCFFifo;
 
     FIFO#(MshrIndex#(cRqIdxT, pRqIdxT)) rsToPIndexQ <- mkSizedFIFO(valueOf(TAdd#(cRqNum, pRqNum)));
 
@@ -249,11 +252,29 @@ module mkIBank#(
         //$display("L1I cRqIndexQ length= %d", addedCRqs-removedCRqs);
     endrule
 
+    // Retry an already allocated dependent request using its real byte address.
+    // Its ordering FIFO and prefetch classification were established at allocation.
+    rule cRqTransfer_retry(cRqRetryIndexQ.notEmpty);
+        cRqRetryIndexQ.deq;
+        cRqIdxT n = cRqRetryIndexQ.first;
+        procRqT req = cRqMshr.retry.getRq(n);
+        pipeline.send(CRq (L1PipeRqIn {
+            addr: req.addr,
+            mshrIdx: n,
+            readWholeLine: False
+        }));
+       if (verbose)
+        $display("%t I %m cRqTransfer_retry: ", $time,
+            fshow(n), " ; ",
+            fshow(req)
+        );
+    endrule
+
     // XXX since I$ may be requested by processor constantly
     // cRq may come at every cycle, so we must make cRq has lower priority than pRq/pRs
     // otherwise the whole system may deadlock/livelock
     // we stop accepting cRq when we need to flush for security
-    rule cRqTransfer(flushDone);
+    rule cRqTransfer(!cRqRetryIndexQ.notEmpty && flushDone);
         Addr addr <- toGet(rqFromCQ).get;
 `ifdef DEBUG_ICACHE
         procRqT r = ProcRqToI {addr: addr, id: cRqId};
@@ -299,7 +320,7 @@ module mkIBank#(
     endrule
 
     // this descending urgency is necessary to avoid deadlock/livelock
-    (* descending_urgency = "pRsTransfer, cRqTransfer" *)
+    (* descending_urgency = "pRsTransfer, cRqTransfer_retry, cRqTransfer" *)
     rule pRsTransfer(fromPQ.first matches tagged PRs .resp);
         fromPQ.deq;
         pipeline.send(PRs (L1PipePRsIn {
@@ -314,8 +335,8 @@ module mkIBank#(
     endrule
 
     //(* descending_urgency = "createPrefetchRq, pRsTransfer, cRqTransfer" *)
-    (* descending_urgency = "pRqTransfer, cRqTransfer, createPrefetchRq" *)
-    rule createPrefetchRq(flushDone);
+    (* descending_urgency = "pRqTransfer, cRqTransfer_retry, cRqTransfer, createPrefetchRq" *)
+    rule createPrefetchRq(!cRqRetryIndexQ.notEmpty && flushDone);
         Addr addr <- prefetcher.getNextPrefetchAddr;
         procRqT r = ProcRqToI {addr: addr};
         cRqIdxT n <- cRqMshr.getEmptyEntryInit(r);
@@ -480,29 +501,26 @@ module mkIBank#(
 
     // pipeline outputs
     pipeOutT pipeOut = pipeline.first;
-    Line selectedAccessLine = accessVectorToCline(replicate(pipeOut.ram.line));
-    ramDataT ram = RamData {info: pipeOut.ram.info, line: selectedAccessLine};
+    ramDataT ram = pipeOut.ram;
     // get proc req to select from cRqMshr
-    procRqT pipeOutCRq = cRqMshr.pipelineResp.getRq(
-        case(pipeOut.cmd) matches
-            tagged L1CRq .n: (n);
-            default: (fromMaybe(0, ram.info.owner)); // L1PRs
-        endcase
-    );
+    cRqIdxT pipeOutCRqIdx = case(pipeOut.cmd) matches
+        tagged L1CRq .n: (n);
+        default: (fromMaybe(0, ram.info.owner)); // L1PRs
+    endcase;
+    procRqT pipeOutCRq = cRqMshr.pipelineResp.getRq(pipeOutCRqIdx);
+    Maybe#(cRqIdxT) pipeOutSucc = cRqMshr.pipelineResp.getSucc(pipeOutCRqIdx);
 
     // function to get superscaler inst read result
-    function resultT readInst(Line line, Addr addr);
-        Vector#(LineSzInst, Instruction16) instVec = unpack(pack(line.data));
-        // the start offset for reading inst
-        LineInstOffset startSel = getLineInstOffset(addr);
-        // calculate the maximum inst count that could be read from this access
-        AccessInstOffset accessStartSel = getAccessInstOffset(addr);
-        AccessInstOffset maxCntMinusOne = maxBound - accessStartSel;
+    function resultT readInst(CLineAccess access, Addr addr);
+        Vector#(AccessSzInst, Instruction16) instVec = unpack(access.data);
+        // Select within this access and stop at its boundary.
+        AccessInstOffset startSel = getAccessInstOffset(addr);
+        AccessInstOffset maxCntMinusOne = maxBound - startSel;
         // read inst superscalaer
         resultT val = ?;
         for(Integer i = 0; i < valueof(supSzX2); i = i+1) begin
             if(fromInteger(i) <= maxCntMinusOne) begin
-                LineInstOffset sel = startSel + fromInteger(i);
+                AccessInstOffset sel = startSel + fromInteger(i);
                 val[i] = Valid (instVec[sel]);
             end
             else begin
@@ -510,23 +528,6 @@ module mkIBank#(
             end
         end
         return val;
-    endfunction
-
-    // Adapt compatibility Line writes to L1Pipe's selected-access interface.
-    function Action deqWriteLine(
-        Maybe#(cRqIdxT) swapRq,
-        ramDataT wrRam,
-        Addr addr,
-        Maybe#(cRqIdxT) nextInQueue,
-        Bool updateRep
-    );
-    action
-        Vector#(CLineNumAccesses, CLineAccess) accesses = clineToAccessVector(wrRam.line);
-        pipeline.deqWrite(swapRq, RamData {
-            info: wrRam.info,
-            line: accesses[getCLineAccessSel(addr)]
-        }, nextInQueue, updateRep);
-    endaction
     endfunction
 
     // function to process cRq hit (MSHR slot may have garbage)
@@ -542,9 +543,10 @@ module mkIBank#(
         doAssert(ram.info.tag == getTag(req.addr) && ram.info.cs == S,
             "cRqHit but tag or cs incorrect"
         );
-        // deq pipeline or swap in successor
-        Maybe#(cRqIdxT) succ = cRqMshr.pipelineResp.getSucc(n);
-        deqWriteLine(succ, RamData {
+        // Dequeue this request. A successor must re-enter through pipeline.send
+        // so L1Pipe selects the access using the successor's real address.
+        Maybe#(cRqIdxT) succ = pipeOutSucc;
+        pipeline.deqWrite(Invalid, RamData {
             info: CacheInfo {
                 tag: getTag(req.addr), // should be the same as original tag
                 cs: ram.info.cs, // use cs in ram
@@ -553,7 +555,9 @@ module mkIBank#(
                 other: ?
             },
             line: ram.line
-        }, req.addr, Invalid, True); // hit, so update rep info
+        }, Invalid, True); // hit, so update rep info
+        if (succ matches tagged Valid .successor)
+            cRqRetryIndexQ.enq(successor);
         if (!cRqIsPrefetch[n]) begin
             prefetcher.reportAccess(req.addr, HIT);
             llcPrefetcher.reportAccess(req.addr, HIT);
@@ -568,10 +572,11 @@ module mkIBank#(
             fshow(succ), " ; ", fshow(instResult)
         );
 `ifdef DEBUG_ICACHE
-        // signal that this req is performed
+        // Preserve the legacy debug payload without widening the ordinary path.
+        Line debugLine = accessVectorToCline(replicate(ram.line));
         cRqDoneQ.enq(DebugICacheResp {
             id: req.id,
-            line: ram.line
+            line: debugLine
         });
 `endif
     endaction
@@ -607,7 +612,7 @@ module mkIBank#(
                 waitP: True // must fetch from parent
             });
             // deq pipeline & set owner, tag
-            deqWriteLine(Invalid, RamData {
+            pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // tag may be garbage if cs == I
                     cs: ram.info.cs,
@@ -616,7 +621,7 @@ module mkIBank#(
                     other: ?
                 },
                 line: ram.line
-            }, procRq.addr, Invalid, False);
+            }, Invalid, False);
             if (!cRqIsPrefetch[n]) begin
                 prefetcher.reportAccess(procRq.addr, MISS);
                 llcPrefetcher.reportAccess(procRq.addr, MISS);
@@ -629,7 +634,7 @@ module mkIBank#(
         function Action cRqReplacement;
         action
             // deq pipeline
-            deqWriteLine(Invalid, RamData {
+            pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // set to req tag (old tag is replaced right now)
                     cs: I,
@@ -638,7 +643,7 @@ module mkIBank#(
                     other: ?
                 },
                 line: ? // data is no longer used
-            }, procRq.addr, Invalid, False);
+            }, Invalid, False);
             doAssert(ram.info.cs == S, "I$ replacement only replace S line");
             // update MSHR to save replaced tag
             // although we send req to parent later (when resp to parent is sent)
@@ -661,7 +666,7 @@ module mkIBank#(
         function Action cRqSetDepNoCacheChange;
         action
             cRqMshr.pipelineResp.setStateSlot(n, Depend, defaultValue);
-            deqWriteLine(Invalid, ram, procRq.addr, Invalid, False);
+            pipeline.deqWrite(Invalid, ram, Invalid, False);
         endaction
         endfunction
 
@@ -757,7 +762,7 @@ module mkIBank#(
             $display("%t I %m pipelineResp: pRq: drop", $time);
             // pRq can be directly dropped, no successor (since just go through pipeline)
             pRqMshr.pipelineResp.releaseEntry(n);
-            deqWriteLine(Invalid, ram, pRq.addr, Invalid, False);
+            pipeline.deqWrite(Invalid, ram, Invalid, False);
         end
         else begin
            if (verbose)
@@ -771,7 +776,7 @@ module mkIBank#(
             // (2) if owned by cRq, cRq would have hit and released ownership
             doAssert(ram.info.owner == Invalid, "pRq cannot hit on line owned by anyone");
             // write ram: set cs to I
-            deqWriteLine(Invalid, RamData {
+            pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag,
                     cs: I, // I$ is always downgraded by pRq to I
@@ -780,7 +785,7 @@ module mkIBank#(
                     other: ?
                 },
                 line: ? // line is not useful
-            }, pRq.addr, Invalid, False);
+            }, Invalid, False);
             // pRq is done
             pRqMshr.pipelineResp.setDone(n);
             // send resp to parent
@@ -832,7 +837,7 @@ module mkIBank#(
         end
 
         // always clear the cache line
-        deqWriteLine(Invalid, RamData {
+        pipeline.deqWrite(Invalid, RamData {
             info: CacheInfo {
                 tag: ?,
                 cs: I, // downgraded to I
@@ -841,7 +846,7 @@ module mkIBank#(
                 other: ?
             },
             line: ?
-        }, flushAddr, Invalid, False);
+        }, Invalid, False);
 
         // check if we have finished all flush
         if (flush.index == maxBound &&

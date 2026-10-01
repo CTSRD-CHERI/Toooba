@@ -85,6 +85,14 @@ typedef struct {
 // MSHR data is purely for replacement resp to parent
 // (resp to processor is done immediately, no data buffering needed)
 
+// read-only port for re-entering an existing dependent request
+interface ICRqMshr_retry#(
+    numeric type cRqNum,
+    type reqT
+);
+    method reqT getRq(Bit#(TLog#(cRqNum)) n);
+endinterface
+
 // port for sendRsToP_cRq
 interface ICRqMshr_sendRsToP_cRq#(
     numeric type cRqNum,
@@ -162,6 +170,9 @@ interface ICRqMshr#(
 );
     // port for cRqTransfer, initialization is done inside method
     method ActionValue#(Bit#(TLog#(cRqNum))) getEmptyEntryInit(reqT r); 
+
+    // port for retrying an existing request
+    interface ICRqMshr_retry#(cRqNum, reqT) retry;
 
     // port for sendRsToC
     interface ICRqMshr_sendRsToC#(cRqNum, resultT) sendRsToC;
@@ -272,6 +283,12 @@ module mkICRqMshrSafe#(
 `endif
         return n;
     endmethod
+
+    interface ICRqMshr_retry retry;
+        method reqT getRq(cRqIndexT n);
+            return reqVec[n][cRqTransfer_port];
+        endmethod
+    endinterface
 
     interface ICRqMshr_sendRsToC sendRsToC;
         method Action releaseEntry(cRqIndexT n) if(inited);
