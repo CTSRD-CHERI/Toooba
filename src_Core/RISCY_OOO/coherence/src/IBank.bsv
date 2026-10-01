@@ -133,6 +133,7 @@ module mkIBank#(
     Alias#(cRsToPT, CRsMsg#(void)),
     Alias#(pRqFromPT, PRqMsg#(void)),
     Alias#(pRsFromPT, PRsMsg#(wayT, void)),
+    Alias#(pRsAccessFromPT, PRsAccessMsg#(wayT, void)),
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(cRqSlotT, ICRqSlot#(wayT, tagT)), // cRq MSHR slot
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
@@ -160,6 +161,7 @@ module mkIBank#(
     Fifo#(2, cRsToPT) rsToPQ <- mkCFFifo;
     Fifo#(2, cRqToPT) rqToPQ <- mkCFFifo;
     Fifo#(2, pRqRsFromPT) fromPQ <- mkCFFifo;
+    Fifo#(2, pRsAccessFromPT) rsAccessFromPQ <- mkCFFifo;
 
     // Existing dependent requests re-enter the pipeline with their own address.
     Fifo#(cRqNum, cRqIdxT) cRqRetryIndexQ <- mkCFFifo;
@@ -319,8 +321,25 @@ module mkIBank#(
         );
     endrule
 
-    // this descending urgency is necessary to avoid deadlock/livelock
-    (* descending_urgency = "pRsTransfer, cRqTransfer_retry, cRqTransfer" *)
+    Reg#(Bool) pRsAccessStarted <- mkReg(False);
+
+    // Parent responses must start before retries or new requests, and streamed
+    // and legacy responses must not compete nondeterministically for the pipe.
+    (* descending_urgency = "startPRsAccessTransfer, pRsTransfer, pRqTransfer, cRqTransfer_retry, cRqTransfer" *)
+    rule startPRsAccessTransfer(!pRsAccessStarted);
+        pipeline.startPRsAccess(rsAccessFromPQ.first);
+        pRsAccessStarted <= True;
+    endrule
+
+    rule transferPRsAccessFlit(pRsAccessStarted && pipeline.prsAccessReady);
+        let r = rsAccessFromPQ.first;
+        pipeline.putPRsAccess(r);
+        rsAccessFromPQ.deq;
+        if (r.last)
+            pRsAccessStarted <= False;
+    endrule
+
+    // Keep the whole-line path for configurations which still use it.
     rule pRsTransfer(fromPQ.first matches tagged PRs .resp);
         fromPQ.deq;
         pipeline.send(PRs (L1PipePRsIn {
@@ -879,7 +898,7 @@ module mkIBank#(
         interface rsToP = toFifoDeq(rsToPQ);
         interface rqToP = toFifoDeq(rqToPQ);
         interface fromP = toFifoEnq(fromPQ);
-        interface rsAccessFromP = nullFifoEnq;
+        interface rsAccessFromP = toFifoEnq(rsAccessFromPQ);
     endinterface
 
     interface InstServer to_proc;

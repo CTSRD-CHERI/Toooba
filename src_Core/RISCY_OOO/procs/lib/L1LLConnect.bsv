@@ -131,11 +131,9 @@ module mkL1LLConnect#(
         end
     endrule
 
-    Vector#(L1Num, Reg#(Line)) pRsPartial <- replicateM(mkReg(unpack(0)));
 `ifdef SELF_INV_CACHE
-    Integer streamedDataCaches = 0;
-`else
-    Integer streamedDataCaches = valueof(CoreNum);
+    // Self-invalidating I-cache banks retain the legacy whole-line interface.
+    Vector#(L1Num, Reg#(Line)) pRsPartial <- replicateM(mkReg(unpack(0)));
 `endif
     for(Integer i = 0; i < valueof(L1Num); i = i+1) begin
         rule sendPRq(llc.toC.first matches tagged PRq .rq
@@ -150,23 +148,22 @@ module mkL1LLConnect#(
             }));
         endrule
 
-        if (i < streamedDataCaches) begin
-            rule forwardPRsAccess(pRsLinkQ.first.child == fromInteger(i));
-                let r = pRsLinkQ.first;
-                pRsLinkQ.deq;
-                l1[i].rsAccessFromP.enq(PRsAccessMsg {
-                    addr: r.addr,
-                    toState: r.toState,
-                    data: r.data,
-                    access: r.access,
-                    last: r.last,
-                    child: ?,
-                    id: r.id
-                });
-            endrule
-        end
-        else begin
-            rule assembleIPRs(pRsLinkQ.first.child == fromInteger(i));
+`ifndef SELF_INV_CACHE
+        rule forwardPRsAccess(pRsLinkQ.first.child == fromInteger(i));
+            let r = pRsLinkQ.first;
+            pRsLinkQ.deq;
+            l1[i].rsAccessFromP.enq(PRsAccessMsg {
+                addr: r.addr,
+                toState: r.toState,
+                data: r.data,
+                access: r.access,
+                last: r.last,
+                child: ?,
+                id: r.id
+            });
+        endrule
+`else
+        rule assembleIPRs(pRsLinkQ.first.child == fromInteger(i));
                 let r = pRsLinkQ.first;
                 pRsLinkQ.deq;
                 Line newLine = pRsPartial[i];
@@ -190,8 +187,8 @@ module mkL1LLConnect#(
                 else begin
                     pRsPartial[i] <= newLine;
                 end
-            endrule
-        end
+        endrule
+`endif
     end
 endmodule
 
