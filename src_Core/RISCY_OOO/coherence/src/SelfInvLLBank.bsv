@@ -157,7 +157,7 @@ module mkSelfInvLLBank#(
     Alias#(dmaRqT, DmaRq#(dmaRqIdT)),
     Alias#(dmaRsT, DmaRs#(dmaRqIdT)),
     Alias#(ldMemRqIdT, LdMemRqId#(cRqIndexT)),
-    Alias#(memRsT, MemRsMsg#(ldMemRqIdT, void)),
+    Alias#(memRsT, MemRsAccessMsg#(ldMemRqIdT, void)),
     Alias#(toMemT, ToMemMsg#(ldMemRqIdT, void)),
     Alias#(toMemInfoT, ToMemInfo#(cRqIndexT)),
     Alias#(cRqT, LLRq#(cRqIdT, dmaRqIdT, childT)),
@@ -472,7 +472,13 @@ module mkSelfInvLLBank#(
 `endif
     endrule
 
-    // mem resp for child req, will refill cache, send it to pipeline
+    Reg#(Bool) mRsLineActive <- mkReg(False);
+    Reg#(ldMemRqIdT) mRsLineId <- mkReg(unpack(0));
+    Reg#(CLineAccessSel) mRsExpectedAccess <- mkReg(0);
+    Vector#(CLineNumAccesses, Reg#(CLineAccess)) mRsAccessLine
+        <- replicateM(mkReg(unpack(0)));
+
+    // SELF_INV compatibility path reassembles the access stream for its legacy pipe.
     (* descending_urgency = "mRsTransfer, cRsTransfer, cRqTransfer_retry, cRqTransfer_new_child, cRqTransfer_new_dma" *)
 `ifdef PERF_COUNT
     // stop mshr block stats when other higher priority req is being sent to
@@ -482,46 +488,52 @@ module mkSelfInvLLBank#(
     (* preempts = "cRsTransfer, cRqTransfer_new_child_block" *)
     (* preempts = "cRsTransfer, cRqTransfer_new_dma_block" *)
 `endif
-    rule mRsTransfer(rsFromMQ.first.id.refill);
-        // get mem resp cRq index & data
-        rsFromMQ.deq;
+    rule mRsTransfer;
         memRsT mRs = rsFromMQ.first;
-        cRqIndexT n = mRs.id.mshrIdx;
-        Line respData = mRs.data;
-        // get correspond cRq & slot
-        cRqT cRq = cRqMshr.transfer.getRq(n);
-        cRqSlotT cSlot = cRqMshr.transfer.getSlot(n);
-        doAssert(isRqFromC(cRq.id), "refill mem resp must be for child req");
-        // send to pipeline
-        pipeline.send(MRs (SelfInvLLPipeMRsIn {
-            addr: cRq.addr,
-            toState: cRq.toState == M ? M : E, // set upgrade state
-            data: respData,
-            way: cSlot.way
-        }));
-        $display("%t LL %m mRsTransfer: ", $time,
-            fshow(mRs), " ; ",
-            fshow(cRq), " ; ",
-            fshow(cSlot), " ; "
-        );
-`ifdef PERF_COUNT
-        // performance counter: normal miss lat and cnt
-        incrMissCnt(n, False);
-`endif
-    endrule
-
-    // this mem resp is just for a DMA req, won't go into pipeline to refill cache
-    rule mRsDeq_nonRefill(!rsFromMQ.first.id.refill);
+        doAssert(mRsLineActive ? mRs.id == mRsLineId : mRs.access == 0,
+                 "SELF_INV memory response burst id/start mismatch");
+        doAssert(mRs.access == mRsExpectedAccess,
+                 "SELF_INV memory response access arrived out of order");
+        Bool expectedLast = mRs.access == fromInteger(valueOf(CLineNumAccesses) - 1);
+        doAssert(mRs.last == expectedLast,
+                 "SELF_INV memory response ended at an invalid access");
+        Vector#(CLineNumAccesses, CLineAccess) accesses = readVReg(mRsAccessLine);
+        accesses[mRs.access] = mRs.data;
+        mRsAccessLine[mRs.access] <= mRs.data;
         rsFromMQ.deq;
-        memRsT mRs = rsFromMQ.first;
-        $display("%t LL %m mRsDeq_nonRefill: ", $time, fshow(mRs));
-        // save data into cRq mshr & send to DMA resp IndexQ
-        cRqMshr.mRsDeq.setData(mRs.id.mshrIdx, Valid (mRs.data));
-        rsLdToDmaIndexQ_mRsDeq.enq(mRs.id.mshrIdx);
+        if (mRs.last) begin
+            Line respData = accessVectorToCline(accesses);
+            cRqIndexT n = mRs.id.mshrIdx;
+            if (mRs.id.refill) begin
+                cRqT cRq = cRqMshr.transfer.getRq(n);
+                cRqSlotT cSlot = cRqMshr.transfer.getSlot(n);
+                doAssert(isRqFromC(cRq.id), "refill mem resp must be for child req");
+                pipeline.send(MRs (SelfInvLLPipeMRsIn {
+                    addr: cRq.addr,
+                    toState: cRq.toState == M ? M : E,
+                    data: respData,
+                    way: cSlot.way
+                }));
 `ifdef PERF_COUNT
-        // performance counter: dma miss lat and cnt
-        incrMissCnt(mRs.id.mshrIdx, True);
+                incrMissCnt(n, False);
 `endif
+            end
+            else begin
+                cRqMshr.mRsDeq.setData(n, Valid(respData));
+                rsLdToDmaIndexQ_mRsDeq.enq(n);
+`ifdef PERF_COUNT
+                incrMissCnt(n, True);
+`endif
+            end
+            mRsLineActive <= False;
+            mRsExpectedAccess <= 0;
+        end
+        else begin
+            mRsLineActive <= True;
+            mRsLineId <= mRs.id;
+            mRsExpectedAccess <= mRsExpectedAccess + 1;
+        end
+        $display("%t LL %m mRsTransfer: ", $time, fshow(mRs));
     endrule
 
     // send rd/wr to mem

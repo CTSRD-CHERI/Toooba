@@ -48,6 +48,7 @@ import SourceSink :: *;
 import Fabric_Defs  :: *;
 import Memory_Config :: *;
 import SoC_Map      :: *;
+import Assert       :: *;
 
 import VnD :: *;
 import Bag :: *;
@@ -84,11 +85,16 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
                           (LLC_AXI4_Adapter_IFC)
    provisos(Bits#(idT, idSz),
             Bits#(childT, childSz),
+            Eq#(idT),
+            Eq#(childT),
             FShow#(ToMemMsg#(idT, childT)),
-            FShow#(MemRsMsg#(idT, childT)),
+            FShow#(MemRsAccessMsg#(idT, childT)),
 
             Add#(a__, SizeOf#(LLC_AXI_ID#(idT, childT)), Wd_MId) // LLC_AXI_ID must fit into the external ID.
            );
+
+   staticAssert(valueOf(AccessesPerCLine) == valueOf(CLineNumAccesses),
+                "AXI cache-line burst length must match the cache access count");
 
    // Verbosity: 0: quiet; 1: LLC transactions; 2: loop detail
    Integer verbosity = 0;
@@ -135,14 +141,14 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
    // ================================================================
    // Handle read requests and responses
 
-   // Assemble one cache line from access-width AXI beats. The counter is
-   // deliberately wider than required to allow larger future configurations.
-   Reg #(Bit #(6)) rg_rd_rsp_beat <- mkReg (0);
+   Reg #(CLineAccessSel) rg_rd_rsp_beat <- mkReg (0);
 
    FIFOF #(LdMemRq #(idT, childT)) f_pending_reads <- mkFIFOF;
-   Reg #(CLine) rg_cline <- mkReg (unpack(0));
 
+   // The streamed response path has one transaction context, so keep one AXI
+   // read outstanding and make contiguous, in-order response bursts explicit.
    rule rl_handle_read_req (llc.toM.first matches tagged Ld .ld
+                            &&& !f_pending_reads.notEmpty
                             &&& (ctr_wr_rsps_pending.value == 0));
       if ((cfg_verbosity > 0)) begin
          $display ("%0d: LLC_AXI4_Adapter.rl_handle_read_req: Ld request from LLC to memory",
@@ -169,30 +175,40 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          $finish (1);
       end
 
-      // Shift the next AXI beat into the cache line being assembled.
-      let new_cline_tag = { mem_rsp.ruser, truncateLSB(pack(rg_cline.tag)) };
-      let new_cline_data = { mem_rsp.rdata, truncateLSB(pack(rg_cline.data)) };
-      let new_cline = CLine { tag: unpack(new_cline_tag)
-                            , data: unpack(new_cline_data) };
-      //let new_cline = shiftOutFrom0(mem_rsp.rdata, rg_cline, 1);
+      let ldreq = f_pending_reads.first;
+      LLC_AXI_ID#(idT, childT) rspId = unpack(truncate(mem_rsp.rid));
+      LLC_AXI_ID#(idT, childT) expectedId = LLC_AXI_ID {
+         tag_req: ldreq.tag_req,
+         id: ldreq.id,
+         child: ldreq.child
+      };
+      dynamicAssert(rspId == expectedId,
+                    "AXI read response ID changed within burst");
+      Bool expected_last = rg_rd_rsp_beat == fromInteger(valueOf(AccessesPerCLine) - 1);
+      dynamicAssert(mem_rsp.rlast == expected_last,
+                    "AXI read response last did not match cache-line access position");
+      CLineAccess accessData = CLineAccess {
+         tag: unpack(truncate(mem_rsp.ruser)),
+         data: truncate(mem_rsp.rdata)
+      };
+      MemRsAccessMsg #(idT, childT) resp = MemRsAccessMsg {
+         data: accessData,
+         access: rg_rd_rsp_beat,
+         last: mem_rsp.rlast,
+         child: ldreq.child,
+         id: ldreq.id
+      };
+      llc.rsFromM.enq(resp);
+
+      if (cfg_verbosity > 1)
+         $display ("    Response access to LLC: ", fshow (resp));
 
       if (mem_rsp.rlast) begin
-         let ldreq <- pop (f_pending_reads);
-         MemRsMsg #(idT, childT) resp = MemRsMsg {data:  new_cline,
-                                                  child: ldreq.child,
-                                                  id:    ldreq.id};
-
-         llc.rsFromM.enq (resp);
-
-         if (cfg_verbosity > 1)
-            $display ("    Response to LLC: ", fshow (resp));
-
+         f_pending_reads.deq;
          rg_rd_rsp_beat <= 0;
-         rg_cline <= unpack(0);
-      end else begin
-         rg_rd_rsp_beat <= rg_rd_rsp_beat + 1;
-         rg_cline <= new_cline;
       end
+      else
+         rg_rd_rsp_beat <= rg_rd_rsp_beat + 1;
    endrule
 
    // ================================================================

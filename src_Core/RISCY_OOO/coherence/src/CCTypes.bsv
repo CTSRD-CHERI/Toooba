@@ -372,10 +372,12 @@ typedef union tagged {
 } ToMemMsg#(type idT, type childT) deriving(Bits, Eq, FShow);
 
 typedef struct {
-    Line data;
+    CLineAccess data;
+    CLineAccessSel access;
+    Bool last;
     childT child; // send to which LLC/Dir
     idT id; // original Ld req id
-} MemRsMsg#(type idT, type childT) deriving(Bits, Eq, FShow);
+} MemRsAccessMsg#(type idT, type childT) deriving(Bits, Eq, FShow);
 
 // Dma req/resp
 typedef struct {
@@ -406,12 +408,12 @@ endinterface
 // memory interface
 interface MemFifoServer#(type idT, type childT);
     interface FifoEnq#(ToMemMsg#(idT, childT)) fromC;
-    interface FifoDeq#(MemRsMsg#(idT, childT)) rsToC;
+    interface FifoDeq#(MemRsAccessMsg#(idT, childT)) rsToC;
 endinterface
 
 interface MemFifoClient#(type idT, type childT);
     interface FifoDeq#(ToMemMsg#(idT, childT)) toM;
-    interface FifoEnq#(MemRsMsg#(idT, childT)) rsFromM;
+    interface FifoEnq#(MemRsAccessMsg#(idT, childT)) rsFromM;
 endinterface
 
 instance Connectable#(MemFifoServer#(idT, childT), MemFifoClient#(idT, childT));

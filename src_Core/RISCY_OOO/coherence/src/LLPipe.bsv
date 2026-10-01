@@ -45,7 +45,7 @@ import RWBramCore::*;
 import RandomReplace::*;
 
 export LLPipeCRqIn(..);
-export LLPipeMRsIn(..);
+
 export LLPipeIn(..);
 export LLCmd(..);
 export LLPipe(..);
@@ -59,17 +59,9 @@ typedef struct {
     cRqIdxT mshrIdx;
 } LLPipeCRqIn#(type cRqIdxT) deriving(Bits, Eq, FShow);
 
-typedef struct {
-    Addr addr;
-    Msi toState; // come from req in MSHR (E or M)
-    Line data; // come from memory must be valid
-    wayT way; // come from MSHR
-} LLPipeMRsIn#(type wayT) deriving(Bits, Eq, FShow);
-
 typedef union tagged {
     LLPipeCRqIn#(cRqIdxT) CRq;
     CRsMsg#(childT) CRs;
-    LLPipeMRsIn#(wayT) MRs;
 } LLPipeIn#(
     type childT,
     type wayT,
@@ -95,6 +87,9 @@ interface LLPipe#(
     method Action startCRsAccess(CRsAccessMsg#(Bit#(TLog#(childNum))) first);
     method Bool crsAccessReady;
     method Action putCRsAccess(CRsAccessMsg#(Bit#(TLog#(childNum))) flit);
+    method Action startMRsAccess(Addr addr, Msi toState, Bit#(TLog#(wayNum)) way);
+    method Bool mrsAccessReady;
+    method Action putMRsAccess(CLineAccess data, CLineAccessSel access, Bool last);
     method Bool notEmpty;
     method PipeOut#(
         Bit#(TLog#(wayNum)),
@@ -347,36 +342,22 @@ module mkLLPipe(
     );
 
     // Admission is deliberately limited to one logical command.  This covers
-    // commands already in hidden CCPipe stages as well as MRs serialization
-    // before pipe.enq.  A swapped successor is the same logical occupancy and
+    // commands already in hidden CCPipe stages as well as a streamed MRs before
+    // its final beat makes the metadata command visible. A swapped successor is
+    // the same logical occupancy and
     // therefore keeps this asserted until that successor retires.
     Reg#(Bool) logicalCmdActive <- mkReg(False);
 
-    // A legacy whole-line memory response is first serialized into the deep
-    // RAM.  Only its final access makes the metadata command visible.
-    Reg#(Bool) mrsWriteActive <- mkReg(False);
-    Reg#(Line) mrsWriteLine <- mkReg(unpack(0));
-    Reg#(Addr) mrsWriteAddr <- mkReg(0);
-    Reg#(Msi) mrsWriteToState <- mkReg(I);
-    Reg#(wayT) mrsWriteWay <- mkReg(0);
-    Reg#(CLineAccessSel) mrsWriteAccess <- mkReg(0);
+    // Streamed memory-response state. The physical RAM is written per access;
+    // the line copy exists only for the existing whole-line child response.
+    Reg#(Bool) mrsActive <- mkReg(False);
+    Reg#(Addr) mrsAddr <- mkReg(0);
+    Reg#(Msi) mrsToState <- mkReg(I);
+    Reg#(wayT) mrsWay <- mkReg(0);
+    Reg#(CLineAccessSel) mrsExpectedAccess <- mkReg(0);
+    Vector#(CLineNumAccesses, Reg#(CLineAccess)) mrsAccessLine
+        <- replicateM(mkReg(unpack(0)));
     Reg#(Maybe#(Line)) mrsLine <- mkReg(Invalid);
-
-    rule writeMRsLine(mrsWriteActive);
-        let accesses = clineToAccessVector(mrsWriteLine);
-        dataRam.wrAccess(getDataRamIndex(mrsWriteWay, getIndex(MRs (LLPipeMRsCmd {
-                               addr: mrsWriteAddr, way: mrsWriteWay}))),
-                         mrsWriteAccess, accesses[mrsWriteAccess]);
-        if (mrsWriteAccess == fromInteger(valueOf(CLineNumAccesses) - 1)) begin
-            pipe.enq(MRs (LLPipeMRsCmd {addr: mrsWriteAddr, way: mrsWriteWay}),
-                     Valid(?), UpCs(mrsWriteToState));
-            mrsLine <= Valid(mrsWriteLine);
-            mrsWriteActive <= False;
-            mrsWriteAccess <= 0;
-        end
-        else
-            mrsWriteAccess <= mrsWriteAccess + 1;
-    endrule
 
     // Every ordinary LL operation still exposes a complete line.  Keep RAM
     // request and response collection in distinct cycles to avoid a
@@ -521,14 +502,7 @@ module mkLLPipe(
                     legacyCRsAccess <= 0;
                 end
             end
-            tagged MRs .rs: begin
-                mrsWriteActive <= True;
-                mrsWriteLine <= rs.data;
-                mrsWriteAddr <= rs.addr;
-                mrsWriteToState <= rs.toState;
-                mrsWriteWay <= rs.way;
-                mrsWriteAccess <= 0;
-            end
+
         endcase
     endmethod
 
@@ -574,6 +548,42 @@ module mkLLPipe(
             doAssert(crsHasData, "non-final streamed child response must carry data");
             crsExpectedAccess <= crsExpectedAccess + 1;
         end
+    endmethod
+
+    method Action startMRsAccess(Addr addr, Msi toState, wayT way)
+        if (!logicalCmdActive && !wholeWriteActive);
+        logicalCmdActive <= True;
+        mrsActive <= True;
+        mrsAddr <= addr;
+        mrsToState <= toState;
+        mrsWay <= way;
+        mrsExpectedAccess <= 0;
+        mrsLine <= Invalid;
+    endmethod
+
+    method Bool mrsAccessReady = mrsActive;
+
+    method Action putMRsAccess(CLineAccess data, CLineAccessSel access, Bool last)
+        if (mrsActive);
+        doAssert(access == mrsExpectedAccess,
+                 "streamed memory response access arrived out of order");
+        Bool expectedLast = access == fromInteger(valueOf(CLineNumAccesses) - 1);
+        doAssert(last == expectedLast,
+                 "streamed memory response ended at an invalid access");
+        dataRam.wrAccess(getDataRamIndex(mrsWay, getIndex(MRs (LLPipeMRsCmd {
+                             addr: mrsAddr, way: mrsWay}))), access, data);
+        Vector#(CLineNumAccesses, CLineAccess) accesses = readVReg(mrsAccessLine);
+        accesses[access] = data;
+        mrsAccessLine[access] <= data;
+        if (last) begin
+            pipe.enq(MRs (LLPipeMRsCmd {addr: mrsAddr, way: mrsWay}),
+                     Valid(unpack(0)), UpCs(mrsToState));
+            mrsLine <= Valid(accessVectorToCline(accesses));
+            mrsActive <= False;
+            mrsExpectedAccess <= 0;
+        end
+        else
+            mrsExpectedAccess <= mrsExpectedAccess + 1;
     endmethod
 
     // need to adapt pipeline output to real output format
