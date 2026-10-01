@@ -138,7 +138,7 @@ interface L1Pipe#(
     method Line fullLine;
     method Action deqWrite(
         Maybe#(cRqIdxT) swapRq,
-        RamData#(tagT, Msi, void, Maybe#(cRqIdxT), void, Line) wrRam, // always write BRAM
+        RamData#(tagT, Msi, void, Maybe#(cRqIdxT), void, CLineAccess) wrRam,
         Maybe#(cRqIdxT) nextInQueue,
         Bool updateRep
     );
@@ -178,7 +178,7 @@ module mkL1Pipe(
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
     Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, dirT, ownerT, otherT, repT, CLineAccess, setAuxT, l1CmdT)), // output type
     Alias#(infoT, CacheInfo#(tagT, Msi, dirT, ownerT, otherT)),
-    Alias#(ramDataT, RamData#(tagT, Msi, dirT, ownerT, otherT, Line)),
+    Alias#(ramDataT, RamData#(tagT, Msi, dirT, ownerT, otherT, CLineAccess)),
     Alias#(respStateT, RespState#(Msi)),
     Alias#(tagMatchResT, TagMatchResult#(wayT)),
     Alias#(updateByUpCsT, UpdateByUpCs#(Msi)),
@@ -198,17 +198,8 @@ module mkL1Pipe(
     // RAMs
     Vector#(wayNum, RWBramCore#(indexT, infoT)) infoRam <- replicateM(mkRWBramCoreForwarded);
     RWBramCore#(indexT, repT) repRam <- mkRandRepRam;
-    Vector#(wayNum, RWBramCoreLineDirectWrite#(indexT)) dataRamDirect <- replicateM(mkRWBramCoreLineDirectWriteForwarded);
-    Vector#(wayNum, RWBramCore#(indexT, Line)) dataRam = newVector;
-    for (Integer i = 0; i < valueOf(wayNum); i = i + 1) begin
-        dataRam[i] = interface RWBramCore;
-            method wrReq = dataRamDirect[i].wrReq;
-            method rdReq = dataRamDirect[i].rdReq;
-            method rdResp = dataRamDirect[i].rdResp;
-            method rdRespValid = dataRamDirect[i].rdRespValid;
-            method deqRdResp = dataRamDirect[i].deqRdResp;
-        endinterface;
-    end
+    Vector#(wayNum, RWBramCoreLineAccess#(indexT)) dataRam
+        <- replicateM(mkRWBramCoreLineAccessForwarded);
     RWBramCore#(indexT, setAuxT) queueRam <- mkRWBramCoreForwarded;
 
     // initialize RAM
@@ -374,12 +365,33 @@ module mkL1Pipe(
     );
 
     Reg#(Bool) lineReadIssued <- mkReg(False);
+    Reg#(Bool) lineReadSweep <- mkReg(False);
     Reg#(Bool) lineReadWhole <- mkReg(False);
     Reg#(CLineAccessSel) lineReadAccess <- mkReg(0);
+    Vector#(CLineNumAccesses, Reg#(CLineAccess)) lineReadLine
+        <- replicateM(mkReg(unpack(0)));
     Ehr#(2, Maybe#(Line)) lineReadDataEhr <- mkEhr(Invalid);
     Reg#(Maybe#(Line)) lineReadData = lineReadDataEhr[0];
     Reg#(Maybe#(Line)) lineReadDataDeq = lineReadDataEhr[1];
     Reg#(Maybe#(Line)) legacyPRsLine <- mkReg(Invalid);
+
+    Reg#(Bool) wholeWriteActive <- mkReg(False);
+    Reg#(Line) wholeWriteLine <- mkRegU;
+    Reg#(wayT) wholeWriteWay <- mkRegU;
+    Reg#(indexT) wholeWriteIndex <- mkRegU;
+    Reg#(CLineAccessSel) wholeWriteAccess <- mkReg(0);
+
+    rule writeWholeLine(wholeWriteActive);
+        let accesses = clineToAccessVector(wholeWriteLine);
+        dataRam[wholeWriteWay].wrAccess(wholeWriteIndex, wholeWriteAccess,
+                                       accesses[wholeWriteAccess]);
+        if (wholeWriteAccess == fromInteger(valueOf(CLineNumAccesses) - 1)) begin
+            wholeWriteActive <= False;
+            wholeWriteAccess <= 0;
+        end
+        else
+            wholeWriteAccess <= wholeWriteAccess + 1;
+    endrule
 
     Reg#(Bool) prsActive <- mkReg(False);
     Reg#(Bool) prsComplete <- mkReg(False);
@@ -413,7 +425,8 @@ module mkL1Pipe(
                || (isPRsCmd(cmd) && isValid(legacyPRsLine));
     endfunction
 
-    rule issueSelectedLineRead(pipe.notEmpty && !lineReadIssued && !isValid(lineReadData)
+    rule issueSelectedLineRead(pipe.notEmpty && !wholeWriteActive
+                               && !lineReadIssued && !isValid(lineReadData)
                                && !responseSuppliesLine(pipe.first.cmd));
         let pout = pipe.first;
         Addr addr = getAddrFromCmd(pout.cmd);
@@ -429,33 +442,39 @@ module mkL1Pipe(
             default: True;
         endcase;
         CLineAccessSel access = getCLineAccessSel(addr);
-        if (readWhole)
-            dataRam[pout.way].rdReq(getIndex(pout.cmd));
-        else
-            dataRamDirect[pout.way].rdAccessReq(getIndex(pout.cmd), access);
-        lineReadWhole <= readWhole;
-        lineReadAccess <= access;
+        Bool continuingSweep = lineReadSweep;
+        Bool selectedReadWhole = continuingSweep || readWhole;
+        CLineAccessSel firstAccess = continuingSweep ? lineReadAccess
+                                                    : (readWhole ? 0 : access);
+        dataRam[pout.way].rdAccessReq(getIndex(pout.cmd), firstAccess);
+        lineReadWhole <= selectedReadWhole;
+        lineReadSweep <= selectedReadWhole;
+        lineReadAccess <= firstAccess;
         lineReadIssued <= True;
     endrule
 
     rule collectSelectedLineRead(pipe.notEmpty && lineReadIssued);
         let pout = pipe.first;
-        Line line = unpack(0);
-        if (lineReadWhole) begin
-            line = dataRam[pout.way].rdResp;
-            dataRam[pout.way].deqRdResp;
+        let accessData = dataRam[pout.way].rdAccessResp;
+        dataRam[pout.way].deqRdAccessResp;
+        Vector#(CLineNumAccesses, CLineAccess) accesses = replicate(unpack(0));
+        if (lineReadWhole)
+            accesses = readVReg(lineReadLine);
+        accesses[lineReadAccess] = accessData;
+        if (lineReadWhole
+            && lineReadAccess != fromInteger(valueOf(CLineNumAccesses) - 1)) begin
+            lineReadLine[lineReadAccess] <= accessData;
+            lineReadAccess <= lineReadAccess + 1;
+            lineReadIssued <= False;
         end
         else begin
-            Vector#(CLineNumAccesses, CLineAccess) accesses = replicate(unpack(0));
-            accesses[lineReadAccess] = dataRamDirect[pout.way].rdAccessResp(lineReadAccess);
-            dataRamDirect[pout.way].deqRdAccessResp(lineReadAccess);
-            line = accessVectorToCline(accesses);
+            lineReadData <= Valid(accessVectorToCline(accesses));
+            lineReadIssued <= False;
+            lineReadSweep <= False;
         end
-        lineReadData <= Valid(line);
-        lineReadIssued <= False;
     endrule
 
-    method Action send(pipeInT req) if (!prsActive);
+    method Action send(pipeInT req) if (!prsActive && !wholeWriteActive);
         case(req) matches
             tagged CRq .rq: begin
                 pipe.enq(CRq (rq), Invalid, Invalid);
@@ -478,7 +497,8 @@ module mkL1Pipe(
         endcase
     endmethod
 
-    method Action startPRsAccess(PRsAccessMsg#(wayT, void) first) if (!prsActive);
+    method Action startPRsAccess(PRsAccessMsg#(wayT, void) first)
+        if (!prsActive && !wholeWriteActive);
         doAssert(first.access == 0, "streamed parent response must start at access zero");
         prsActive <= True;
         prsComplete <= False;
@@ -508,7 +528,7 @@ module mkL1Pipe(
         let pout = pipe.first;
         doAssert(pout.way == prsWay, "streamed parent response selected wrong way");
         if (flit.data matches tagged Valid .accessData) begin
-            dataRamDirect[pout.way].wrAccess(getIndex(pout.cmd), flit.access, accessData);
+            dataRam[pout.way].wrAccess(getIndex(pout.cmd), flit.access, accessData);
             prsLine[flit.access] <= accessData;
         end
         if (flit.last) begin
@@ -578,27 +598,21 @@ module mkL1Pipe(
 `endif
         end
         let pout = pipe.first;
-        Bool streamedUnchanged = isActivePRsCmd(pout.cmd)
-                                 && prsHasData && wrRam.line == getPRsLine;
-        if (!streamedUnchanged) begin
-            if (responseSuppliesLine(pout.cmd)) begin
-                Line responseLine = isActivePRsCmd(pout.cmd)
-                                    ? getPRsLine : validValue(legacyPRsLine);
-                let responseAccesses = clineToAccessVector(responseLine);
-                let writeAccesses = clineToAccessVector(wrRam.line);
-                let access = getCLineAccessSel(getAddrFromCmd(pout.cmd));
-                responseAccesses[access] = writeAccesses[access];
-                dataRamDirect[pout.way].wrReq(getIndex(pout.cmd),
-                                              accessVectorToCline(responseAccesses));
-            end
-            else if (lineReadWhole)
-                dataRamDirect[pout.way].wrReq(getIndex(pout.cmd), wrRam.line);
-            else begin
-                let accesses = clineToAccessVector(wrRam.line);
-                dataRamDirect[pout.way].wrAccess(getIndex(pout.cmd), lineReadAccess,
-                                                 accesses[lineReadAccess]);
-            end
+        let access = getCLineAccessSel(getAddrFromCmd(pout.cmd));
+        Bool streamedUnchanged = isActivePRsCmd(pout.cmd) && prsHasData
+                                 && wrRam.line == clineToAccessVector(getPRsLine)[access];
+        if (isValid(legacyPRsLine) && isPRsCmd(pout.cmd)) begin
+            let responseAccesses = clineToAccessVector(validValue(legacyPRsLine));
+            responseAccesses[access] = wrRam.line;
+            wholeWriteLine <= accessVectorToCline(responseAccesses);
+            wholeWriteWay <= pout.way;
+            wholeWriteIndex <= getIndex(pout.cmd);
+            wholeWriteAccess <= 0;
+            wholeWriteActive <= True;
         end
+        else if (!streamedUnchanged
+                 && (!lineReadWhole || responseSuppliesLine(pout.cmd)))
+            dataRam[pout.way].wrAccess(getIndex(pout.cmd), access, wrRam.line);
 
         RamData#(tagT, Msi, dirT, ownerT, otherT, void) metaRam = RamData {
             info: wrRam.info,
@@ -607,6 +621,8 @@ module mkL1Pipe(
         pipe.deqWriteNoData(newCmd, metaRam, nextInQueue, updateRep);
 
         lineReadIssued <= False;
+        lineReadSweep <= False;
+        lineReadWhole <= False;
         lineReadDataDeq <= Invalid;
         legacyPRsLine <= Invalid;
         if (isActivePRsCmd(pout.cmd)) begin

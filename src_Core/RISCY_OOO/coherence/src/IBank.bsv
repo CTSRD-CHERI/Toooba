@@ -512,6 +512,23 @@ module mkIBank#(
         return val;
     endfunction
 
+    // Adapt compatibility Line writes to L1Pipe's selected-access interface.
+    function Action deqWriteLine(
+        Maybe#(cRqIdxT) swapRq,
+        ramDataT wrRam,
+        Addr addr,
+        Maybe#(cRqIdxT) nextInQueue,
+        Bool updateRep
+    );
+    action
+        Vector#(CLineNumAccesses, CLineAccess) accesses = clineToAccessVector(wrRam.line);
+        pipeline.deqWrite(swapRq, RamData {
+            info: wrRam.info,
+            line: accesses[getCLineAccessSel(addr)]
+        }, nextInQueue, updateRep);
+    endaction
+    endfunction
+
     // function to process cRq hit (MSHR slot may have garbage)
     function Action cRqHit(cRqIdxT n, procRqT req);
     action
@@ -527,7 +544,7 @@ module mkIBank#(
         );
         // deq pipeline or swap in successor
         Maybe#(cRqIdxT) succ = cRqMshr.pipelineResp.getSucc(n);
-        pipeline.deqWrite(succ, RamData {
+        deqWriteLine(succ, RamData {
             info: CacheInfo {
                 tag: getTag(req.addr), // should be the same as original tag
                 cs: ram.info.cs, // use cs in ram
@@ -536,7 +553,7 @@ module mkIBank#(
                 other: ?
             },
             line: ram.line
-        }, Invalid, True); // hit, so update rep info
+        }, req.addr, Invalid, True); // hit, so update rep info
         if (!cRqIsPrefetch[n]) begin
             prefetcher.reportAccess(req.addr, HIT);
             llcPrefetcher.reportAccess(req.addr, HIT);
@@ -590,7 +607,7 @@ module mkIBank#(
                 waitP: True // must fetch from parent
             });
             // deq pipeline & set owner, tag
-            pipeline.deqWrite(Invalid, RamData {
+            deqWriteLine(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // tag may be garbage if cs == I
                     cs: ram.info.cs,
@@ -599,7 +616,7 @@ module mkIBank#(
                     other: ?
                 },
                 line: ram.line
-            }, Invalid, False);
+            }, procRq.addr, Invalid, False);
             if (!cRqIsPrefetch[n]) begin
                 prefetcher.reportAccess(procRq.addr, MISS);
                 llcPrefetcher.reportAccess(procRq.addr, MISS);
@@ -612,7 +629,7 @@ module mkIBank#(
         function Action cRqReplacement;
         action
             // deq pipeline
-            pipeline.deqWrite(Invalid, RamData {
+            deqWriteLine(Invalid, RamData {
                 info: CacheInfo {
                     tag: getTag(procRq.addr), // set to req tag (old tag is replaced right now)
                     cs: I,
@@ -621,7 +638,7 @@ module mkIBank#(
                     other: ?
                 },
                 line: ? // data is no longer used
-            }, Invalid, False);
+            }, procRq.addr, Invalid, False);
             doAssert(ram.info.cs == S, "I$ replacement only replace S line");
             // update MSHR to save replaced tag
             // although we send req to parent later (when resp to parent is sent)
@@ -644,7 +661,7 @@ module mkIBank#(
         function Action cRqSetDepNoCacheChange;
         action
             cRqMshr.pipelineResp.setStateSlot(n, Depend, defaultValue);
-            pipeline.deqWrite(Invalid, ram, Invalid, False);
+            deqWriteLine(Invalid, ram, procRq.addr, Invalid, False);
         endaction
         endfunction
 
@@ -740,7 +757,7 @@ module mkIBank#(
             $display("%t I %m pipelineResp: pRq: drop", $time);
             // pRq can be directly dropped, no successor (since just go through pipeline)
             pRqMshr.pipelineResp.releaseEntry(n);
-            pipeline.deqWrite(Invalid, ram, Invalid, False);
+            deqWriteLine(Invalid, ram, pRq.addr, Invalid, False);
         end
         else begin
            if (verbose)
@@ -754,7 +771,7 @@ module mkIBank#(
             // (2) if owned by cRq, cRq would have hit and released ownership
             doAssert(ram.info.owner == Invalid, "pRq cannot hit on line owned by anyone");
             // write ram: set cs to I
-            pipeline.deqWrite(Invalid, RamData {
+            deqWriteLine(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag,
                     cs: I, // I$ is always downgraded by pRq to I
@@ -763,7 +780,7 @@ module mkIBank#(
                     other: ?
                 },
                 line: ? // line is not useful
-            }, Invalid, False);
+            }, pRq.addr, Invalid, False);
             // pRq is done
             pRqMshr.pipelineResp.setDone(n);
             // send resp to parent
@@ -788,6 +805,8 @@ module mkIBank#(
         pipeOut.cmd matches tagged L1Flush .flush
     );
         pRqIdxT n = flush.mshrIdx;
+        Bit#(LgLineSzBytes) offset = 0;
+        Addr flushAddr = {ram.info.tag, flush.index, bankId, offset};
        if (verbose)
         $display("%t I %m pipelineResp: flush: ", $time, fshow(flush));
 
@@ -809,13 +828,11 @@ module mkIBank#(
             rsToPIndexQ.enq(PRq (n));
             // record the flushed addr in MSHR so that sendRsToP rule knows
             // which addr is invalidated
-            Bit#(LgLineSzBytes) offset = 0;
-            Addr addr = {ram.info.tag, flush.index, bankId, offset};
-            pRqMshr.pipelineResp.setFlushAddr(n, addr);
+            pRqMshr.pipelineResp.setFlushAddr(n, flushAddr);
         end
 
         // always clear the cache line
-        pipeline.deqWrite(Invalid, RamData {
+        deqWriteLine(Invalid, RamData {
             info: CacheInfo {
                 tag: ?,
                 cs: I, // downgraded to I
@@ -824,7 +841,7 @@ module mkIBank#(
                 other: ?
             },
             line: ?
-        }, Invalid, False);
+        }, flushAddr, Invalid, False);
 
         // check if we have finished all flush
         if (flush.index == maxBound &&
