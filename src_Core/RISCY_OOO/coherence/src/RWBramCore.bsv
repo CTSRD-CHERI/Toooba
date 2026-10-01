@@ -66,6 +66,9 @@ endinterface
 interface RWBramCoreLineDirectWrite#(type addrT);
     method Action wrReq(addrT a, CLine line);
     method Action wrAccess(addrT a, CLineAccessSel access, CLineAccess data);
+    method Action rdAccessReq(addrT a, CLineAccessSel access);
+    method CLineAccess rdAccessResp(CLineAccessSel access);
+    method Action deqRdAccessResp(CLineAccessSel access);
     method Action rdReq(addrT a);
     method CLine rdResp;
     method Bool rdRespValid;
@@ -303,6 +306,20 @@ module mkRWBramCoreLineDirectWrite(RWBramCoreLineDirectWrite#(addrT)) provisos(
         tagRam[access].wrReq(a, data.tag);
     endmethod
 
+    method Action rdAccessReq(addrT a, CLineAccessSel access);
+        dataRam[access].rdReq(a);
+        tagRam[access].rdReq(a);
+    endmethod
+
+    method CLineAccess rdAccessResp(CLineAccessSel access);
+        return CLineAccess {data: dataRam[access].rdResp, tag: tagRam[access].rdResp};
+    endmethod
+
+    method Action deqRdAccessResp(CLineAccessSel access);
+        dataRam[access].deqRdResp;
+        tagRam[access].deqRdResp;
+    endmethod
+
     method Action rdReq(addrT a);
         for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1) begin
             dataRam[i].rdReq(a);
@@ -349,6 +366,20 @@ module mkRWBramCoreLineDirectWriteForwarded(RWBramCoreLineDirectWrite#(addrT)) p
     method Action wrAccess(addrT a, CLineAccessSel access, CLineAccess data);
         dataRam[access].wrReq(a, data.data);
         tagRam[access].wrReq(a, data.tag);
+    endmethod
+
+    method Action rdAccessReq(addrT a, CLineAccessSel access);
+        dataRam[access].rdReq(a);
+        tagRam[access].rdReq(a);
+    endmethod
+
+    method CLineAccess rdAccessResp(CLineAccessSel access);
+        return CLineAccess {data: dataRam[access].rdResp, tag: tagRam[access].rdResp};
+    endmethod
+
+    method Action deqRdAccessResp(CLineAccessSel access);
+        dataRam[access].deqRdResp;
+        tagRam[access].deqRdResp;
     endmethod
 
     method Action rdReq(addrT a);

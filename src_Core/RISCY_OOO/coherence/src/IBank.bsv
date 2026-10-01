@@ -262,10 +262,11 @@ module mkIBank#(
         procRqT r = ProcRqToI {addr: addr};
 `endif
         cRqIdxT n <- cRqMshr.getEmptyEntryInit(r);
-        // send to pipeline
+        // Instruction fetch windows may span access boundaries.
         pipeline.send(CRq (L1PipeRqIn {
             addr: r.addr,
-            mshrIdx: n
+            mshrIdx: n,
+            readWholeLine: True
         }));
         // enq to indexQ for in order resp
         cRqIndexQ.enq(n);
@@ -288,7 +289,8 @@ module mkIBank#(
         // send to pipeline
         pipeline.send(PRq (L1PipeRqIn {
             addr: req.addr,
-            mshrIdx: n
+            mshrIdx: n,
+            readWholeLine: True
         }));
        if (verbose)
         $display("%t I %m pRqTransfer: ", $time,
@@ -318,10 +320,11 @@ module mkIBank#(
         Addr addr <- prefetcher.getNextPrefetchAddr;
         procRqT r = ProcRqToI {addr: addr};
         cRqIdxT n <- cRqMshr.getEmptyEntryInit(r);
-        // send to pipeline
+        // Instruction fetch windows may span access boundaries.
         pipeline.send(CRq (L1PipeRqIn {
             addr: r.addr,
-            mshrIdx: n
+            mshrIdx: n,
+            readWholeLine: True
         }));
         // enq to indexQ for in order resp
         prefetchIndexQ.enq(n);

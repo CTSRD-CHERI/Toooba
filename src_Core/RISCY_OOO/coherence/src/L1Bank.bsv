@@ -306,7 +306,8 @@ endfunction
         procRqT req = cRqMshr.cRqTransfer.getRq(n);
         pipeline.send(CRq (L1PipeRqIn {
             addr: req.addr,
-            mshrIdx: n
+            mshrIdx: n,
+            readWholeLine: req.loadTags
         }));
         cRqIsPrefetch[n] <= False;
        if (verbose)
@@ -325,7 +326,8 @@ endfunction
         // send to pipeline
         pipeline.send(CRq (L1PipeRqIn {
             addr: r.addr,
-            mshrIdx: n
+            mshrIdx: n,
+            readWholeLine: r.loadTags
         }));
         cRqIsPrefetch[n] <= False;
         // performance counter: cRq type
@@ -343,7 +345,8 @@ endfunction
         // send to pipeline
         pipeline.send(PRq (L1PipeRqIn {
             addr: req.addr,
-            mshrIdx: n
+            mshrIdx: n,
+            readWholeLine: False
         }));
        if (verbose)
         $display("%t L1 %m pRqTransfer: ", $time,
@@ -397,7 +400,8 @@ endfunction
         // send to pipeline
         pipeline.send(CRq (L1PipeRqIn {
             addr: r.addr,
-            mshrIdx: n
+            mshrIdx: n,
+            readWholeLine: False
         }));
         cRqIsPrefetch[n] <= True;
         // performance counter: cRq type

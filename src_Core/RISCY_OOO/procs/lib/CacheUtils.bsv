@@ -108,6 +108,8 @@ typedef TLog#(CLineDataNumBytes) LogCLineDataNumBytes;
 typedef TDiv#(AccessWidth, MemDataSz) CLineMemDataPerAccess;
 typedef TDiv#(CLineDataSz, AccessWidth) CLineNumAccesses;
 typedef Bit#(TMax#(TLog#(CLineNumAccesses), 1)) CLineAccessSel;
+function CLineAccessSel getCLineAccessSel(Addr a) =
+  truncate(a >> valueOf(TLog#(TDiv#(AccessWidth, 8))));
 typedef struct {
   Vector#(CLineMemDataPerAccess, MemTag) tag;
   Bit#(AccessWidth) data;

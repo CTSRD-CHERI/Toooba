@@ -63,6 +63,7 @@ export mkL1Pipe;
 typedef struct {
     Addr addr;
     rqIdxT mshrIdx;
+    Bool readWholeLine;
 } L1PipeRqIn#(type rqIdxT) deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -371,6 +372,8 @@ module mkL1Pipe(
     );
 
     Reg#(Bool) lineReadIssued <- mkReg(False);
+    Reg#(Bool) lineReadWhole <- mkReg(False);
+    Reg#(CLineAccessSel) lineReadAccess <- mkReg(0);
     Ehr#(2, Maybe#(Line)) lineReadDataEhr <- mkEhr(Invalid);
     Reg#(Maybe#(Line)) lineReadData = lineReadDataEhr[0];
     Reg#(Maybe#(Line)) lineReadDataDeq = lineReadDataEhr[1];
@@ -411,14 +414,41 @@ module mkL1Pipe(
     rule issueSelectedLineRead(pipe.notEmpty && !lineReadIssued && !isValid(lineReadData)
                                && !responseSuppliesLine(pipe.first.cmd));
         let pout = pipe.first;
-        dataRam[pout.way].rdReq(getIndex(pout.cmd));
+        Addr addr = getAddrFromCmd(pout.cmd);
+        Bool readWhole = case (pout.cmd) matches
+            tagged CRq .rq:
+                rq.readWholeLine
+                || (pout.ram.info.cs == M && pout.ram.info.tag != truncateLSB(rq.addr));
+            tagged PRq .*: pout.ram.info.cs == M;
+            tagged PRs .*: True;
+`ifdef SECURITY_CACHES
+            tagged Flush .*: pout.ram.info.cs == M;
+`endif
+            default: True;
+        endcase;
+        CLineAccessSel access = getCLineAccessSel(addr);
+        if (readWhole)
+            dataRam[pout.way].rdReq(getIndex(pout.cmd));
+        else
+            dataRamDirect[pout.way].rdAccessReq(getIndex(pout.cmd), access);
+        lineReadWhole <= readWhole;
+        lineReadAccess <= access;
         lineReadIssued <= True;
     endrule
 
     rule collectSelectedLineRead(pipe.notEmpty && lineReadIssued);
         let pout = pipe.first;
-        let line = dataRam[pout.way].rdResp;
-        dataRam[pout.way].deqRdResp;
+        Line line = unpack(0);
+        if (lineReadWhole) begin
+            line = dataRam[pout.way].rdResp;
+            dataRam[pout.way].deqRdResp;
+        end
+        else begin
+            Vector#(CLineNumAccesses, CLineAccess) accesses = replicate(unpack(0));
+            accesses[lineReadAccess] = dataRamDirect[pout.way].rdAccessResp(lineReadAccess);
+            dataRamDirect[pout.way].deqRdAccessResp(lineReadAccess);
+            line = accessVectorToCline(accesses);
+        end
         lineReadData <= Valid(line);
         lineReadIssued <= False;
     endrule
@@ -529,7 +559,13 @@ module mkL1Pipe(
         Maybe#(pipeCmdT) newCmd = Invalid;
         if(swapRq matches tagged Valid .idx) begin // swap in cRq
             Addr addr = getAddrFromCmd(pipe.first.cmd); // inherit addr
-            newCmd = Valid (CRq (L1PipeRqIn {addr: addr, mshrIdx: idx}));
+            newCmd = Valid (CRq (L1PipeRqIn {
+                addr: addr,
+                mshrIdx: idx,
+                // The successor's request attributes are not available here.
+                // Conservatively preserve the whole-line behavior.
+                readWholeLine: True
+            }));
 `ifdef SECURITY_CACHES
             doAssert(pipe.first.cmd matches tagged Flush .f ? False : True,
                      "Cannot swap after a flush req");
@@ -538,8 +574,15 @@ module mkL1Pipe(
         let pout = pipe.first;
         Bool streamedUnchanged = isActivePRsCmd(pout.cmd)
                                  && prsHasData && wrRam.line == getPRsLine;
-        if (!streamedUnchanged)
-            dataRamDirect[pout.way].wrReq(getIndex(pout.cmd), wrRam.line);
+        if (!streamedUnchanged) begin
+            if (responseSuppliesLine(pout.cmd) || lineReadWhole)
+                dataRamDirect[pout.way].wrReq(getIndex(pout.cmd), wrRam.line);
+            else begin
+                let accesses = clineToAccessVector(wrRam.line);
+                dataRamDirect[pout.way].wrAccess(getIndex(pout.cmd), lineReadAccess,
+                                                 accesses[lineReadAccess]);
+            end
+        end
 
         RamData#(tagT, Msi, dirT, ownerT, otherT, void) metaRam = RamData {
             info: wrRam.info,
