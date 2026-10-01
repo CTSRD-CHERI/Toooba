@@ -592,7 +592,7 @@ endfunction
 function Bool memAddrMisaligned(Addr addr, ByteOrTagEn byteOrTagEn);
     MemDataByteEn byteEn = byteOrTagEn.DataMemAccess;
     if (byteOrTagEn == TagMemAccess) begin
-        return(!isCLineAlignAddr(addr));
+        return(!isCLineAccessAlignAddr(addr));
     end
     else if(byteEn[15]) begin
         return addr[3:0] != 0;

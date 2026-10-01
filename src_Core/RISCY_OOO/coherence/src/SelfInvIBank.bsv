@@ -298,8 +298,9 @@ module mkSelfInvIBank#(
         Vector#(LineSzInst, Instruction16) instVec = unpack(pack(line.data));
         // the start offset for reading inst
         LineInstOffset startSel = getLineInstOffset(addr);
-        // calculate the maximum inst count that could be read from line
-        LineInstOffset maxCntMinusOne = maxBound - startSel;
+        // calculate the maximum inst count that could be read from this access
+        AccessInstOffset accessStartSel = getAccessInstOffset(addr);
+        AccessInstOffset maxCntMinusOne = maxBound - accessStartSel;
         // read inst superscalaer
         resultT val = ?;
         for(Integer i = 0; i < valueof(supSzX2); i = i+1) begin

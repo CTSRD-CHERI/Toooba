@@ -110,6 +110,10 @@ typedef TDiv#(CLineDataSz, AccessWidth) CLineNumAccesses;
 typedef Bit#(TMax#(TLog#(CLineNumAccesses), 1)) CLineAccessSel;
 function CLineAccessSel getCLineAccessSel(Addr a) =
   truncate(a >> valueOf(TLog#(TDiv#(AccessWidth, 8))));
+function Bool isCLineAccessAlignAddr(Addr a);
+  Bit#(TLog#(TDiv#(AccessWidth, 8))) offset = truncate(a);
+  return offset == 0;
+endfunction
 typedef struct {
   Vector#(CLineMemDataPerAccess, MemTag) tag;
   Bit#(AccessWidth) data;
@@ -122,6 +126,14 @@ function Vector#(CLineNumAccesses, CLineAccess) clineToAccessVector(CLine line);
   for (Integer i = 0; i < valueOf(CLineNumAccesses); i = i + 1)
     accesses[i] = CLineAccess {tag: tags[i], data: data[i]};
   return accesses;
+endfunction
+
+function MemTaggedData getAccessTagsAt(CLine line, CLineAccessSel sel);
+  let access = clineToAccessVector(line)[sel];
+  return MemTaggedData {
+    tag: False,
+    data: cons(zeroExtend(pack(access.tag)), unpack(0))
+  };
 endfunction
 
 function CLine accessVectorToCline(Vector#(CLineNumAccesses, CLineAccess) accesses);

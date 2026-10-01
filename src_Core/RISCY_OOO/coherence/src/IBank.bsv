@@ -136,7 +136,7 @@ module mkIBank#(
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(cRqSlotT, ICRqSlot#(wayT, tagT)), // cRq MSHR slot
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, void, cacheOwnerT, cacheOtherT, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, void, cacheOwnerT, cacheOtherT, RandRepInfo, CLineAccess, cacheSetAuxT, l1CmdT)),
     Mul#(2, supSz, supSzX2),
     Alias#(resultT, Vector#(supSzX2, Maybe#(Instruction16))),
     // requirements
@@ -262,11 +262,10 @@ module mkIBank#(
         procRqT r = ProcRqToI {addr: addr};
 `endif
         cRqIdxT n <- cRqMshr.getEmptyEntryInit(r);
-        // Instruction fetch windows may span access boundaries.
         pipeline.send(CRq (L1PipeRqIn {
             addr: r.addr,
             mshrIdx: n,
-            readWholeLine: True
+            readWholeLine: False
         }));
         // enq to indexQ for in order resp
         cRqIndexQ.enq(n);
@@ -290,7 +289,7 @@ module mkIBank#(
         pipeline.send(PRq (L1PipeRqIn {
             addr: req.addr,
             mshrIdx: n,
-            readWholeLine: True
+            readWholeLine: False
         }));
        if (verbose)
         $display("%t I %m pRqTransfer: ", $time,
@@ -320,11 +319,10 @@ module mkIBank#(
         Addr addr <- prefetcher.getNextPrefetchAddr;
         procRqT r = ProcRqToI {addr: addr};
         cRqIdxT n <- cRqMshr.getEmptyEntryInit(r);
-        // Instruction fetch windows may span access boundaries.
         pipeline.send(CRq (L1PipeRqIn {
             addr: r.addr,
             mshrIdx: n,
-            readWholeLine: True
+            readWholeLine: False
         }));
         // enq to indexQ for in order resp
         prefetchIndexQ.enq(n);
@@ -482,7 +480,8 @@ module mkIBank#(
 
     // pipeline outputs
     pipeOutT pipeOut = pipeline.first;
-    ramDataT ram = pipeOut.ram;
+    Line selectedAccessLine = accessVectorToCline(replicate(pipeOut.ram.line));
+    ramDataT ram = RamData {info: pipeOut.ram.info, line: selectedAccessLine};
     // get proc req to select from cRqMshr
     procRqT pipeOutCRq = cRqMshr.pipelineResp.getRq(
         case(pipeOut.cmd) matches
@@ -496,8 +495,9 @@ module mkIBank#(
         Vector#(LineSzInst, Instruction16) instVec = unpack(pack(line.data));
         // the start offset for reading inst
         LineInstOffset startSel = getLineInstOffset(addr);
-        // calculate the maximum inst count that could be read from line
-        LineInstOffset maxCntMinusOne = maxBound - startSel;
+        // calculate the maximum inst count that could be read from this access
+        AccessInstOffset accessStartSel = getAccessInstOffset(addr);
+        AccessInstOffset maxCntMinusOne = maxBound - accessStartSel;
         // read inst superscalaer
         resultT val = ?;
         for(Integer i = 0; i < valueof(supSzX2); i = i+1) begin
@@ -644,7 +644,7 @@ module mkIBank#(
         function Action cRqSetDepNoCacheChange;
         action
             cRqMshr.pipelineResp.setStateSlot(n, Depend, defaultValue);
-            pipeline.deqWrite(Invalid, pipeOut.ram, Invalid, False);
+            pipeline.deqWrite(Invalid, ram, Invalid, False);
         endaction
         endfunction
 
@@ -740,7 +740,7 @@ module mkIBank#(
             $display("%t I %m pipelineResp: pRq: drop", $time);
             // pRq can be directly dropped, no successor (since just go through pipeline)
             pRqMshr.pipelineResp.releaseEntry(n);
-            pipeline.deqWrite(Invalid, pipeOut.ram, Invalid, False);
+            pipeline.deqWrite(Invalid, ram, Invalid, False);
         end
         else begin
            if (verbose)

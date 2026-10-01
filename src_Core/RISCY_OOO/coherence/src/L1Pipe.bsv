@@ -132,8 +132,10 @@ interface L1Pipe#(
         Bit#(TLog#(wayNum)),
         tagT, Msi, void, // no dir
         Maybe#(cRqIdxT), void, RandRepInfo, // no other
-        Line, Maybe#(cRqIdxT), L1Cmd#(indexT, cRqIdxT, pRqIdxT)
+        CLineAccess, Maybe#(cRqIdxT), L1Cmd#(indexT, cRqIdxT, pRqIdxT)
     ) first;
+    // Complete line for coherence-only operations selected for a whole-line read.
+    method Line fullLine;
     method Action deqWrite(
         Maybe#(cRqIdxT) swapRq,
         RamData#(tagT, Msi, void, Maybe#(cRqIdxT), void, Line) wrRam, // always write BRAM
@@ -174,7 +176,7 @@ module mkL1Pipe(
     Alias#(pipeInT, L1PipeIn#(wayT, indexT, cRqIdxT, pRqIdxT)),
     Alias#(pipeCmdT, L1PipeCmd#(wayT, indexT, cRqIdxT, pRqIdxT)),
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, dirT, ownerT, otherT, repT, Line, setAuxT, l1CmdT)), // output type
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, dirT, ownerT, otherT, repT, CLineAccess, setAuxT, l1CmdT)), // output type
     Alias#(infoT, CacheInfo#(tagT, Msi, dirT, ownerT, otherT)),
     Alias#(ramDataT, RamData#(tagT, Msi, dirT, ownerT, otherT, Line)),
     Alias#(respStateT, RespState#(Msi)),
@@ -420,7 +422,7 @@ module mkL1Pipe(
                 rq.readWholeLine
                 || (pout.ram.info.cs == M && pout.ram.info.tag != truncateLSB(rq.addr));
             tagged PRq .*: pout.ram.info.cs == M;
-            tagged PRs .*: True;
+            tagged PRs .*: False;
 `ifdef SECURITY_CACHES
             tagged Flush .*: pout.ram.info.cs == M;
 `endif
@@ -532,6 +534,7 @@ module mkL1Pipe(
             selectedLine = getPRsLine;
         else if (isValid(legacyPRsLine) && isPRsCmd(pout.cmd))
             selectedLine = validValue(legacyPRsLine);
+        let selectedAccess = clineToAccessVector(selectedLine)[getCLineAccessSel(getAddrFromCmd(pout.cmd))];
         let result = PipeOut {
             cmd: (case(pout.cmd) matches
                 tagged CRq .rq: L1CRq (rq.mshrIdx);
@@ -547,11 +550,15 @@ module mkL1Pipe(
             endcase),
             way: pout.way,
             pRqMiss: pout.pRqMiss,
-            ram: RamData {info: pout.ram.info, line: selectedLine},
+            ram: RamData {info: pout.ram.info, line: selectedAccess},
             repInfo: pout.repInfo,
             setAuxData: pout.setAuxData
         };
         return result;
+    endmethod
+
+    method Line fullLine if (pipe.notEmpty && lineReadWhole && isValid(lineReadData));
+        return validValue(lineReadData);
     endmethod
 
     method Action deqWrite(Maybe#(cRqIdxT) swapRq, ramDataT wrRam, Maybe#(cRqIdxT) nextInQueue, Bool updateRep);
@@ -562,9 +569,8 @@ module mkL1Pipe(
             newCmd = Valid (CRq (L1PipeRqIn {
                 addr: addr,
                 mshrIdx: idx,
-                // The successor's request attributes are not available here.
-                // Conservatively preserve the whole-line behavior.
-                readWholeLine: True
+                // All processor-visible accesses are confined to one access.
+                readWholeLine: False
             }));
 `ifdef SECURITY_CACHES
             doAssert(pipe.first.cmd matches tagged Flush .f ? False : True,
@@ -575,7 +581,17 @@ module mkL1Pipe(
         Bool streamedUnchanged = isActivePRsCmd(pout.cmd)
                                  && prsHasData && wrRam.line == getPRsLine;
         if (!streamedUnchanged) begin
-            if (responseSuppliesLine(pout.cmd) || lineReadWhole)
+            if (responseSuppliesLine(pout.cmd)) begin
+                Line responseLine = isActivePRsCmd(pout.cmd)
+                                    ? getPRsLine : validValue(legacyPRsLine);
+                let responseAccesses = clineToAccessVector(responseLine);
+                let writeAccesses = clineToAccessVector(wrRam.line);
+                let access = getCLineAccessSel(getAddrFromCmd(pout.cmd));
+                responseAccesses[access] = writeAccesses[access];
+                dataRamDirect[pout.way].wrReq(getIndex(pout.cmd),
+                                              accessVectorToCline(responseAccesses));
+            end
+            else if (lineReadWhole)
                 dataRamDirect[pout.way].wrReq(getIndex(pout.cmd), wrRam.line);
             else begin
                 let accesses = clineToAccessVector(wrRam.line);

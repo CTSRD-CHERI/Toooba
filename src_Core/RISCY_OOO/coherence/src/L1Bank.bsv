@@ -150,7 +150,7 @@ module mkL1Bank#(
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(cRqSlotT, L1CRqSlot#(wayT, tagT)), // cRq MSHR slot
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, void, cacheOwnerT, void, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, void, cacheOwnerT, void, RandRepInfo, CLineAccess, cacheSetAuxT, l1CmdT)),
     // requirements
     Bits#(procRqIdT, _procRqIdT),
     FShow#(procRqIdT),
@@ -307,7 +307,7 @@ endfunction
         pipeline.send(CRq (L1PipeRqIn {
             addr: req.addr,
             mshrIdx: n,
-            readWholeLine: req.loadTags
+            readWholeLine: False
         }));
         cRqIsPrefetch[n] <= False;
        if (verbose)
@@ -327,7 +327,7 @@ endfunction
         pipeline.send(CRq (L1PipeRqIn {
             addr: r.addr,
             mshrIdx: n,
-            readWholeLine: r.loadTags
+            readWholeLine: False
         }));
         cRqIsPrefetch[n] <= False;
         // performance counter: cRq type
@@ -565,7 +565,10 @@ endfunction
 
     // pipeline outputs
     pipeOutT pipeOut = pipeline.first;
-    ramDataT ram = pipeOut.ram;
+    // Until L1Bank itself is access-typed, replicate the selected access into a
+    // compatibility line. Only the addressed access is written back by L1Pipe.
+    Line selectedAccessLine = accessVectorToCline(replicate(pipeOut.ram.line));
+    ramDataT ram = RamData {info: pipeOut.ram.info, line: selectedAccessLine};
     // figure out procRq MSHR idx in pipeline output (since there is only one
     // port to select from MSHR)
     cRqIdxT pipeOutCRqIdx = (case(pipeOut.cmd) matches
@@ -601,7 +604,8 @@ endfunction
             Ld: begin
                 if (!cRqIsPrefetch[n]) begin
                     if (req.loadTags) begin
-                        procResp.respLd(req.id, getTagsAt(curLine));
+                        procResp.respLd(req.id, getAccessTagsAt(curLine,
+                                                               getCLineAccessSel(req.addr)));
                     end else begin
                         procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel));
                     end
@@ -853,7 +857,7 @@ endfunction
                 repTag: ram.info.tag, // tag being replaced
                 waitP: False // we send req to parent later (when resp to parent is sent)
             });
-            cRqMshr.pipelineResp.setData(n, ram.info.cs == M ? Valid (ram.line) : Invalid);
+            cRqMshr.pipelineResp.setData(n, ram.info.cs == M ? Valid (pipeline.fullLine) : Invalid);
             if (!cRqIsPrefetch[n]) begin
                 prefetcher.reportAccess(procRq.addr, procRq.pcHash, MISS);
                 llcPrefetcher.reportAccess(procRq.addr, procRq.pcHash, MISS);
@@ -872,21 +876,21 @@ endfunction
         function Action cRqSetDepNoCacheChange;
         action
             cRqMshr.pipelineResp.setStateSlot(n, Depend, defaultValue);
-            pipeline.deqWrite(Invalid, pipeOut.ram, pipeOutNextInQueue, False);
+            pipeline.deqWrite(Invalid, ram, pipeOutNextInQueue, False);
         endaction
         endfunction
 
         function Action cRqQueue;
         action
             cRqMshr.pipelineResp.setStateSlot(n, Queued, defaultValue);
-            pipeline.deqWrite(Invalid, pipeOut.ram, Valid(fromMaybe(n, pipeOutNextInQueue)), False);
+            pipeline.deqWrite(Invalid, ram, Valid(fromMaybe(n, pipeOutNextInQueue)), False);
         endaction
         endfunction
 
         function Action cRqDrop;
         action
             cRqMshr.pipelineResp.releaseEntry(n);
-            pipeline.deqWrite(Invalid, pipeOut.ram, pipeOutNextInQueue, False);
+            pipeline.deqWrite(Invalid, ram, pipeOutNextInQueue, False);
         endaction
         endfunction
 
@@ -1047,7 +1051,7 @@ endfunction
             // pRq can be directly dropped
             // must go through tag match, no successor
             pRqMshr.pipelineResp.releaseEntry(n);
-            pipeline.deqWrite(Invalid, pipeOut.ram, pipeOutNextInQueue, False);
+            pipeline.deqWrite(Invalid, ram, pipeOutNextInQueue, False);
             // sanity check (ram.info.tag != getTag(pRq.addr) is useless)
             if(!pipeOut.pRqMiss) begin
                 doAssert(ram.info.cs == S && pRq.toState == S && ram.info.tag == getTag(pRq.addr),
@@ -1102,7 +1106,7 @@ endfunction
             doAssert(ram.info.cs > pRq.toState && ram.info.tag == getTag(pRq.addr),
                 ("pRq should be processed")
             );
-            pRqMshr.pipelineResp.setDone_setData(n, ram.info.cs == M ? Valid (ram.line) : Invalid);
+            pRqMshr.pipelineResp.setDone_setData(n, ram.info.cs == M ? Valid (pipeline.fullLine) : Invalid);
             pipeline.deqWrite(Invalid, RamData {
                 info: CacheInfo {
                     tag: ram.info.tag,
@@ -1111,7 +1115,7 @@ endfunction
                     owner: Invalid, // no successor
                     other: ?
                 },
-                line: ram.line
+                line: ram.info.cs == M ? pipeline.fullLine : ram.line
             }, pipeOutSecondInQueue, False);
             if (pipeOutNextInQueue matches tagged Valid .nextInQueue) begin
                 if (verbose)
@@ -1157,7 +1161,7 @@ endfunction
         else begin
            if (verbose)
             $display("%t L1 %m pipelineResp: flush: valid process", $time);
-            pRqMshr.pipelineResp.setDone_setData(n, ram.info.cs == M ? Valid (ram.line) : Invalid);
+            pRqMshr.pipelineResp.setDone_setData(n, ram.info.cs == M ? Valid (pipeline.fullLine) : Invalid);
             rsToPIndexQ.enq(PRq (n));
             // record the flushed addr in MSHR so that sendRsToP rule knows
             // which addr is invalidated
@@ -1389,7 +1393,7 @@ module mkL1Cache#(
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(pRsAccessFromPT, PRsAccessMsg#(wayT, void)),
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
-    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, void, cacheOwnerT, void, RandRepInfo, Line, cacheSetAuxT, l1CmdT)),
+    Alias#(pipeOutT, PipeOut#(wayT, tagT, Msi, void, cacheOwnerT, void, RandRepInfo, CLineAccess, cacheSetAuxT, l1CmdT)),
     // requirements
     Bits#(procRqIdT, _procRqIdT),
     FShow#(procRqIdT),

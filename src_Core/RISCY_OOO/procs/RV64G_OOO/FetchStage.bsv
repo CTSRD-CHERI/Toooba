@@ -574,10 +574,10 @@ module mkFetchStage(FetchStage);
         Vector#(SupSizeX2, Maybe#(CapMem)) pred_future_pc = nextAddrPred.pred;
 
         // Next pc is the first nextPc that breaks the chain of pc+4 or
-        // that is at the end of a cacheline.
+        // that is at the end of an AccessWidth boundary.
         Vector#(SupSizeX2,Integer) indexes = genVector;
         function Bool findNextPc(CapMem in_pc, Integer i);
-            Bool notLastInst = getLineInstOffset(getAddr(in_pc) + fromInteger(2*i)) != maxBound;
+            Bool notLastInst = getAccessInstOffset(getAddr(in_pc) + fromInteger(2*i)) != maxBound;
             Bool noJump = !isValid(pred_future_pc[i]);
             return (!(notLastInst && noJump));
         endfunction

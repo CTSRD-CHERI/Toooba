@@ -40,6 +40,7 @@ import MemoryTypes::*; // import from RISCY repo
 import Vector::*;
 import FShow::*;
 import CacheUtils::*;
+import Memory_Config::*;
 import Assert::*;
 import Connectable::*;
 import GetPut::*;
@@ -101,6 +102,11 @@ typedef Bit#(LgMemDataSzBytes) MemDataBytesOffset;
 typedef TDiv#(Inst16_Sz, 8) InstSzBytes;
 typedef TLog#(InstSzBytes) LgInstSzBytes;
 
+// Instruction fragments within one configured memory access.
+typedef TDiv#(AccessWidth, 8) AccessSzBytes;
+typedef TDiv#(AccessSzBytes, InstSzBytes) AccessSzInst;
+typedef Bit#(TLog#(AccessSzInst)) AccessInstOffset;
+
 // Cache-line types derived from the size configured in ProcConfig.bsv.
 typedef CacheUtils::LogCLineNumMemTaggedData LgLineSzData;
 typedef CacheUtils::LogCLineNumMemDataBytes LgLineSzBytes;
@@ -129,6 +135,10 @@ function LineMemDataOffset getLineMemDataOffset(Addr a);
 endfunction
 
 function LineInstOffset getLineInstOffset(Addr a);
+    return truncate(a >> valueof(LgInstSzBytes));
+endfunction
+
+function AccessInstOffset getAccessInstOffset(Addr a);
     return truncate(a >> valueof(LgInstSzBytes));
 endfunction
 
