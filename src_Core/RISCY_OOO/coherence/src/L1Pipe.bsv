@@ -127,6 +127,10 @@ interface L1Pipe#(
     method Action send(L1PipeIn#(Bit#(TLog#(wayNum)), indexT, cRqIdxT, pRqIdxT) r);
     method Action startPRsAccess(PRsAccessMsg#(Bit#(TLog#(wayNum)), void) first);
     method Bool prsAccessReady;
+    // Requested access becomes available before the remaining refill beats.
+    method Bool prsRequestedAccessValid;
+    method CLineAccess prsRequestedAccess;
+    method Maybe#(cRqIdxT) prsOwner;
     method Action putPRsAccess(PRsAccessMsg#(Bit#(TLog#(wayNum)), void) flit);
     method PipeOut#(
         Bit#(TLog#(wayNum)),
@@ -400,17 +404,14 @@ module mkL1Pipe(
     Reg#(Msi) prsToState <- mkReg(I);
     Reg#(wayT) prsWay <- mkReg(0);
     Reg#(CLineAccessSel) prsExpectedAccess <- mkReg(0);
-    Vector#(CLineNumAccesses, Reg#(CLineAccess)) prsLine <- replicateM(mkReg(unpack(0)));
+    Reg#(CLineAccess) prsAccessData <- mkRegU;
+    Reg#(Bool) prsAccessValid <- mkReg(False);
 
     function Bool isPRsCmd(pipeCmdT cmd);
         return case (cmd) matches
             tagged PRs .*: True;
             default: False;
         endcase;
-    endfunction
-
-    function Line getPRsLine;
-        return accessVectorToCline(readVReg(prsLine));
     endfunction
 
     function Bool isActivePRsCmd(pipeCmdT cmd);
@@ -507,6 +508,7 @@ module mkL1Pipe(
         prsToState <= first.toState;
         prsWay <= first.id;
         prsExpectedAccess <= 0;
+        prsAccessValid <= False;
         legacyPRsLine <= Invalid;
         pipe.enq(PRs (L1PipePRsCmd {addr: first.addr, way: first.id}),
                  isValid(first.data) ? Valid(?) : Invalid,
@@ -529,7 +531,10 @@ module mkL1Pipe(
         doAssert(pout.way == prsWay, "streamed parent response selected wrong way");
         if (flit.data matches tagged Valid .accessData) begin
             dataRam[pout.way].wrAccess(getIndex(pout.cmd), flit.access, accessData);
-            prsLine[flit.access] <= accessData;
+            if (flit.access == getCLineAccessSel(prsAddr)) begin
+                prsAccessData <= accessData;
+                prsAccessValid <= True;
+            end
         end
         if (flit.last) begin
             doAssert(prsHasData
@@ -544,17 +549,22 @@ module mkL1Pipe(
         end
     endmethod
 
+    method Bool prsRequestedAccessValid = prsActive && prsHasData && prsAccessValid;
+    method CLineAccess prsRequestedAccess if (prsActive && prsAccessValid) = prsAccessData;
+    method Maybe#(cRqIdxT) prsOwner if (prsActive && pipe.notEmpty
+                                      && isActivePRsCmd(pipe.first.cmd)) = pipe.first.ram.info.owner;
+
     // need to adapt pipeline output to real output format
     method pipeOutT first if (pipe.notEmpty
                               && (!isActivePRsCmd(pipe.first.cmd) || prsComplete)
                               && (responseSuppliesLine(pipe.first.cmd) || isValid(lineReadData)));
         let pout = pipe.first;
         Line selectedLine = fromMaybe(?, lineReadData);
-        if (isActivePRsCmd(pout.cmd) && prsHasData)
-            selectedLine = getPRsLine;
-        else if (isValid(legacyPRsLine) && isPRsCmd(pout.cmd))
+        if (isValid(legacyPRsLine) && isPRsCmd(pout.cmd))
             selectedLine = validValue(legacyPRsLine);
-        let selectedAccess = clineToAccessVector(selectedLine)[getCLineAccessSel(getAddrFromCmd(pout.cmd))];
+        let selectedAccess = isActivePRsCmd(pout.cmd) && prsHasData
+                           ? prsAccessData
+                           : clineToAccessVector(selectedLine)[getCLineAccessSel(getAddrFromCmd(pout.cmd))];
         let result = PipeOut {
             cmd: (case(pout.cmd) matches
                 tagged CRq .rq: L1CRq (rq.mshrIdx);
@@ -600,7 +610,7 @@ module mkL1Pipe(
         let pout = pipe.first;
         let access = getCLineAccessSel(getAddrFromCmd(pout.cmd));
         Bool streamedUnchanged = isActivePRsCmd(pout.cmd) && prsHasData
-                                 && wrRam.line == clineToAccessVector(getPRsLine)[access];
+                                 && wrRam.line == prsAccessData;
         if (isValid(legacyPRsLine) && isPRsCmd(pout.cmd)) begin
             let responseAccesses = clineToAccessVector(validValue(legacyPRsLine));
             responseAccesses[access] = wrRam.line;
@@ -629,6 +639,7 @@ module mkL1Pipe(
             prsActive <= False;
             prsComplete <= False;
             prsHasData <= False;
+            prsAccessValid <= False;
             prsExpectedAccess <= 0;
         end
     endmethod

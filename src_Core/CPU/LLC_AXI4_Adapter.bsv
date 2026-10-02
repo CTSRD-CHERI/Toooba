@@ -147,11 +147,13 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
 
    Bag#(OutstandingReads, Bit#(Wd_MId), LdMemRq#(idT, childT)) pendingReads <- mkSmallBag;
    Bag#(OutstandingReads, Bit#(Wd_MId), CLineAccessSel) readReceiveAccess <- mkSmallBag;
-   // Keep one FIFO unassigned so FFBag.full cannot assert merely because all
-   // outstanding IDs have received a partial first beat.
+   // At most OutstandingReads keys exist, each with at most one line burst.
+   // Keep a spare keyed FIFO. Do not use FFBag.full: another RID's complete
+   // queued burst must not prevent reception of the selected RID's next beat.
+   // Per-ID access/RLAST assertions bound each queue to AccessesPerCLine.
    FFBag#(ReadResponseFifos, Bit#(Wd_MId),
           LLCReadResponseBits, AccessesPerCLine) readResponses <- mkFFBag;
-   FIFOF#(Bit#(Wd_MId)) completedReadIds <- mkSizedFIFOF(valueOf(OutstandingReads));
+   FIFOF#(Bit#(Wd_MId)) readyReadIds <- mkSizedFIFOF(valueOf(OutstandingReads));
    Reg#(CLineAccessSel) rg_rd_drain_access <- mkReg(0);
 
    rule rl_handle_read_req (llc.toM.first matches tagged Ld .ld
@@ -177,9 +179,10 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       end
    endrule
 
-   // Responses may interleave across IDs.  Do not drain an ID until RLAST has
-   // established that its complete burst is resident in readResponses.
-   rule rl_receive_read_rsp (!readResponses.full && completedReadIds.notFull);
+   // Responses may interleave across IDs. Select a burst on its first beat,
+   // then drain it as beats arrive; other IDs retain their keyed beat queues.
+   // Never wait for RLAST to make the selected burst visible to the LLC.
+   rule rl_receive_read_rsp;
       let mem_rsp <- get(masterPortShim.slave.r);
       let pending = pendingReads.isMember(mem_rsp.rid);
       let receiveAccess = readReceiveAccess.isMember(mem_rsp.rid);
@@ -207,8 +210,9 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          dynamicAssert(mem_rsp.rlast == expectedLast,
                        "AXI read response RLAST is at the wrong per-ID access");
          readResponses.enq(mem_rsp.rid, pack(mem_rsp));
+         if (receiveAccess.d == 0)
+            readyReadIds.enq(mem_rsp.rid);
          if (mem_rsp.rlast) begin
-            completedReadIds.enq(mem_rsp.rid);
             readReceiveAccess.remove(mem_rsp.rid);
          end
          else
@@ -216,14 +220,13 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
       end
    endrule
 
-   // completedReadIds may bypass a newly enqueued RLAST ID in the same cycle,
-   // while FFBag publishes that final beat after its state-update rule.  Wait
-   // until the keyed FIFO actually exposes the beat before beginning drainage.
-   rule rl_drain_read_rsp (readResponses.first(completedReadIds.first).v);
-      Bit#(Wd_MId) activeRid = completedReadIds.first;
+   // The selected RID owns the contiguous cache response until its last beat.
+   // A gap in that RID stalls drainage, but reception of other RIDs continues.
+   rule rl_drain_read_rsp (readResponses.first(readyReadIds.first).v);
+      Bit#(Wd_MId) activeRid = readyReadIds.first;
       let buffered = readResponses.first(activeRid);
       let pending = pendingReads.isMember(activeRid);
-      dynamicAssert(pending.v, "completed AXI read ID has no request metadata");
+      dynamicAssert(pending.v, "selected AXI read ID has no request metadata");
 
       if (pending.v) begin
          LLCReadResponse mem_rsp = unpack(buffered.d);
@@ -253,7 +256,7 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
             dynamicAssert(rg_rd_drain_access == fromInteger(valueOf(AccessesPerCLine) - 1),
                           "AXI read burst drained with an invalid access count");
             pendingReads.remove(activeRid);
-            completedReadIds.deq;
+            readyReadIds.deq;
             rg_rd_drain_access <= 0;
          end
          else begin

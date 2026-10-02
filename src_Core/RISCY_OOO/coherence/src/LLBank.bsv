@@ -631,6 +631,15 @@ endfunction
 
     Reg#(Bool) mRsAccessStarted <- mkReg(False);
     Reg#(ldMemRqIdT) mRsAccessId <- mkReg(unpack(0));
+    Reg#(Bool) refillForwardActive <- mkReg(False);
+    Reg#(memRsT) refillLastFlit <- mkRegU;
+    // Choose the grant before forwarding starts. Tag-only sharers may remain
+    // present during a data refill, so an S request cannot blindly receive E.
+    Vector#(cRqNum, Reg#(Msi)) refillRsToState <- replicateM(mkReg(I));
+    function Msi refillGrant(cRqT rq, Bool noChildren);
+        return rq.toState == S && rq.canUpToE && noChildren && respLoadWithE(True)
+             ? E : rq.toState;
+    endfunction
 
     Reg#(Bool) dmaMRsActive <- mkReg(False);
     Reg#(ldMemRqIdT) dmaMRsId <- mkReg(unpack(0));
@@ -648,7 +657,9 @@ endfunction
     (* preempts = "cRsTransfer, cRqTransfer_new_child_block" *)
     (* preempts = "cRsTransfer, cRqTransfer_new_dma_block" *)
 `endif
-    rule startMRsTransfer(rsFromMQ.first.id.refill && !mRsAccessStarted);
+    rule startMRsTransfer(rsFromMQ.first.id.refill && !mRsAccessStarted
+                          && !refillForwardActive && !responseRamBusy
+                          && !accessRsInfoQ.notEmpty);
         memRsT mRs = rsFromMQ.first;
         cRqIndexT n = mRs.id.mshrIdx;
         cRqT cRq = cRqMshr.transfer.getRq(n);
@@ -659,6 +670,7 @@ endfunction
             cRq.toState == M ? M : cRq.toState == T ? T : E, cSlot.way);
         mRsAccessStarted <= True;
         mRsAccessId <= mRs.id;
+        refillForwardActive <= !cRqIsPrefetch[n];
     endrule
 
     rule mRsTransfer(rsFromMQ.first.id.refill && mRsAccessStarted
@@ -670,6 +682,21 @@ endfunction
                  "refill memory response id changed within burst");
         pipeline.putMRsAccess(mRs.data, mRs.access, mRs.last);
         rsFromMQ.deq;
+        if (!cRqIsPrefetch[n]) begin
+            if (mRs.last)
+                // Keep only the final access until directory/MSHR commit. This
+                // prevents downstream acceptance from releasing a live MSHR.
+                refillLastFlit <= mRs;
+            else begin
+                Msi toState = refillRsToState[n];
+                rsAccessToCQ.enq(PRsAccessMsg {
+                    addr: cRq.addr, toState: toState, data: Valid(mRs.data),
+                    access: mRs.access, last: False,
+                    child: cRq.child, id: getIdFromC(cRq.id)
+                });
+                rsAccessReleaseQ.enq(Invalid);
+            end
+        end
         if (mRs.last) begin
             mRsAccessStarted <= False;
             if (!cRqIsPrefetch[n])
@@ -870,7 +897,7 @@ endfunction
 
     // Normal coherent responses use a dedicated access-width link.  The MSHR
     // remains allocated until the final flit has been accepted downstream.
-    rule sendNoDataRsToC(accessRsInfoQ.first.hasData == False);
+    rule sendNoDataRsToC(!refillForwardActive && accessRsInfoQ.first.hasData == False);
         let d = accessRsInfoQ.first;
         doAssert(!cRqIsPrefetch[d.mshrIdx],
                  "prefetch result entered normal no-data response path");
@@ -885,7 +912,7 @@ endfunction
 `endif
     endrule
 
-    rule sendDataRsToC(accessRsInfoQ.first.hasData && pipeline.responseNotEmpty);
+    rule sendDataRsToC(!refillForwardActive && accessRsInfoQ.first.hasData && pipeline.responseNotEmpty);
         let d = accessRsInfoQ.first;
         doAssert(!cRqIsPrefetch[d.mshrIdx],
                  "prefetch result entered normal data response path");
@@ -1048,11 +1075,33 @@ endfunction
         if(cRq.toState == S && cRq.canUpToE && ram.info.dir == replicate(I) && respLoadWithE(isMRs)) begin
             toState = E;
         end
+        if (isMRs) begin
+            toState = refillRsToState[n];
+            doAssert(toState != E || ram.info.dir == replicate(I),
+                     "forwarded exclusive refill still has a child sharer");
+        end
         // Decide data validity using dir (which is more up to date than
         // fromState). Normal responses never enter the MSHR Line buffer.
         Bool dataNeeded = ram.info.dir[cRq.child] <= T;
         if (cRqIsPrefetch[n]) begin
             rsToCIndexQ.enq(LLRsInfo {cRqId: n, toState: toState});
+        end
+        else if (isMRs) begin
+            doAssert(refillForwardActive && refillLastFlit.last,
+                     "refill completion has no final forwarded access");
+            rsAccessToCQ.enq(PRsAccessMsg {
+                addr: cRq.addr, toState: toState, data: Valid(refillLastFlit.data),
+                access: refillLastFlit.access, last: True,
+                child: cRq.child, id: getIdFromC(cRq.id)
+            });
+            rsAccessReleaseQ.enq(Valid(n));
+            refillForwardActive <= False;
+`ifdef PERF_COUNT
+            if (doStats) begin
+                upRespCnt.incr(1);
+                upRespDataCnt.incr(1);
+            end
+`endif
         end
         else begin
             accessRsInfoQ.enq(LLAccessRsInfo {
@@ -1188,6 +1237,7 @@ endfunction
         // write back (only when line is M, otherwise silent drop)
         // and req memory for new data (because cs is I now)
         Bool needWB = ram.info.cs == M;
+        refillRsToState[n] <= refillGrant(cRq, True);
         toMInfoQ.enq(ToMemInfo{
             mshrIdx: n,
             t: needWB ? RepLd : Ld
@@ -1296,6 +1346,15 @@ endfunction
             // in LLC, we req memory only when we don't have enough data
             Bool reqMem = ram.info.cs == I || (dataReq && ram.info.cs == T);
             if(reqMem) begin
+                function Msi finalChildState(Integer i);
+                    return case (dirPend[i]) matches
+                        tagged ToSend .st: st;
+                        tagged Waiting .st: st;
+                        default: ram.info.dir[i];
+                    endcase;
+                endfunction
+                Vector#(childNum, Msi) finalDir = genWith(finalChildState);
+                refillRsToState[n] <= refillGrant(cRq, finalDir == replicate(I));
                 toMInfoQ.enq(ToMemInfo{
                     mshrIdx: n,
                     t: Ld

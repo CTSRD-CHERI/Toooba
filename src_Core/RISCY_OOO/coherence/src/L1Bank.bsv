@@ -583,7 +583,9 @@ endfunction
     ramDataT ram = pipeOut.ram;
     // figure out procRq MSHR idx in pipeline output (since there is only one
     // port to select from MSHR)
-    cRqIdxT pipeOutCRqIdx = (case(pipeOut.cmd) matches
+    cRqIdxT pipeOutCRqIdx = pipeline.prsRequestedAccessValid
+                         ? validValue(pipeline.prsOwner)
+                         : (case(pipeOut.cmd) matches
         tagged L1CRq .n: (n);
         default: (fromMaybe(0, ram.info.owner)); // L1PRs and L1PRq
     endcase);
@@ -594,6 +596,25 @@ endfunction
     Maybe#(cRqIdxT) pipeOutNextInQueue = pipeOut.setAuxData;
     Maybe#(cRqIdxT) pipeOutSecondInQueue = isValid(pipeOutNextInQueue) ? cRqMshr.pipelineResp.getSucc2(fromMaybe(?, pipeOutNextInQueue)) : Invalid;
 
+
+    // Return a load as soon as its requested access arrives. Keep the MSHR
+    // and pipeline command until the complete refill is installed, so queued
+    // requests and coherence probes cannot observe a partially valid line.
+    Reg#(Bool) prsLoadResponded <- mkReg(False);
+    Bool earlyRefillLoad = !prsLoadResponded && pipeline.prsRequestedAccessValid
+                         && pipeOutCRq.op == Ld && !cRqIsPrefetch[pipeOutCRqIdx];
+    rule respondRefillLoad(earlyRefillLoad);
+        let owner = pipeline.prsOwner;
+        doAssert(isValid(owner), "streamed refill has no L1 request owner");
+        let req = pipeOutCRq;
+        let access = pipeline.prsRequestedAccess;
+        if (req.loadTags)
+            procResp.respLd(req.id, getAccessTags(access));
+        else
+            procResp.respLd(req.id, getTaggedDataAtAccess(access,
+                getCLineAccessMemTaggedDataSel(req.addr)));
+        prsLoadResponded <= True;
+    endrule
 
     // function to process cRq hit (MSHR slot may have garbage)
     function Action cRqHit(cRqIdxT n, procRqT req);
@@ -615,7 +636,7 @@ endfunction
         CLineAccessMemTaggedDataSel dataSel = getCLineAccessMemTaggedDataSel(req.addr);
         case(req.op) matches
             Ld: begin
-                if (!cRqIsPrefetch[n]) begin
+                if (!cRqIsPrefetch[n] && !(pipeOut.cmd == L1PRs && prsLoadResponded)) begin
                     if (req.loadTags) begin
                         procResp.respLd(req.id, getAccessTags(curAccess));
                     end else begin
@@ -1035,7 +1056,9 @@ endfunction
         end
     endrule
 
-    rule pipelineResp_pRs(!isValid(processAmo) &&& pipeOut.cmd == L1PRs);
+    rule pipelineResp_pRs(!isValid(processAmo) &&& pipeOut.cmd == L1PRs
+                          &&& !earlyRefillLoad);
+        prsLoadResponded <= False;
        if (verbose) begin
         $display("%t L1 %m pipelineResp: ", $time, fshow(pipeOut));
         $display("%t L1 %m pipelineResp: pRs: ", $time);
