@@ -137,94 +137,56 @@ module mkL1LLConnect#(
         cRsLinkQ.deq;
     endrule
 
-    // Serialize parent responses onto the access-width return link.
-    Fifo#(2, PRsAccessMsg#(L1Way, LLChild)) pRsLinkQ <- mkCFFifo;
-    Reg#(CLineAccessSel) pRsAccess <- mkReg(0);
-    rule serializePRs(llc.toC.first matches tagged PRs .rs);
-        Bool hasData = isValid(rs.data);
-        Bool last = !hasData || pRsAccess == fromInteger(valueOf(CLineNumAccesses) - 1);
-        Maybe#(CLineAccess) accessData = Invalid;
-        if (hasData) begin
-            let accesses = clineToAccessVector(validValue(rs.data));
-            accessData = Valid(accesses[pRsAccess]);
-        end
-        pRsLinkQ.enq(PRsAccessMsg {
-            addr: rs.addr,
-            toState: rs.toState,
-            data: accessData,
-            access: pRsAccess,
-            last: last,
-            child: rs.child,
-            id: rs.id
-        });
-        if (last) begin
-            llc.toC.deq;
-            pRsAccess <= 0;
-        end
-        else begin
-            pRsAccess <= pRsAccess + 1;
-        end
-    endrule
-
 `ifdef SELF_INV_CACHE
-    // Self-invalidating I-cache banks retain the legacy whole-line interface.
-    Vector#(L1Num, Reg#(Line)) pRsPartial <- replicateM(mkReg(unpack(0)));
-`endif
+    // SELF_INV retains the legacy whole-line parent response path.
+    for(Integer i = 0; i < valueof(L1Num); i = i+1) begin
+        rule sendLegacyFromP(llc.toC.first matches tagged PRq .rq
+                             &&& rq.child == fromInteger(i));
+            llc.toC.deq;
+            l1[i].fromP.enq(PRq (PRqMsg {
+                addr: rq.addr, toState: rq.toState, child: ?
+            }));
+        endrule
+        rule sendLegacyPRs(llc.toC.first matches tagged PRs .rs
+                           &&& rs.child == fromInteger(i));
+            llc.toC.deq;
+            l1[i].fromP.enq(PRs (PRsMsg {
+                addr: rs.addr, toState: rs.toState, child: ?,
+                data: rs.data, id: rs.id
+            }));
+        endrule
+    end
+`else
+    // Normal coherent responses are already access-width at the LLC.  Lock the
+    // selected destination for the complete burst (the LLC currently emits one
+    // stream at a time) and forward without transient Line assembly.
+    Reg#(Maybe#(LLChild)) pRsOwner <- mkReg(Invalid);
     for(Integer i = 0; i < valueof(L1Num); i = i+1) begin
         rule sendPRq(llc.toC.first matches tagged PRq .rq
                      &&& rq.child == fromInteger(i)
-                     &&& !pRsLinkQ.notEmpty
-                     &&& pRsAccess == 0);
+                     &&& !isValid(pRsOwner)
+                     &&& !llc.rsAccessToC.notEmpty);
             llc.toC.deq;
             l1[i].fromP.enq(PRq (PRqMsg {
-                addr: rq.addr,
-                toState: rq.toState,
-                child: ?
+                addr: rq.addr, toState: rq.toState, child: ?
             }));
         endrule
 
-`ifndef SELF_INV_CACHE
-        rule forwardPRsAccess(pRsLinkQ.first.child == fromInteger(i));
-            let r = pRsLinkQ.first;
-            pRsLinkQ.deq;
+        rule forwardPRsAccess(llc.rsAccessToC.first.child == fromInteger(i)
+                              &&& (!isValid(pRsOwner)
+                                   || pRsOwner == Valid(fromInteger(i))));
+            let r = llc.rsAccessToC.first;
+            doAssert(isValid(pRsOwner) || r.access == 0,
+                     "LL parent response burst did not start at access zero");
+            llc.rsAccessToC.deq;
             l1[i].rsAccessFromP.enq(PRsAccessMsg {
-                addr: r.addr,
-                toState: r.toState,
-                data: r.data,
-                access: r.access,
-                last: r.last,
-                child: ?,
-                id: r.id
+                addr: r.addr, toState: r.toState, data: r.data,
+                access: r.access, last: r.last, child: ?, id: r.id
             });
+            pRsOwner <= r.last ? Invalid : Valid(fromInteger(i));
         endrule
-`else
-        rule assembleIPRs(pRsLinkQ.first.child == fromInteger(i));
-                let r = pRsLinkQ.first;
-                pRsLinkQ.deq;
-                Line newLine = pRsPartial[i];
-                Maybe#(Line) responseData = Invalid;
-                if (r.data matches tagged Valid .accessData) begin
-                    let accesses = clineToAccessVector(newLine);
-                    accesses[r.access] = accessData;
-                    newLine = accessVectorToCline(accesses);
-                    responseData = Valid(newLine);
-                end
-                if (r.last) begin
-                    l1[i].fromP.enq(PRs (PRsMsg {
-                        addr: r.addr,
-                        toState: r.toState,
-                        child: ?,
-                        data: responseData,
-                        id: r.id
-                    }));
-                    pRsPartial[i] <= unpack(0);
-                end
-                else begin
-                    pRsPartial[i] <= newLine;
-                end
-        endrule
-`endif
     end
+`endif
 endmodule
 
 /*

@@ -90,6 +90,16 @@ interface LLPipe#(
     method Action startMRsAccess(Addr addr, Msi toState, Bit#(TLog#(wayNum)) way);
     method Bool mrsAccessReady;
     method Action putMRsAccess(CLineAccess data, CLineAccessSel access, Bool last);
+    method Action requestLineRead;
+    method Bool lineReady;
+    method Action startResponseRead(Bit#(TLog#(wayNum)) way, indexT index, cRqIdxT mshrIdx);
+    method Bool responseBusy;
+    method cRqIdxT responseId;
+    method Bool responseNotEmpty;
+    method CLineAccess responseFirst;
+    method CLineAccessSel responseAccess;
+    method Bool responseLast;
+    method Action responseDeq;
     method Bool notEmpty;
     method PipeOut#(
         Bit#(TLog#(wayNum)),
@@ -355,9 +365,7 @@ module mkLLPipe(
     Reg#(Msi) mrsToState <- mkReg(I);
     Reg#(wayT) mrsWay <- mkReg(0);
     Reg#(CLineAccessSel) mrsExpectedAccess <- mkReg(0);
-    Vector#(CLineNumAccesses, Reg#(CLineAccess)) mrsAccessLine
-        <- replicateM(mkReg(unpack(0)));
-    Reg#(Maybe#(Line)) mrsLine <- mkReg(Invalid);
+
 
     // Every ordinary LL operation still exposes a complete line.  Keep RAM
     // request and response collection in distinct cycles to avoid a
@@ -370,6 +378,30 @@ module mkLLPipe(
     Ehr#(2, Maybe#(Line)) lineReadDataEhr <- mkEhr(Invalid);
     Reg#(Maybe#(Line)) lineReadData = lineReadDataEhr[0];
     Reg#(Maybe#(Line)) lineReadDataDeq = lineReadDataEhr[1];
+
+    // A normal child response captures its physical location before the
+    // metadata command retires, then reads the deep RAM access by access.
+    Reg#(Bool) responseActive <- mkReg(False);
+    Reg#(Bool) responseIssued <- mkReg(False);
+    Reg#(Bool) responseValid <- mkReg(False);
+    Reg#(wayT) responseWay <- mkReg(0);
+    Reg#(indexT) responseIndex <- mkReg(0);
+    Reg#(cRqIdxT) responseMshrIdx <- mkReg(0);
+    Reg#(CLineAccessSel) responseSel <- mkReg(0);
+    Reg#(CLineAccess) responseData <- mkReg(unpack(0));
+
+    rule issueResponseRead(responseActive && !responseIssued && !responseValid
+                           && !lineReadIssued);
+        dataRam.rdAccessReq(getDataRamIndex(responseWay, responseIndex), responseSel);
+        responseIssued <= True;
+    endrule
+
+    rule collectResponseRead(responseActive && responseIssued && !responseValid);
+        responseData <= dataRam.rdAccessResp;
+        dataRam.deqRdAccessResp;
+        responseIssued <= False;
+        responseValid <= True;
+    endrule
 
     // Whole-line changes made by LLBank (notably DMA writes) are serialized
     // after dequeue.  No following command may become visible meanwhile.
@@ -430,18 +462,9 @@ module mkLLPipe(
         return (isCRsCmd(cmd)
                 && ((crsActive && crsHasData)
                     || legacyCRsActive))
-               || (cmd matches tagged MRs .* ? isValid(mrsLine) : False);
+               ;
     endfunction
 
-    rule issueSelectedLineRead(pipe.notEmpty && !wholeWriteActive
-                               && (!legacyCRsActive || legacyCRsComplete)
-                               && !lineReadIssued && !isValid(lineReadData)
-                               && !responseSuppliesLine(pipe.first.cmd));
-        let pout = pipe.first;
-        dataRam.rdAccessReq(getDataRamIndex(pout.way, getIndex(pout.cmd)),
-                            lineReadAccess);
-        lineReadIssued <= True;
-    endrule
 
     rule collectSelectedLineRead(pipe.notEmpty && lineReadIssued);
         let accessData = dataRam.rdAccessResp;
@@ -479,12 +502,11 @@ module mkLLPipe(
             result.ram.line = getCRsLine;
         else if (legacyCRsActive && legacyCRsComplete && isCRsCmd(pout.cmd))
             result.ram.line = legacyCRsLine;
-        else if (pout.cmd matches tagged MRs .* &&& mrsLine matches tagged Valid .line)
-            result.ram.line = line;
+
         return result;
     endfunction
 
-    method Action send(pipeInT req) if (!logicalCmdActive && !wholeWriteActive);
+    method Action send(pipeInT req) if (!logicalCmdActive && !wholeWriteActive && !responseActive);
         logicalCmdActive <= True;
         case(req) matches
             tagged CRq .rq: begin
@@ -558,7 +580,6 @@ module mkLLPipe(
         mrsToState <= toState;
         mrsWay <= way;
         mrsExpectedAccess <= 0;
-        mrsLine <= Invalid;
     endmethod
 
     method Bool mrsAccessReady = mrsActive;
@@ -572,13 +593,9 @@ module mkLLPipe(
                  "streamed memory response ended at an invalid access");
         dataRam.wrAccess(getDataRamIndex(mrsWay, getIndex(MRs (LLPipeMRsCmd {
                              addr: mrsAddr, way: mrsWay}))), access, data);
-        Vector#(CLineNumAccesses, CLineAccess) accesses = readVReg(mrsAccessLine);
-        accesses[access] = data;
-        mrsAccessLine[access] <= data;
         if (last) begin
             pipe.enq(MRs (LLPipeMRsCmd {addr: mrsAddr, way: mrsWay}),
                      Valid(unpack(0)), UpCs(mrsToState));
-            mrsLine <= Valid(accessVectorToCline(accesses));
             mrsActive <= False;
             mrsExpectedAccess <= 0;
         end
@@ -586,11 +603,49 @@ module mkLLPipe(
             mrsExpectedAccess <= mrsExpectedAccess + 1;
     endmethod
 
-    // need to adapt pipeline output to real output format
+    method Action requestLineRead if (pipe.notEmpty && !responseActive
+                                      && !lineReadIssued && !isValid(lineReadData));
+        let pout = pipe.first;
+        dataRam.rdAccessReq(getDataRamIndex(pout.way, getIndex(pout.cmd)),
+                            lineReadAccess);
+        lineReadIssued <= True;
+    endmethod
+
+    method Bool lineReady = responseSuppliesLine(pipe.first.cmd) || isValid(lineReadData);
+
+    method Action startResponseRead(wayT way, indexT index, cRqIdxT mshrIdx)
+        if (pipe.notEmpty && !responseActive && !lineReadIssued && !isValid(lineReadData));
+        responseActive <= True;
+        responseIssued <= False;
+        responseValid <= False;
+        responseWay <= way;
+        responseIndex <= index;
+        responseMshrIdx <= mshrIdx;
+        responseSel <= 0;
+    endmethod
+
+    method Bool responseBusy = responseActive;
+    method cRqIdxT responseId if (responseActive) = responseMshrIdx;
+    method Bool responseNotEmpty = responseActive && responseValid;
+    method CLineAccess responseFirst if (responseActive && responseValid) = responseData;
+    method CLineAccessSel responseAccess if (responseActive && responseValid) = responseSel;
+    method Bool responseLast if (responseActive && responseValid) =
+        responseSel == fromInteger(valueOf(CLineNumAccesses) - 1);
+    method Action responseDeq if (responseActive && responseValid);
+        responseValid <= False;
+        if (responseSel == fromInteger(valueOf(CLineNumAccesses) - 1)) begin
+            responseActive <= False;
+            responseSel <= 0;
+        end
+        else
+            responseSel <= responseSel + 1;
+    endmethod
+
+    // need to adapt pipeline output to real output format. Metadata-only CRq/MRs
+    // outputs are visible immediately; consumers explicitly request a Line.
     method pipeOutT first if (pipe.notEmpty && !wholeWriteActive
                               && (!crsActive || crsComplete)
-                              && (!legacyCRsActive || legacyCRsComplete)
-                              && (responseSuppliesLine(pipe.first.cmd) || isValid(lineReadData)));
+                              && (!legacyCRsActive || legacyCRsComplete));
         return getFirst(pipe.first); // guarded version
     endmethod
 
@@ -600,8 +655,7 @@ module mkLLPipe(
 
     method notEmpty = pipe.notEmpty && !wholeWriteActive
                       && (!crsActive || crsComplete)
-                      && (!legacyCRsActive || legacyCRsComplete)
-                      && (responseSuppliesLine(pipe.first.cmd) || isValid(lineReadData));
+                      && (!legacyCRsActive || legacyCRsComplete);
 
     method Action deqWrite(Maybe#(cRqIdxT) swapRq, ramDataT wrRam, Bool updateRep);
         // get new cmd
@@ -615,7 +669,8 @@ module mkLLPipe(
         // Responses have already installed their data.  For all other
         // semantically valid line changes, serialize the complete LLBank
         // result so DMA byte updates anywhere in the line are preserved.
-        if (wrRam.info.cs > I && wrRam.line != oldLine) begin
+        if ((responseSuppliesLine(pout.cmd) || isValid(lineReadData))
+            && wrRam.info.cs > I && wrRam.line != oldLine) begin
             wholeWriteLine <= wrRam.line;
             wholeWriteWay <= pout.way;
             wholeWriteIndex <= getIndex(pout.cmd);
@@ -635,8 +690,7 @@ module mkLLPipe(
         lineReadIssued <= False;
         lineReadAccess <= 0;
         lineReadDataDeq <= Invalid;
-        if (pout.cmd matches tagged MRs .*)
-            mrsLine <= Invalid;
+
         if (legacyCRsActive && isCRsCmd(pout.cmd)) begin
             legacyCRsActive <= False;
             legacyCRsComplete <= False;

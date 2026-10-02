@@ -366,6 +366,15 @@ module mkLLCache(LLCache);
                 cache.to_child.rqFromC.enq(y);
             endmethod
         endinterface
+        interface FifoDeq rsAccessToC;
+            method notEmpty = cache.to_child.rsAccessToC.notEmpty;
+            method deq = cache.to_child.rsAccessToC.deq;
+            method PRsAccessMsg#(LLCRqId, LLChild) first;
+                let y = cache.to_child.rsAccessToC.first;
+                y.addr = secureRotateAddr(y.addr);
+                return y;
+            endmethod
+        endinterface
         interface FifoDeq toC;
             method notEmpty = cache.to_child.toC.notEmpty;
             method deq = cache.to_child.toC.deq;

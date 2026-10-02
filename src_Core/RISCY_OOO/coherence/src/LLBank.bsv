@@ -132,6 +132,15 @@ typedef struct {
     Msi toState;
 } LLRsInfo#(type cRqIdT) deriving(Bits, Eq, FShow);
 
+typedef struct {
+    mshrIdxT mshrIdx;
+    Addr addr;
+    Msi toState;
+    childT child;
+    idT id;
+    Bool hasData;
+} LLAccessRsInfo#(type mshrIdxT, type idT, type childT) deriving(Bits, Eq, FShow);
+
 // to mem info
 typedef enum {
     Ld, // read only by child req or dma req
@@ -171,6 +180,8 @@ module mkLLBank#(
     Alias#(cRsFromCT, CRsMsg#(childT)),
     Alias#(cRsAccessFromCT, CRsAccessMsg#(childT)),
     Alias#(pRqRsToCT, PRqRsMsg#(cRqIdT, childT)),
+    Alias#(pRsAccessToCT, PRsAccessMsg#(cRqIdT, childT)),
+    Alias#(accessRsInfoT, LLAccessRsInfo#(cRqIndexT, cRqIdT, childT)),
     Alias#(dmaRqT, DmaRq#(dmaRqIdT)),
     Alias#(dmaRsT, DmaRs#(dmaRqIdT)),
     Alias#(ldMemRqIdT, LdMemRqId#(cRqIndexT)),
@@ -187,6 +198,7 @@ module mkLLBank#(
     FShow#(cRqIdT),
     FShow#(dmaRqIdT),
     Add#(tagSz, a__, AddrSz),
+    Add#(indexSz, d__, AddrSz),
     // make sure: cRqNum <= wayNum
     Add#(cRqNum, b__, wayNum),
     Add#(TLog#(TDiv#(childNum,2)), c__, TLog#(childNum))
@@ -202,6 +214,10 @@ module mkLLBank#(
     Fifo#(2, cRsFromCT) rsFromCQ <- mkCFFifo;
     Fifo#(2, cRsAccessFromCT) rsAccessFromCQ <- mkCFFifo;
     Fifo#(2, pRqRsToCT) toCQ <- mkCFFifo;
+    Fifo#(2, pRsAccessToCT) rsAccessToCQ <- mkCFFifo;
+    Fifo#(2, Maybe#(cRqIndexT)) rsAccessReleaseQ <- mkCFFifo;
+    Fifo#(cRqNum, accessRsInfoT) accessRsInfoQ <- mkCFFifo;
+    Reg#(Bool) responseRamBusy <- mkReg(False);
 
     Fifo#(2, dmaRqT) rqFromDmaQ <- mkCFFifo;
     Fifo#(2, dmaRsT) rsLdToDmaQ <- mkCFFifo;
@@ -852,41 +868,50 @@ endfunction
         cRqMshr.sendRsToDmaC.releaseEntry(n);
     endrule
 
-    // send upgrade resp to child
-    rule sendRsToC(rsToCIndexQ.notEmpty && !cRqIsPrefetch[rsToCIndexQ.first.cRqId]);
-        // send upgrade resp to child
-        rsToCIndexQ.deq;
-        cRqIndexT n = rsToCIndexQ.first.cRqId;
-        Msi toState = rsToCIndexQ.first.toState;
-        cRqT cRq = cRqMshr.sendRsToDmaC.getRq(n);
-        Maybe#(Line) rsData = cRqMshr.sendRsToDmaC.getData(n);
-       if (verbose)
-        $display("%t LL %m sendRsToC: ", $time,
-            fshow(n), " ; ",
-            fshow(cRq), " ; ",
-            fshow(rsData), " ; ",
-            fshow(toState)
-        );
-        // send resp to child
-        doAssert(isRqFromC(cRq.id), "cRq should be child req");
-        cRqIdT cRqId = getIdFromC(cRq.id);
-        toCQ.enq(PRs (PRsMsg {
-            addr: cRq.addr,
-            toState: toState, // we may upgrade to E for req S, don't use toState in cRq
-            child: cRq.child,
-            data: rsData,
-            id: cRqId
-        }));
-        // release MSHR entry
-        cRqMshr.sendRsToDmaC.releaseEntry(n);
+    // Normal coherent responses use a dedicated access-width link.  The MSHR
+    // remains allocated until the final flit has been accepted downstream.
+    rule sendNoDataRsToC(accessRsInfoQ.first.hasData == False);
+        let d = accessRsInfoQ.first;
+        doAssert(!cRqIsPrefetch[d.mshrIdx],
+                 "prefetch result entered normal no-data response path");
+        accessRsInfoQ.deq;
+        rsAccessToCQ.enq(PRsAccessMsg {
+            addr: d.addr, toState: d.toState, data: Invalid,
+            access: 0, last: True, child: d.child, id: d.id
+        });
+        rsAccessReleaseQ.enq(Valid(d.mshrIdx));
 `ifdef PERF_COUNT
-        if(doStats) begin
-            upRespCnt.incr(1);
-            if(isValid(rsData)) begin
+        if (doStats) upRespCnt.incr(1);
+`endif
+    endrule
+
+    rule sendDataRsToC(accessRsInfoQ.first.hasData && pipeline.responseNotEmpty);
+        let d = accessRsInfoQ.first;
+        doAssert(!cRqIsPrefetch[d.mshrIdx],
+                 "prefetch result entered normal data response path");
+        doAssert(responseRamBusy,
+                 "LL response RAM flit produced without active bank lock");
+        doAssert(d.mshrIdx == pipeline.responseId,
+                 "LL response descriptor does not match deep-RAM stream");
+        let access = pipeline.responseAccess;
+        let last = pipeline.responseLast;
+        rsAccessToCQ.enq(PRsAccessMsg {
+            addr: d.addr, toState: d.toState,
+            data: Valid(pipeline.responseFirst), access: access, last: last,
+            child: d.child, id: d.id
+        });
+        rsAccessReleaseQ.enq(last ? Valid(d.mshrIdx) : Invalid);
+        pipeline.responseDeq;
+        if (last) begin
+            accessRsInfoQ.deq;
+            responseRamBusy <= False;
+`ifdef PERF_COUNT
+            if (doStats) begin
+                upRespCnt.incr(1);
                 upRespDataCnt.incr(1);
             end
-        end
 `endif
+        end
     endrule
 
     // send downgrade req to child
@@ -918,7 +943,10 @@ endfunction
         end
     endfunction
 
-    rule sendRqToC(!rsToCIndexQ.notEmpty);
+    rule sendRqToC(!rsToCIndexQ.notEmpty
+                   && !accessRsInfoQ.notEmpty
+                   && !rsAccessToCQ.notEmpty
+                   && !responseRamBusy);
         Maybe#(cRqIndexT) cRqNeedDown = cRqMshr.sendRqToC.searchNeedRqChild(Valid (whichCRq));
         // XXX must add this into guard
         // otherwise this rule will block pipelineResp rule from firing forever
@@ -1020,14 +1048,26 @@ endfunction
         if(cRq.toState == S && cRq.canUpToE && ram.info.dir == replicate(I) && respLoadWithE(isMRs)) begin
             toState = E;
         end
-        // update slot, data & send to indexQ
-        // decide data validity using dir (which is more up to date than fromState)
-        rsToCIndexQ.enq(LLRsInfo {
-            cRqId: n,
-            toState: toState
-        });
-        cRqMshr.pipelineResp.setStateSlot(n, Done, ?); // we no longer need slot info
-        cRqMshr.pipelineResp.setData(n, ram.info.dir[cRq.child] <= T ? Valid (ram.line) : Invalid);
+        // Decide data validity using dir (which is more up to date than
+        // fromState). Normal responses never enter the MSHR Line buffer.
+        Bool dataNeeded = ram.info.dir[cRq.child] <= T;
+        if (cRqIsPrefetch[n]) begin
+            rsToCIndexQ.enq(LLRsInfo {cRqId: n, toState: toState});
+        end
+        else begin
+            accessRsInfoQ.enq(LLAccessRsInfo {
+                mshrIdx: n, addr: cRq.addr, toState: toState,
+                child: cRq.child, id: getIdFromC(cRq.id), hasData: dataNeeded
+            });
+            if (dataNeeded) begin
+                indexT responseIndex = truncate(cRq.addr >>
+                    (valueOf(LgLineSzBytes) + valueOf(lgBankNum)));
+                pipeline.startResponseRead(pipeOut.way, responseIndex, n);
+                responseRamBusy <= True;
+            end
+        end
+        cRqMshr.pipelineResp.setStateSlot(n, Done, ?);
+        cRqMshr.pipelineResp.setData(n, Invalid);
         // update child dir
         dirT newDir = ram.info.dir;
         if (!cRqIsPrefetch[n]) begin
@@ -1056,7 +1096,9 @@ endfunction
                 endcase),
                 other: ?
             },
-            line: ram.line // use line in ram
+            // Metadata-only child hits/refills do not consume PipeOut.ram.line;
+            // a cRs-triggered hit may already carry a genuine assembled line.
+            line: pipeline.lineReady ? ram.line : unpack(0)
         }, True); // hit, so update rep info
         if (!cRqIsPrefetch[n]) begin
             if (cRq.child[0] == 1) begin
@@ -1179,8 +1221,23 @@ endfunction
     endaction
     endfunction
 
+    function Bool cRqNeedsWholeLine(cRqT cRq);
+        Bool replacement = !isValid(ram.info.owner) && ram.info.cs > I
+                           && ram.info.tag != getTag(cRq.addr);
+        return isRqFromDma(cRq.id) || replacement;
+    endfunction
+
+    rule requestCRqWholeLine(!responseRamBusy
+                             &&& pipeOut.cmd matches tagged LLCRq .n
+                             &&& cRqNeedsWholeLine(pipeOutCRq)
+                             &&& !pipeline.lineReady);
+        pipeline.requestLineRead;
+    endrule
+
     // handle cRq
-    rule pipelineResp_cRq(pipeOut.cmd matches tagged LLCRq .n);
+    rule pipelineResp_cRq(!responseRamBusy
+                          &&& pipeOut.cmd matches tagged LLCRq .n
+                          &&& (!cRqNeedsWholeLine(pipeOutCRq) || pipeline.lineReady));
        if (verbose)
         $display("%t LL %m pipelineResp: ", $time, fshow(pipeOut));
         // cs and dir in ram have been merged with modification caused by mRs/cRs cmd
@@ -1525,7 +1582,7 @@ endfunction
     endrule
 
     // handle mRs
-    rule pipelineResp_mRs(pipeOut.cmd == LLMRs);
+    rule pipelineResp_mRs(!responseRamBusy && pipeOut.cmd == LLMRs);
         // get cache owner
         doAssert(isValid(ram.info.owner), "mRs owner must match some cRq");
         CRqOwner#(cRqIndexT) cOwner = validValue(ram.info.owner);
@@ -1553,8 +1610,19 @@ endfunction
         cRqFromCHit(cOwner.mshrIdx, cRq, True);
     endrule
 
+    // A data-bearing cRs supplies a complete line through the retained CRs
+    // assembly path. For a no-data cRs, conservatively fetch the selected line:
+    // it may be the final downgrade that enables dirty replacement or DMA.
+    rule requestCRsWholeLine(!responseRamBusy
+                             &&& pipeOut.cmd matches tagged LLCRs .child
+                             &&& !pipeline.lineReady);
+        pipeline.requestLineRead;
+    endrule
+
     // handle cRs
-    rule pipelineResp_cRs(pipeOut.cmd matches tagged LLCRs .child);
+    rule pipelineResp_cRs(!responseRamBusy
+                          &&& pipeOut.cmd matches tagged LLCRs .child
+                          &&& pipeline.lineReady);
         // cRs from child
         // XXX CCPipe has already updated ram.info and ram.line properly,
         // particularly for E->M case.
@@ -1669,6 +1737,18 @@ endfunction
         interface rsFromC = toFifoEnq(rsFromCQ);
         interface rsAccessFromC = toFifoEnq(rsAccessFromCQ);
         interface toC = toFifoDeq(toCQ);
+        interface FifoDeq rsAccessToC;
+            method Bool notEmpty = rsAccessToCQ.notEmpty;
+            method pRsAccessToCT first = rsAccessToCQ.first;
+            method Action deq;
+                doAssert(rsAccessToCQ.first.last == isValid(rsAccessReleaseQ.first),
+                         "LL response final flit/release identity mismatch");
+                rsAccessToCQ.deq;
+                rsAccessReleaseQ.deq;
+                if (rsAccessReleaseQ.first matches tagged Valid .n)
+                    cRqMshr.sendRsToDmaC.releaseEntry(n);
+            endmethod
+        endinterface
     endinterface
 
     interface DmaServer dma;

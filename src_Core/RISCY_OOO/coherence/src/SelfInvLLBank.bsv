@@ -1392,7 +1392,9 @@ module mkSelfInvLLBank#(
     interface ParentCacheToChild to_child;
         interface rqFromC = toFifoEnq(rqFromCQ);
         interface rsFromC = toFifoEnq(rsFromCQ);
+        interface rsAccessFromC = nullFifoEnq;
         interface toC = toFifoDeq(toCQ);
+        interface rsAccessToC = nullFifoDeq;
     endinterface
 
     interface DmaServer dma;

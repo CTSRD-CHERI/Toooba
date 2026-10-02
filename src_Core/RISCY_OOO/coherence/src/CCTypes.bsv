@@ -325,6 +325,7 @@ interface ParentCacheToChild#(type cRqIdT, type childT);
     interface FifoEnq#(CRsAccessMsg#(childT)) rsAccessFromC;
     interface FifoEnq#(CRqMsg#(cRqIdT, childT)) rqFromC;
     interface FifoDeq#(PRqRsMsg#(cRqIdT, childT)) toC;
+    interface FifoDeq#(PRsAccessMsg#(cRqIdT, childT)) rsAccessToC;
 endinterface
 
 // unified child req & dma req
