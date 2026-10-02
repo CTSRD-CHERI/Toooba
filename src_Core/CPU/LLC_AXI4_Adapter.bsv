@@ -74,9 +74,13 @@ typedef struct {
 } LLC_AXI_ID#(type idT, type childT) deriving(Bits, Eq, FShow);
 
 typedef 16 OutstandingWrites;
+typedef 16 OutstandingReads;
+typedef TAdd#(OutstandingReads, 1) ReadResponseFifos;
 typedef 16 WriteAddressHashW;
 typedef TDiv#(AccessWidth, 8) AccessBytes;
 typedef TDiv#(CLineDataNumBytes, AccessBytes) AccessesPerCLine;
+typedef AXI4_RFlit#(Wd_MId, Wd_Data, Wd_R_User) LLCReadResponse;
+typedef Bit#(SizeOf#(LLCReadResponse)) LLCReadResponseBits;
 
 Bit#(LogCLineNumMemDataBytes) zeroOffset = 0;
 AXI4_Size axiAccessSize = unpack(fromInteger(valueOf(TLog#(AccessBytes))));
@@ -141,74 +145,123 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
    // ================================================================
    // Handle read requests and responses
 
-   Reg #(CLineAccessSel) rg_rd_rsp_beat <- mkReg (0);
+   Bag#(OutstandingReads, Bit#(Wd_MId), LdMemRq#(idT, childT)) pendingReads <- mkSmallBag;
+   Bag#(OutstandingReads, Bit#(Wd_MId), CLineAccessSel) readReceiveAccess <- mkSmallBag;
+   // Keep one FIFO unassigned so FFBag.full cannot assert merely because all
+   // outstanding IDs have received a partial first beat.
+   FFBag#(ReadResponseFifos, Bit#(Wd_MId),
+          LLCReadResponseBits, AccessesPerCLine) readResponses <- mkFFBag;
+   FIFOF#(Bit#(Wd_MId)) completedReadIds <- mkSizedFIFOF(valueOf(OutstandingReads));
+   Reg#(CLineAccessSel) rg_rd_drain_access <- mkReg(0);
 
-   FIFOF #(LdMemRq #(idT, childT)) f_pending_reads <- mkFIFOF;
-
-   // The streamed response path has one transaction context, so keep one AXI
-   // read outstanding and make contiguous, in-order response bursts explicit.
    rule rl_handle_read_req (llc.toM.first matches tagged Ld .ld
-                            &&& !f_pending_reads.notEmpty
                             &&& (ctr_wr_rsps_pending.value == 0));
-      if ((cfg_verbosity > 0)) begin
-         $display ("%0d: LLC_AXI4_Adapter.rl_handle_read_req: Ld request from LLC to memory",
-                   cur_cycle);
-         $display ("    ", fshow (ld));
-      end
+      LLC_AXI_ID#(idT, childT) llcId = LLC_AXI_ID {
+         tag_req: ld.tag_req, id: ld.id, child: ld.child
+      };
+      Bit#(Wd_MId) arid = zeroExtend(pack(llcId));
+      let active = pendingReads.isMember(arid);
+      if (!pendingReads.full && !active.v) begin
+         dynamicAssert(!active.v, "duplicate active AXI read ID");
+         if (cfg_verbosity > 0) begin
+            $display ("%0d: LLC_AXI4_Adapter.rl_handle_read_req: Ld request from LLC to memory",
+                      cur_cycle);
+            $display ("    ", fshow (ld));
+         end
 
-      Addr  line_addr = {truncateLSB(ld.addr), zeroOffset }; // Addr of containing cache line
-      fa_fabric_send_read_req (line_addr, LLC_AXI_ID{tag_req: ld.tag_req, id: ld.id, child: ld.child});
-      f_pending_reads.enq (ld);
-      llc.toM.deq;
+         Addr line_addr = {truncateLSB(ld.addr), zeroOffset};
+         fa_fabric_send_read_req(line_addr, llcId);
+         pendingReads.insert(arid, ld);
+         readReceiveAccess.insert(arid, 0);
+         llc.toM.deq;
+      end
    endrule
 
-   rule rl_handle_read_rsps;
+   // Responses may interleave across IDs.  Do not drain an ID until RLAST has
+   // established that its complete burst is resident in readResponses.
+   rule rl_receive_read_rsp (!readResponses.full && completedReadIds.notFull);
       let mem_rsp <- get(masterPortShim.slave.r);
+      let pending = pendingReads.isMember(mem_rsp.rid);
+      let receiveAccess = readReceiveAccess.isMember(mem_rsp.rid);
+      dynamicAssert(pending.v, "AXI read response has unknown RID");
+      dynamicAssert(receiveAccess.v, "AXI read response RID has no receive position");
+
       if (cfg_verbosity > 1) begin
-         $display ("%0d: LLC_AXI4_Adapter.rl_handle_read_rsps: ", cur_cycle);
+         $display ("%0d: LLC_AXI4_Adapter.rl_receive_read_rsp: ", cur_cycle);
          $display ("    ", fshow (mem_rsp));
       end
       if (mem_rsp.rresp != OKAY) begin
          // TODO: need to raise a non-maskable interrupt (NMI) here
-         $display ("%0d: LLC_AXI4_Adapter.rl_handle_read_rsp: fabric response error; exit", cur_cycle);
+         $display ("%0d: LLC_AXI4_Adapter.rl_receive_read_rsp: fabric response error; exit", cur_cycle);
          $display ("    ", fshow (mem_rsp));
          $finish (1);
       end
 
-      let ldreq = f_pending_reads.first;
-      LLC_AXI_ID#(idT, childT) rspId = unpack(truncate(mem_rsp.rid));
-      LLC_AXI_ID#(idT, childT) expectedId = LLC_AXI_ID {
-         tag_req: ldreq.tag_req,
-         id: ldreq.id,
-         child: ldreq.child
-      };
-      dynamicAssert(rspId == expectedId,
-                    "AXI read response ID changed within burst");
-      Bool expected_last = rg_rd_rsp_beat == fromInteger(valueOf(AccessesPerCLine) - 1);
-      dynamicAssert(mem_rsp.rlast == expected_last,
-                    "AXI read response last did not match cache-line access position");
-      CLineAccess accessData = CLineAccess {
-         tag: unpack(truncate(mem_rsp.ruser)),
-         data: truncate(mem_rsp.rdata)
-      };
-      MemRsAccessMsg #(idT, childT) resp = MemRsAccessMsg {
-         data: accessData,
-         access: rg_rd_rsp_beat,
-         last: mem_rsp.rlast,
-         child: ldreq.child,
-         id: ldreq.id
-      };
-      llc.rsFromM.enq(resp);
-
-      if (cfg_verbosity > 1)
-         $display ("    Response access to LLC: ", fshow (resp));
-
-      if (mem_rsp.rlast) begin
-         f_pending_reads.deq;
-         rg_rd_rsp_beat <= 0;
+      if (pending.v && receiveAccess.v) begin
+         LLC_AXI_ID#(idT, childT) expectedId = LLC_AXI_ID {
+            tag_req: pending.d.tag_req, id: pending.d.id, child: pending.d.child
+         };
+         dynamicAssert(mem_rsp.rid == zeroExtend(pack(expectedId)),
+                       "AXI read response full RID does not match request metadata");
+         Bool expectedLast = receiveAccess.d == fromInteger(valueOf(AccessesPerCLine) - 1);
+         dynamicAssert(mem_rsp.rlast == expectedLast,
+                       "AXI read response RLAST is at the wrong per-ID access");
+         readResponses.enq(mem_rsp.rid, pack(mem_rsp));
+         if (mem_rsp.rlast) begin
+            completedReadIds.enq(mem_rsp.rid);
+            readReceiveAccess.remove(mem_rsp.rid);
+         end
+         else
+            readReceiveAccess.update(mem_rsp.rid, receiveAccess.d + 1);
       end
-      else
-         rg_rd_rsp_beat <= rg_rd_rsp_beat + 1;
+   endrule
+
+   // completedReadIds may bypass a newly enqueued RLAST ID in the same cycle,
+   // while FFBag publishes that final beat after its state-update rule.  Wait
+   // until the keyed FIFO actually exposes the beat before beginning drainage.
+   rule rl_drain_read_rsp (readResponses.first(completedReadIds.first).v);
+      Bit#(Wd_MId) activeRid = completedReadIds.first;
+      let buffered = readResponses.first(activeRid);
+      let pending = pendingReads.isMember(activeRid);
+      dynamicAssert(pending.v, "completed AXI read ID has no request metadata");
+
+      if (pending.v) begin
+         LLCReadResponse mem_rsp = unpack(buffered.d);
+         dynamicAssert(mem_rsp.rid == activeRid,
+                       "buffered AXI read response RID is inconsistent");
+         Bool expectedLast = rg_rd_drain_access == fromInteger(valueOf(AccessesPerCLine) - 1);
+         dynamicAssert(mem_rsp.rlast == expectedLast,
+                       "AXI read drain access order is inconsistent with RLAST");
+         CLineAccess accessData = CLineAccess {
+            tag: unpack(truncate(mem_rsp.ruser)),
+            data: truncate(mem_rsp.rdata)
+         };
+         MemRsAccessMsg#(idT, childT) resp = MemRsAccessMsg {
+            data: accessData,
+            access: rg_rd_drain_access,
+            last: mem_rsp.rlast,
+            child: pending.d.child,
+            id: pending.d.id
+         };
+         llc.rsFromM.enq(resp);
+         readResponses.deq(activeRid);
+
+         if (cfg_verbosity > 1)
+            $display ("    Response access to LLC: ", fshow (resp));
+
+         if (mem_rsp.rlast) begin
+            dynamicAssert(rg_rd_drain_access == fromInteger(valueOf(AccessesPerCLine) - 1),
+                          "AXI read burst drained with an invalid access count");
+            pendingReads.remove(activeRid);
+            completedReadIds.deq;
+            rg_rd_drain_access <= 0;
+         end
+         else begin
+            dynamicAssert(rg_rd_drain_access < fromInteger(valueOf(AccessesPerCLine) - 1),
+                          "AXI read drain access advanced past the burst length");
+            rg_rd_drain_access <= rg_rd_drain_access + 1;
+         end
+      end
    endrule
 
    // ================================================================
