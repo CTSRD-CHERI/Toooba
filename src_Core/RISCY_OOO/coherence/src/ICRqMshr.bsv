@@ -149,6 +149,7 @@ interface ICRqMshr_sendRsToC#(
     numeric type cRqNum,
     type resultT
 );
+    // Consume the response; release immediately only if the refill is Done.
     method Action releaseEntry(Bit#(TLog#(cRqNum)) n);
     method Maybe#(resultT) getResult(Bit#(TLog#(cRqNum)) n);
 endinterface
@@ -230,6 +231,8 @@ module mkICRqMshrSafe#(
     Vector#(cRqNum, Ehr#(4, reqT)) reqVec <- replicateM(mkEhr(?));
     // cRq mshr slots
     Vector#(cRqNum, Ehr#(4, slotT)) slotVec <- replicateM(mkEhr(defaultValue));
+    // Retain an early-consumed fetch until its refill also completes.
+    Vector#(cRqNum, Ehr#(4, Bool)) resultConsumedVec <- replicateM(mkEhr(False));
     // result
     Vector#(cRqNum, Ehr#(4, Maybe#(resultT))) resultVec <- replicateM(mkEhr(Invalid));
     // successor valid bit
@@ -276,6 +279,7 @@ module mkICRqMshrSafe#(
         stateVec[n][cRqTransfer_port] <= Init;
         slotVec[n][cRqTransfer_port] <= defaultValue;
         resultVec[n][cRqTransfer_port] <= Invalid;
+        resultConsumedVec[n][cRqTransfer_port] <= False;
         succValidVec[n][cRqTransfer_port] <= False;
         reqVec[n][cRqTransfer_port] <= r;
 `ifdef CHECK_DEADLOCK
@@ -292,11 +296,16 @@ module mkICRqMshrSafe#(
 
     interface ICRqMshr_sendRsToC sendRsToC;
         method Action releaseEntry(cRqIndexT n) if(inited);
-            emptyEntryQ.enq(n);
-            stateVec[n][sendRsToC_port] <= Empty;
+            if (stateVec[n][sendRsToC_port] == Done) begin
+                emptyEntryQ.enq(n);
+                stateVec[n][sendRsToC_port] <= Empty;
 `ifdef CHECK_DEADLOCK
-            checker.releaseEntry(n);
+                checker.releaseEntry(n);
 `endif
+            end
+            else begin
+                resultConsumedVec[n][sendRsToC_port] <= True;
+            end
         endmethod
 
         method Maybe#(resultT) getResult(Bit#(TLog#(cRqNum)) n);
@@ -353,7 +362,16 @@ module mkICRqMshrSafe#(
 
         method Action setStateSlot(cRqIndexT n, ICRqState state, slotT slot);
             doAssert(state != Empty, "use releaseEntry to set state to Empty");
-            stateVec[n][pipelineResp_port] <= state;
+            if (state == Done && resultConsumedVec[n][pipelineResp_port]) begin
+                emptyEntryQ.enq(n);
+                stateVec[n][pipelineResp_port] <= Empty;
+`ifdef CHECK_DEADLOCK
+                checker.releaseEntry(n);
+`endif
+            end
+            else begin
+                stateVec[n][pipelineResp_port] <= state;
+            end
             slotVec[n][pipelineResp_port] <= slot;
         endmethod
 

@@ -520,10 +520,12 @@ module mkIBank#(
     pipeOutT pipeOut = pipeline.first;
     ramDataT ram = pipeOut.ram;
     // get proc req to select from cRqMshr
-    cRqIdxT pipeOutCRqIdx = case(pipeOut.cmd) matches
+    cRqIdxT pipeOutCRqIdx = pipeline.prsRequestedAccessValid
+                         ? validValue(pipeline.prsOwner)
+                         : (case(pipeOut.cmd) matches
         tagged L1CRq .n: (n);
         default: (fromMaybe(0, ram.info.owner)); // L1PRs
-    endcase;
+    endcase);
     procRqT pipeOutCRq = cRqMshr.pipelineResp.getRq(pipeOutCRqIdx);
     Maybe#(cRqIdxT) pipeOutSucc = cRqMshr.pipelineResp.getSucc(pipeOutCRqIdx);
 
@@ -546,6 +548,18 @@ module mkIBank#(
         end
         return val;
     endfunction
+
+    // Publish only the requested instruction bundle. Retain ownership and
+    // the dependency chain until all refill accesses have been installed.
+    Reg#(Bool) prsFetchResponded <- mkReg(False);
+    Bool earlyRefillFetch = !prsFetchResponded && pipeline.prsRequestedAccessValid
+                           && !cRqIsPrefetch[pipeOutCRqIdx];
+    rule respondRefillFetch(earlyRefillFetch);
+        doAssert(isValid(pipeline.prsOwner), "streamed instruction refill has no owner");
+        cRqMshr.pipelineResp.setResult(pipeOutCRqIdx,
+            readInst(pipeline.prsRequestedAccess, pipeOutCRq.addr));
+        prsFetchResponded <= True;
+    endrule
 
     // function to process cRq hit (MSHR slot may have garbage)
     function Action cRqHit(cRqIdxT n, procRqT req);
@@ -740,7 +754,8 @@ module mkIBank#(
         end
     endrule
 
-    rule pipelineResp_pRs(pipeOut.cmd == L1PRs);
+    rule pipelineResp_pRs(pipeOut.cmd == L1PRs && !earlyRefillFetch);
+        prsFetchResponded <= False;
        if (verbose) begin
         $display("%t I %m pipelineResp: ", $time, fshow(pipeOut));
         $display("%t I %m pipelineResp: pRs: ", $time);
@@ -814,7 +829,7 @@ module mkIBank#(
             cRqMshr.prefetcher.getResult(prefetchIndexQ.first) matches tagged Valid .inst);
         prefetchIndexQ.deq;
         removedCRqs.incr(1);
-        cRqMshr.prefetcher.releaseEntry(prefetchIndexQ.first); // release MSHR entry
+        cRqMshr.prefetcher.releaseEntry(prefetchIndexQ.first); // release completed prefetch
         if (verbose)
         $display("%t I %m discardPrefetchRqResult: ", $time,
             fshow(prefetchIndexQ.first)
@@ -912,7 +927,7 @@ module mkIBank#(
             );
                 cRqIndexQ.deq;
                 removedCRqs.incr(1);
-                cRqMshr.sendRsToC.releaseEntry(cRqIndexQ.first); // release MSHR entry
+                cRqMshr.sendRsToC.releaseEntry(cRqIndexQ.first); // retain entry if refill is still active
                if (verbose)
                 $display("%t I %m sendRsToC: ", $time,
                     fshow(cRqIndexQ.first), " ; ",
