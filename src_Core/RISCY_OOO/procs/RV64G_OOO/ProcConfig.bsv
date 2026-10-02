@@ -116,7 +116,7 @@
 
 // Cache-line size in bytes. It must be a power of two and an integer multiple
 // of the configured access width.
-`define CACHE_LINE_BYTES 128
+`define CACHE_LINE_BYTES 64
 
 `ifdef CACHE_TEST
 

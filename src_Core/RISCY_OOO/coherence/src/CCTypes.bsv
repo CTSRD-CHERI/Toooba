@@ -225,7 +225,7 @@ endinterface
 interface L1ProcResp#(type idT);
     method Action respLd(idT id, MemTaggedData resp);
     method Action respLrScAmo(idT id, MemTaggedData resp);
-    method ActionValue#(Tuple2#(LineByteEn, Line)) respSt(idT id);
+    method ActionValue#(Tuple2#(CLineAccessByteEn, CLineAccess)) respSt(idT id, CLineAccessSel access);
     method Action evict(LineAddr a); // called when cache line is evicted
 endinterface
 
@@ -314,6 +314,7 @@ typedef union tagged {
 
 interface ChildCacheToParent#(type cRqIdT, type childT);
     interface FifoDeq#(CRsMsg#(childT)) rsToP;
+    interface FifoDeq#(CRsAccessMsg#(childT)) rsAccessToP;
     interface FifoDeq#(CRqMsg#(cRqIdT, childT)) rqToP;
     interface FifoEnq#(PRqRsMsg#(cRqIdT, childT)) fromP;
     interface FifoEnq#(PRsAccessMsg#(cRqIdT, childT)) rsAccessFromP;

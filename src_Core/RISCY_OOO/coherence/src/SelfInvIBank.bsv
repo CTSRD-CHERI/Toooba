@@ -514,6 +514,7 @@ module mkSelfInvIBank#(
 
     interface ChildCacheToParent to_parent;
         interface rsToP = nullFifoDeq;
+        interface rsAccessToP = nullFifoDeq;
         interface rqToP = toFifoDeq(rqToPQ);
         interface fromP = toFifoEnq(fromPQ);
         interface rsAccessFromP = nullFifoEnq;

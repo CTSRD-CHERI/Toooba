@@ -394,7 +394,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             end
         endmethod
 `ifdef TSO_MM
-        method ActionValue#(Tuple2#(LineByteEn, Line)) respSt(DProcReqId id);
+        method ActionValue#(Tuple2#(CLineAccessByteEn, CLineAccess)) respSt(DProcReqId id, CLineAccessSel access);
             lsq.deqSt; // deq here
             let waitSt <- toGet(waitStRespQ).get;
             if(verbose) begin
@@ -414,16 +414,21 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             events.evt_STORE_WAIT = saturating_truncate(lat);
             events_reg[2] <= events;
 `endif
-            // now figure out the data to be written
-            CLineMemDataByteEn be = replicate(replicate(False));
-            Line data = unpack(0);
-            be[waitSt.offset] = waitSt.shiftedBE;
-            data.data[waitSt.offset] = waitSt.shiftedData.data;
-            data.tag[waitSt.offset] = waitSt.shiftedData.tag;
-            return tuple2(unpack(pack(be)), data);
+            // Construct only the addressed access. The MemTaggedData index is
+            // the low part of the cache-line offset after selecting an access.
+            CLineAccessByteEn be = replicate(replicate(False));
+            Vector#(CLineMemDataPerAccess, MemData) accessData = replicate(unpack(0));
+            Vector#(CLineMemDataPerAccess, MemTag) accessTags = replicate(False);
+            CLineAccessMemTaggedDataSel dataSel = truncate(waitSt.offset);
+            doAssert(access == truncate(waitSt.offset >> valueOf(TLog#(CLineMemDataPerAccess))),
+                     "store response access mismatch");
+            be[dataSel] = waitSt.shiftedBE;
+            accessData[dataSel] = waitSt.shiftedData.data;
+            accessTags[dataSel] = waitSt.shiftedData.tag;
+            return tuple2(be, CLineAccess {data: pack(accessData), tag: accessTags});
         endmethod
 `else
-        method ActionValue#(Tuple2#(LineByteEn, Line)) respSt(DProcReqId id);
+        method ActionValue#(Tuple2#(CLineAccessByteEn, CLineAccess)) respSt(DProcReqId id, CLineAccessSel access);
             SBIndex idx = truncate(id);
             let e <- stb.deq(idx); // deq SB
             lsq.wakeupLdStalledBySB(idx); // wake up loads
@@ -441,7 +446,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             events.evt_STORE_WAIT = saturating_truncate(lat);
             events_reg[2] <= events;
 `endif
-            return tuple2(unpack(pack(e.byteEn)), e.line); // return SB entry
+            Vector#(CLineNumAccesses, CLineAccessByteEn) accessBEs = unpack(pack(e.byteEn));
+            return tuple2(accessBEs[access], clineToAccessVector(e.line)[access]);
         endmethod
 `endif
         method Action evict(LineAddr lineAddr);

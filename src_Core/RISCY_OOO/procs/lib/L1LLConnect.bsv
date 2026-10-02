@@ -59,7 +59,9 @@ module mkL1LLConnect#(
     function Get#(CRqMsg#(L1Way, void)) cRqGet(ChildCacheToParent#(L1Way, void) ifc) = toGet(ifc.rqToP);
     mkXBar(getCRqDst, map(cRqGet, l1), vec(toPut(llc.rqFromC)));
 
-    // Serialize child responses into access-width flits before arbitration.
+    Fifo#(2, CRsAccessMsg#(LLChild)) cRsLinkQ <- mkCFFifo;
+`ifdef SELF_INV_CACHE
+    // Compatibility path: self-invalidating caches still return whole lines.
     Vector#(L1Num, Fifo#(1, CRsAccessMsg#(LLChild))) cRsAccessQ <- replicateM(mkBypassFifo);
     Vector#(L1Num, Reg#(CLineAccessSel)) cRsAccess <- replicateM(mkReg(0));
     for(Integer i = 0; i < valueof(L1Num); i = i+1) begin
@@ -68,34 +70,67 @@ module mkL1LLConnect#(
             Bool hasData = isValid(r.data);
             Bool last = !hasData || cRsAccess[i] == fromInteger(valueOf(CLineNumAccesses) - 1);
             Maybe#(CLineAccess) accessData = Invalid;
-            if (hasData) begin
-                let accesses = clineToAccessVector(validValue(r.data));
-                accessData = Valid(accesses[cRsAccess[i]]);
-            end
+            if (hasData)
+                accessData = Valid(clineToAccessVector(validValue(r.data))[cRsAccess[i]]);
             cRsAccessQ[i].enq(CRsAccessMsg {
-                addr: r.addr,
-                toState: r.toState,
-                data: accessData,
-                access: cRsAccess[i],
-                last: last,
-                child: fromInteger(i)
+                addr: r.addr, toState: r.toState, data: accessData,
+                access: cRsAccess[i], last: last, child: fromInteger(i)
             });
             if (last) begin
                 l1[i].rsToP.deq;
                 cRsAccess[i] <= 0;
             end
-            else begin
+            else
                 cRsAccess[i] <= cRsAccess[i] + 1;
-            end
         endrule
     end
-
-    Fifo#(2, CRsAccessMsg#(LLChild)) cRsLinkQ <- mkCFFifo;
-    function XBarDstInfo#(Bit#(0), CRsAccessMsg#(LLChild)) getCRsAccessDst(LLChild child, CRsAccessMsg#(LLChild) r);
+    function XBarDstInfo#(Bit#(0), CRsAccessMsg#(LLChild)) getLegacyCRsAccessDst(LLChild child, CRsAccessMsg#(LLChild) r);
         return XBarDstInfo {idx: 0, data: r};
     endfunction
-    function Get#(CRsAccessMsg#(LLChild)) cRsAccessGet(Fifo#(1, CRsAccessMsg#(LLChild)) f) = toGet(f);
-    mkXBar(getCRsAccessDst, map(cRsAccessGet, cRsAccessQ), vec(toPut(cRsLinkQ)));
+    function Get#(CRsAccessMsg#(LLChild)) legacyCRsAccessGet(Fifo#(1, CRsAccessMsg#(LLChild)) f) = toGet(f);
+    mkXBar(getLegacyCRsAccessDst, map(legacyCRsAccessGet, cRsAccessQ), vec(toPut(cRsLinkQ)));
+`else
+    // Normal coherent caches source access-width flits directly from MSHRs.
+    // Fairly acquire one child and retain ownership until its final flit because
+    // the LLC start/put interface accepts exactly one logical response at a time.
+    Reg#(Maybe#(LLChild)) cRsOwner <- mkReg(Invalid);
+    Reg#(LLChild) cRsNext <- mkReg(0);
+    rule arbitrateCRsAccess;
+        Maybe#(LLChild) selected = cRsOwner;
+        Bool found = isValid(selected);
+        if (!found) begin
+            for (Integer i = 0; i < valueof(L1Num); i = i+1) begin
+                if (!found && cRsNext <= fromInteger(i)
+                    && l1[i].rsAccessToP.notEmpty) begin
+                    selected = Valid(fromInteger(i));
+                    found = True;
+                end
+            end
+            for (Integer i = 0; i < valueof(L1Num); i = i+1) begin
+                if (!found && fromInteger(i) < cRsNext
+                    && l1[i].rsAccessToP.notEmpty) begin
+                    selected = Valid(fromInteger(i));
+                    found = True;
+                end
+            end
+        end
+        if (selected matches tagged Valid .child) begin
+            let r = l1[child].rsAccessToP.first;
+            l1[child].rsAccessToP.deq;
+            cRsLinkQ.enq(CRsAccessMsg {
+                addr: r.addr, toState: r.toState, data: r.data,
+                access: r.access, last: r.last, child: child
+            });
+            if (r.last) begin
+                cRsOwner <= Invalid;
+                cRsNext <= child == fromInteger(valueof(L1Num) - 1) ? 0 : child + 1;
+            end
+            else begin
+                cRsOwner <= Valid(child);
+            end
+        end
+    endrule
+`endif
 
     rule forwardCRsAccess;
         llc.rsAccessFromC.enq(cRsLinkQ.first);

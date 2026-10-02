@@ -497,10 +497,13 @@ module mkSelfInvL1Bank#(
                 linkAddr <= Invalid;
             end
             St: begin
-                // resp processor, get write data & BE
-                let {be, wrLine} <- procResp.respSt(req.id);
-                // calculate new data to write
-                newLine = getUpdatedLine(curLine, be, wrLine);
+                // The legacy self-invalidating pipeline remains line-wide, so
+                // update the selected access and reassemble the line locally.
+                CLineAccessSel accessSel = getCLineAccessSel(req.addr);
+                let {be, wrAccess} <- procResp.respSt(req.id, accessSel);
+                let accesses = clineToAccessVector(curLine);
+                accesses[accessSel] = getUpdatedAccess(accesses[accessSel], be, wrAccess);
+                newLine = accessVectorToCline(accesses);
             end
             default: begin
                 doAssert(False, "unknown mem op");
@@ -981,6 +984,7 @@ module mkSelfInvL1Bank#(
 
     interface ChildCacheToParent to_parent;
         interface rsToP = toFifoDeq(rsToPQ);
+        interface rsAccessToP = nullFifoDeq;
         interface rqToP = toFifoDeq(rqToPQ);
         interface fromP = toFifoEnq(fromPQ);
         interface rsAccessFromP = nullFifoEnq;
@@ -1212,6 +1216,7 @@ module mkSelfInvL1Cache#(
         toParentIfc = (interface ChildCacheToParent;
             interface rqToP = toFifoDeq(cRqToPQ);
             interface rsToP = toFifoDeq(cRsToPQ);
+            interface rsAccessToP = nullFifoDeq;
             interface fromP = toFifoEnq(pRqRsFromPQ);
             interface rsAccessFromP = nullFifoEnq;
         endinterface);

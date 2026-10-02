@@ -144,6 +144,7 @@ module mkL1Bank#(
     Alias#(procRqT, ProcRq#(procRqIdT)),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
     Alias#(cRsToPT, CRsMsg#(void)),
+    Alias#(cRsAccessToPT, CRsAccessMsg#(void)),
     Alias#(pRqFromPT, PRqMsg#(void)),
     Alias#(pRsFromPT, PRsMsg#(wayT, void)),
     Alias#(pRsAccessFromPT, PRsAccessMsg#(wayT, void)),
@@ -170,6 +171,8 @@ module mkL1Bank#(
     Fifo#(1, procRqT) rqFromCQ <- mkBypassFifo;
 
     Fifo#(2, cRsToPT) rsToPQ <- mkCFFifo;
+    Fifo#(2, cRsAccessToPT) rsAccessToPQ <- mkCFFifo;
+    Reg#(CLineAccessSel) rsToPAccess <- mkReg(0);
     Fifo#(2, cRqToPT) rqToPQ <- mkCFFifo;
     Fifo#(2, pRqRsFromPT) fromPQ <- mkCFFifo;
     Fifo#(2, pRsAccessFromPT) rsAccessFromPQ <- mkCFFifo;
@@ -453,7 +456,6 @@ endfunction
 `endif
 
     rule sendRsToP_cRq(rsToPIndexQ.first matches tagged CRq .n);
-        rsToPIndexQ.deq;
         // get cRq replacement info
         procRqT req = cRqMshr.sendRsToP_cRq.getRq(n);
         cRqSlotT slot = cRqMshr.sendRsToP_cRq.getSlot(n);
@@ -462,52 +464,65 @@ endfunction
         doAssert(state == WaitNewTag,
             "send replacement resp to parent, state should be WaitNewTag"
         );
-        // send resp to parent
-        cRsToPT resp = CRsMsg {
-            addr: {slot.repTag, truncate(req.addr)}, // get bank id & index from req
-            toState: I,
-            data: data,
-            child: ?
-        };
-        rsToPQ.enq(resp);
-        // req parent for upgrade & change state
-        rqToPIndexQ_sendRsToP.enq(n);
-        cRqMshr.sendRsToP_cRq.setWaitSt_setSlot_clearData(n, L1CRqSlot {
-            way: slot.way,
-            cs: I, // replacement, so I (get ready for rqToIndex.deq)
-            repTag: ?,
-            waitP: True // we have req parent at the same time
+        Addr respAddr = {slot.repTag, truncate(req.addr)};
+        Bool hasData = isValid(data);
+        Bool last = !hasData || rsToPAccess == fromInteger(valueOf(CLineNumAccesses) - 1);
+        Maybe#(CLineAccess) accessData = Invalid;
+        if (hasData)
+            accessData = Valid(clineToAccessVector(validValue(data))[rsToPAccess]);
+        rsAccessToPQ.enq(CRsAccessMsg {
+            addr: respAddr, toState: I, data: accessData,
+            access: rsToPAccess, last: last, child: ?
         });
-        // inform processor of line eviction
-        procResp.evict(getLineAddr(resp.addr));
+        // The enqueue and notification are atomic, so backpressure cannot
+        // expose the eviction before the first response flit is accepted.
+        if (rsToPAccess == 0)
+            procResp.evict(getLineAddr(respAddr));
+        if (last) begin
+            rsToPIndexQ.deq;
+            rsToPAccess <= 0;
+            // Only release/clear MSHR data after the final flit is accepted.
+            rqToPIndexQ_sendRsToP.enq(n);
+            cRqMshr.sendRsToP_cRq.setWaitSt_setSlot_clearData(n, L1CRqSlot {
+                way: slot.way, cs: I, repTag: ?, waitP: True
+            });
+        end
+        else
+            rsToPAccess <= rsToPAccess + 1;
        if (verbose)
         $display("%t L1 %m sendRsToP: ", $time,
             fshow(rsToPIndexQ.first)," ; ",
-            fshow(req), " ; ",
-            fshow(resp)
+            fshow(req), " ; ", fshow(respAddr), " ; ",
+            fshow(rsToPAccess), " ; ", fshow(last)
         );
     endrule
 
     rule sendRsToP_pRq(rsToPIndexQ.first matches tagged PRq .n);
-        rsToPIndexQ.deq;
-        // get pRq info & send resp & release MSHR entry
+        // Keep the MSHR entry and its complete line until the final flit.
         pRqFromPT req = pRqMshr.sendRsToP_pRq.getRq(n);
         Maybe#(Line) data = pRqMshr.sendRsToP_pRq.getData(n);
-        cRsToPT resp = CRsMsg {
-            addr: req.addr,
-            toState: req.toState,
-            data: data,
-            child: ?
-        };
-        rsToPQ.enq(resp);
-        pRqMshr.sendRsToP_pRq.releaseEntry(n); // mshr entry released
-        // inform processor of line eviction
-        procResp.evict(getLineAddr(resp.addr));
+        Bool hasData = isValid(data);
+        Bool last = !hasData || rsToPAccess == fromInteger(valueOf(CLineNumAccesses) - 1);
+        Maybe#(CLineAccess) accessData = Invalid;
+        if (hasData)
+            accessData = Valid(clineToAccessVector(validValue(data))[rsToPAccess]);
+        rsAccessToPQ.enq(CRsAccessMsg {
+            addr: req.addr, toState: req.toState, data: accessData,
+            access: rsToPAccess, last: last, child: ?
+        });
+        if (rsToPAccess == 0)
+            procResp.evict(getLineAddr(req.addr));
+        if (last) begin
+            rsToPIndexQ.deq;
+            rsToPAccess <= 0;
+            pRqMshr.sendRsToP_pRq.releaseEntry(n);
+        end
+        else
+            rsToPAccess <= rsToPAccess + 1;
        if (verbose)
         $display("%t L1 %m sendRsToP: ", $time,
             fshow(rsToPIndexQ.first), " ; ",
-            fshow(req), " ; ",
-            fshow(resp)
+            fshow(req), " ; ", fshow(rsToPAccess), " ; ", fshow(last)
         );
     endrule
 
@@ -634,12 +649,9 @@ endfunction
             end
             St: begin
                 // resp processor, get write data & BE
-                let {be, wrLine} <- procResp.respSt(req.id);
-                // Slice the whole-line processor response to the addressed access.
-                Vector#(CLineNumAccesses, CLineAccessByteEn) accessBEs = unpack(pack(be));
                 CLineAccessSel accessSel = getCLineAccessSel(req.addr);
-                CLineAccess wrAccess = clineToAccessVector(wrLine)[accessSel];
-                newAccess = getUpdatedAccess(curAccess, accessBEs[accessSel], wrAccess);
+                let {be, wrAccess} <- procResp.respSt(req.id, accessSel);
+                newAccess = getUpdatedAccess(curAccess, be, wrAccess);
             end
             default: begin
                 doAssert(False, "unknown mem op");
@@ -1223,6 +1235,7 @@ endfunction
 
     interface ChildCacheToParent to_parent;
         interface rsToP = toFifoDeq(rsToPQ);
+        interface rsAccessToP = toFifoDeq(rsAccessToPQ);
         interface rqToP = toFifoDeq(rqToPQ);
         interface fromP = toFifoEnq(fromPQ);
         interface rsAccessFromP = toFifoEnq(rsAccessFromPQ);
@@ -1399,6 +1412,7 @@ module mkL1Cache#(
     Alias#(procRqT, ProcRq#(procRqIdT)),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
     Alias#(cRsToPT, CRsMsg#(void)),
+    Alias#(cRsAccessToPT, CRsAccessMsg#(void)),
     Alias#(pRqRsFromPT, PRqRsMsg#(wayT, void)),
     Alias#(pRsAccessFromPT, PRsAccessMsg#(wayT, void)),
     Alias#(l1CmdT, L1Cmd#(indexT, cRqIdxT, pRqIdxT)),
@@ -1432,6 +1446,7 @@ module mkL1Cache#(
         // multiple banks need cross bar
         Fifo#(2, cRqToPT) cRqToPQ <- mkCFFifo;
         Fifo#(2, cRsToPT) cRsToPQ <- mkCFFifo;
+        Fifo#(2, cRsAccessToPT) cRsAccessToPQ <- mkCFFifo;
         Fifo#(2, pRqRsFromPT) pRqRsFromPQ <- mkCFFifo;
         Fifo#(2, pRsAccessFromPT) pRsAccessFromPQ <- mkCFFifo;
 
@@ -1441,11 +1456,48 @@ module mkL1Cache#(
         function Get#(cRqToPT) cRqGet(l1BankT ifc) = toGet(ifc.to_parent.rqToP);
         mkXBar(getCRqDstInfo, map(cRqGet, banks), vec(toPut(cRqToPQ)));
 
-        function XBarDstInfo#(Bit#(0), cRsToPT) getCRsDstInfo(bankdIdT bid, cRsToPT cRs);
+        function XBarDstInfo#(Bit#(0), cRsToPT) getCRsDstInfo(bankIdT bid, cRsToPT cRs);
             return XBarDstInfo {idx: 0, data: cRs};
         endfunction
         function Get#(cRsToPT) cRsGet(l1BankT ifc) = toGet(ifc.to_parent.rsToP);
         mkXBar(getCRsDstInfo, map(cRsGet, banks), vec(toPut(cRsToPQ)));
+
+        // Fairly acquire a ready bank, then retain ownership through the final
+        // flit so dirty-line responses remain contiguous under backpressure.
+        Reg#(Maybe#(bankIdT)) cRsAccessOwner <- mkReg(Invalid);
+        Reg#(bankIdT) cRsAccessNext <- mkReg(0);
+        rule sendCRsAccess;
+            Maybe#(bankIdT) selected = cRsAccessOwner;
+            Bool found = isValid(selected);
+            if (!found) begin
+                for (Integer i = 0; i < valueof(bankNum); i = i+1) begin
+                    if (!found && cRsAccessNext <= fromInteger(i)
+                        && banks[i].to_parent.rsAccessToP.notEmpty) begin
+                        selected = Valid(fromInteger(i));
+                        found = True;
+                    end
+                end
+                for (Integer i = 0; i < valueof(bankNum); i = i+1) begin
+                    if (!found && fromInteger(i) < cRsAccessNext
+                        && banks[i].to_parent.rsAccessToP.notEmpty) begin
+                        selected = Valid(fromInteger(i));
+                        found = True;
+                    end
+                end
+            end
+            if (selected matches tagged Valid .bank) begin
+                let r = banks[bank].to_parent.rsAccessToP.first;
+                banks[bank].to_parent.rsAccessToP.deq;
+                cRsAccessToPQ.enq(r);
+                if (r.last) begin
+                    cRsAccessOwner <= Invalid;
+                    cRsAccessNext <= bank == fromInteger(valueof(bankNum) - 1) ? 0 : bank + 1;
+                end
+                else begin
+                    cRsAccessOwner <= Valid(bank);
+                end
+            end
+        endrule
 
         for(Integer i = 0; i < valueof(bankNum); i = i+1) begin
             rule sendPRq(pRqRsFromPQ.first matches tagged PRq .rq &&& getBankId(rq.addr) == fromInteger(i));
@@ -1465,6 +1517,7 @@ module mkL1Cache#(
         toParentIfc = (interface ChildCacheToParent;
             interface rqToP = toFifoDeq(cRqToPQ);
             interface rsToP = toFifoDeq(cRsToPQ);
+            interface rsAccessToP = toFifoDeq(cRsAccessToPQ);
             interface fromP = toFifoEnq(pRqRsFromPQ);
             interface rsAccessFromP = toFifoEnq(pRsAccessFromPQ);
         endinterface);

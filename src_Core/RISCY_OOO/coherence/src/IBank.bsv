@@ -131,6 +131,7 @@ module mkIBank#(
     Alias#(procRqT, ProcRqToI),
     Alias#(cRqToPT, CRqMsg#(wayT, void)),
     Alias#(cRsToPT, CRsMsg#(void)),
+    Alias#(cRsAccessToPT, CRsAccessMsg#(void)),
     Alias#(pRqFromPT, PRqMsg#(void)),
     Alias#(pRsFromPT, PRsMsg#(wayT, void)),
     Alias#(pRsAccessFromPT, PRsAccessMsg#(wayT, void)),
@@ -159,6 +160,7 @@ module mkIBank#(
     Fifo#(1, Addr) rqFromCQ <- mkBypassFifo;
 
     Fifo#(2, cRsToPT) rsToPQ <- mkCFFifo;
+    Fifo#(2, cRsAccessToPT) rsAccessToPQ <- mkCFFifo;
     Fifo#(2, cRqToPT) rqToPQ <- mkCFFifo;
     Fifo#(2, pRqRsFromPT) fromPQ <- mkCFFifo;
     Fifo#(2, pRsAccessFromPT) rsAccessFromPQ <- mkCFFifo;
@@ -424,13 +426,11 @@ module mkIBank#(
         procRqT req = cRqMshr.sendRsToP_cRq.getRq(n);
         cRqSlotT slot = cRqMshr.sendRsToP_cRq.getSlot(n);
         // send resp to parent
-        cRsToPT resp = CRsMsg {
+        cRsAccessToPT resp = CRsAccessMsg {
             addr: {slot.repTag, truncate(req.addr)}, // get bank id & index from req
-            toState: I,
-            data: Invalid, // I$ never downgrade with data to writeback
-            child: ?
+            toState: I, data: Invalid, access: 0, last: True, child: ?
         };
-        rsToPQ.enq(resp);
+        rsAccessToPQ.enq(resp);
         // req parent for upgrade now
         // (prevent parent resp from coming to release MSHR entry before replace resp is sent)
         rqToPIndexQ_sendRsToP.enq(n);
@@ -447,13 +447,11 @@ module mkIBank#(
         rsToPIndexQ.deq;
         // get pRq info & send resp & release MSHR entry
         pRqFromPT req = pRqMshr.sendRsToP_pRq.getRq(n);
-        cRsToPT resp = CRsMsg {
-            addr: req.addr,
-            toState: I, // I$ must downgrade to I
-            data: Invalid, // I$ never downgrade with data to writeback
-            child: ?
+        cRsAccessToPT resp = CRsAccessMsg {
+            addr: req.addr, toState: I, // I$ must downgrade to I
+            data: Invalid, access: 0, last: True, child: ?
         };
-        rsToPQ.enq(resp);
+        rsAccessToPQ.enq(resp);
         pRqMshr.sendRsToP_pRq.releaseEntry(n); // mshr entry released
        if (verbose)
         $display("%t I %m sendRsToP: ", $time,
@@ -896,6 +894,7 @@ module mkIBank#(
 
     interface ChildCacheToParent to_parent;
         interface rsToP = toFifoDeq(rsToPQ);
+        interface rsAccessToP = toFifoDeq(rsAccessToPQ);
         interface rqToP = toFifoDeq(rqToPQ);
         interface fromP = toFifoEnq(fromPQ);
         interface rsAccessFromP = toFifoEnq(rsAccessFromPQ);
