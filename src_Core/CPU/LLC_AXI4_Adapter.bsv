@@ -164,10 +164,10 @@ module mkLLC_AXi4_Adapter #(MemFifoClient #(idT, childT) llc)
          $finish (1);
       end
 
-      // Shift next 64 bits from fabric into the cache line being assembled
+      // Shift the next 64-byte fabric beat into the cache line being assembled.
       let new_cline_tag = { mem_rsp.ruser, truncateLSB(pack(rg_cline.tag)) };
       let new_cline_data = { mem_rsp.rdata, truncateLSB(pack(rg_cline.data)) };
-      let new_cline = CLine { tag: rg_rd_rsp_beat[0] == 0 ? unpack(new_cline_tag) : rg_cline.tag
+      let new_cline = CLine { tag: unpack(new_cline_tag)
                             , data: unpack(new_cline_data) };
       //let new_cline = shiftOutFrom0(mem_rsp.rdata, rg_cline, 1);
 
