@@ -611,15 +611,12 @@ endfunction
         // TODO when we have MESI, cache state may also need update
         Line curLine = ram.line;
         Line newLine = curLine;
-        Bool line_poisoned = False;
         LineMemDataOffset dataSel = getLineMemDataOffset(req.addr);
         case(req.op) matches
             Ld: begin
                 if (!cRqIsPrefetch[n]) begin
                     if (req.loadTags) begin
                         procResp.respLd(req.id, getTagsAt(curLine));
-                    end else if (req.alloc_policy == 3'b100) begin 
-                        procResp.respLd(req.id, getPoisonAt(curLine, dataSel));
                     end else begin
                         procResp.respLd(req.id, getTaggedDataAt(curLine, dataSel));
                     end
@@ -628,98 +625,33 @@ endfunction
             Lr: begin
                 procResp.respLrScAmo(req.id, getTaggedDataAt(curLine, dataSel));
                 // set link addr
-                linkAddr <= Valid (getLineAddr(req.addr));
+                linkAddr <= poisonAccessDenied(getTaggedDataAt(curLine, dataSel),
+                    req.permitPoison, req.length) ? Invalid : Valid(getLineAddr(req.addr));
             end
             Amo: begin
                 noAction;
             end
             Sc: begin
-                // check Sc succeeds or not
-                Bool succeed = linkAddr == Valid (getLineAddr(req.addr));
-                // resp to proc
-                MemTaggedData respVal = succeed ? fromInteger(valueof(ScSuccVal)) : fromInteger(valueof(ScFailVal));
-                procResp.respLrScAmo(req.id, respVal);
-                // calculate new data to write
-                if(succeed) begin
-                    let taggedData = getTaggedDataAt(curLine, dataSel);
-                    CapPipe loaded_dataUnpacked = fromMem(unpack(pack(taggedData)));
-                    Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
-                    let poison_length = getLength(loaded_dataUnpacked);
-                    //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1 && !req.permitPoison) begin 
-                    if(req.alloc_policy == 3'b001) begin 
-                            //let newTaggedData =
-                            //     mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
-                            newLine = setTaggedDataAt( curLine, dataSel, unpack(0));
-                            $display("%t L1 %m pipelineResp: zero poison",
-                                $time,
-                                fshow(curLine), fshow(newLine)
-                            );
-                    end else begin 
-                        if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked)  == 1'b1 && !req.permitPoison && req.length <= poison_length) begin 
-                        //if(isValidCap(loaded_dataUnpacked) && taggedData.data[1][46] == 1'b1  ) begin 
-                            if (req.pver >  poison_pver ) begin  
-                                let newTaggedData =
-                                    mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
-                                newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
-                            end else begin 
-                                $display("%t L1 %m pipelineResp: found poison on store-conditional access, cancel store conditional",
-                                    $time,
-                                    fshow(taggedData)
-                                );
-                            end 
-                        end else begin 
-                            let newTaggedData =
-                                mergeMemTaggedDataBE(taggedData, req.data, zeroExtend(pack(req.byteEn)));
-                            newLine = setTaggedDataAt( newLine, dataSel, newTaggedData);
-                        end 
-                    end 
-                end
-                // reset link addr
+                CLineMemDataByteEn be = replicate(replicate(False));
+                be[dataSel] = req.byteEn;
+                Line writeLine = unpack(0);
+                writeLine = setTaggedDataAt(writeLine, dataSel, req.data);
+                let {allowed, updated} = poisonCheckedStore(curLine, be,
+                    writeLine, req.permitPoison, req.pver, req.length);
+                Bool succeed = linkAddr == Valid(getLineAddr(req.addr)) && allowed;
+                procResp.respLrScAmo(req.id,
+                    fromInteger(succeed ? valueOf(ScSuccVal) : valueOf(ScFailVal)));
+                if (succeed) newLine = updated;
                 linkAddr <= Invalid;
             end
             St: begin
-                // resp processor, get write data & BE
-                
                 let {be, wrLine, permitPoison, pver} <- procResp.respSt(req.id);
-                    // calculate new data to write
-                MemTaggedData curData = getTaggedDataAt(curLine, dataSel);
-                //if(curData.tag == True && curData.data[1][46] == 1'b1 && !permitPoison) begin 
-                CapPipe loaded_dataUnpacked = fromMem(unpack(pack(curData)));
-
-                let poison_length = getLength(loaded_dataUnpacked);
-                Bit#(8) poison_pver = getPVer(loaded_dataUnpacked);
-                //if(isValidCap(loaded_dataUnpacked) && curData.data[1][46] == 1'b1 && !permitPoison ) begin
-                if(req.alloc_policy == 3'b001) begin 
-                    //let newTaggedData =
-                    //     mergeMemTaggedDataBE(unpack(0), req.data, zeroExtend(pack(req.byteEn)));
-                    newLine = setTaggedDataAt( curLine, dataSel, unpack(0));
-                    $display("%t L1 %m pipelineResp: zero poison",
-                        $time,
-                        fshow(curLine), fshow(newLine)
-                    );
-                end else begin 
-                    if(isValidCap(loaded_dataUnpacked) && getCapPoison(loaded_dataUnpacked) == 1'b1 && !req.permitPoison && req.length <= poison_length) begin
-                        if (req.pver > poison_pver || req.alloc_policy == 3'b001) begin  
-                        //if(pver == pver) begin
-                            let unpoisoned_curLine = setTaggedDataAt( curLine, dataSel, unpack(0));
-                            newLine = getUpdatedLine(unpoisoned_curLine, be, wrLine);
-                            $display("%t L1 %m pipelineResp: found mismatch poison on store access, return 0",
-                                $time,
-                                fshow(curLine), fshow(newLine)
-                            );
-                        end else begin 
-                            $display("%t L1 %m pipelineResp: found poison on store access, cancel store",
-                                $time,
-                                fshow(curData), fshow(pver), isValidCap(loaded_dataUnpacked), fshow(wrLine)
-                            );
-                        end 
-                    end else begin 
-                        newLine = getUpdatedLine(curLine, be, wrLine);
-                    end 
-                end 
-            end
-            default: begin
-                doAssert(False, "unknown mem op");
+                let {allowed, updated} = poisonCheckedStore(curLine,
+                    unpack(pack(be)), wrLine, req.permitPoison, req.pver, req.length);
+                // Cancel a rejected store without changing data or CHERI tags.
+                newLine = updated;
+                if (verbose && !allowed)
+                    $display("%t L1 %m: cancelled poisoned store at %h", $time, req.addr);
             end
         endcase
         // deq pipeline or swap in successor ONLY when not AMO: to cut critical
@@ -819,10 +751,15 @@ endfunction
             data: unpack(signExtend(wordData[wordIdx]))
           };
         endcase;
+        Bool denied = poisonAccessDenied(current, req.permitPoison, req.length);
+        // AMOs read before writing, so a version change does not initialize
+        // their input. Return the raw poison to carry the precise fault back
+        // to the memory pipeline, including for AMOs with rd = x0.
+        if (denied) resp = current;
         procResp.respLrScAmo(req.id, resp);
         // calculate new data to write
         let newData = amoExec(req.amoInst, wordIdx, current, req.data);
-        newLine = setTaggedDataAt(newLine, dataSel, newData);
+        if (!denied) newLine = setTaggedDataAt(newLine, dataSel, newData);
         // deq pipeline or swap in successor
         pipeline.deqWrite(succ, RamData {
             info: CacheInfo {

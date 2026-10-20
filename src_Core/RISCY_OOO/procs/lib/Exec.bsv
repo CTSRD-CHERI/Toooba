@@ -52,9 +52,9 @@ function Maybe#(CSR_XCapCause) capChecksExec(CapPipe a, CapPipe b, CapPipe ddc, 
     function Maybe#(CSR_XCapCause) e2(CHERIException e)   = Valid(CSR_XCapCause{cheri_exc_reg: toCheck.rn2, cheri_exc_code: e});
     function Maybe#(CSR_XCapCause) eDDC(CHERIException e) = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1, pack(scrAddrDDC)}, cheri_exc_code: e});
     Maybe#(CSR_XCapCause) result = Invalid;
-    if (toCheck.src1_tag                  && !isValidCap(a))
+    if (toCheck.src1_tag                  && (!isValidCap(a) || getCapPoison(a) != 0))
         result = e1(cheriExcTagViolation);
-    else if (toCheck.src2_tag                  && !isValidCap(b))
+    else if (toCheck.src2_tag                  && (!isValidCap(b) || getCapPoison(b) != 0))
         result = e2(cheriExcTagViolation);
     else if (toCheck.src1_unsealed_or_sentry   && isValidCap(a) && (getKind(a) != UNSEALED) && (getKind(a) != SENTRY))
         result = e1(cheriExcSealViolation);
@@ -92,7 +92,7 @@ function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapCheck
         Amo:    tuple2(True, True);
     endcase;
     Bool storeValidCap = isStore && isValidCap(data) && byteOrTagEn == DataMemAccess(replicate(True));
-    if      (!isValidCap(auth))
+    if      (!isValidCap(auth) || getCapPoison(auth) != 0)
         result = eAuth(cheriExcTagViolation);
     else if (getKind(auth) != UNSEALED)
         result = eAuth(cheriExcSealViolation);
@@ -106,6 +106,9 @@ function Maybe#(CSR_XCapCause) capChecksMem(CapPipe auth, CapPipe data, CapCheck
         result = eAuth(cheriExcPermitWCapViolation);
     else if (storeValidCap && !getHardPerms(auth).permitStoreLocalCap && !getHardPerms(data).global)
         result = eAuth(cheriExcPermitWLocalCapViolation);
+    else if (storeValidCap && getCapPoison(data) != 0 &&
+             !getHardPerms(auth).permitPoison && getLength(auth) <= getLength(data))
+        result = eAuth(cheriExcPermitWCapViolation);
     return result;
 endfunction
 
@@ -240,7 +243,9 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
     let new_hard_perms = getHardPerms(a);
     new_hard_perms.global = new_hard_perms.global && getHardPerms(b).global;
     Bool unsealIllegal = !isValidCap(b) || getKind(a) != UNSEALED || getKind(b) == UNSEALED || a_res || getAddr(b) != a_type || !getHardPerms(b).permitUnseal || !isInBounds(b, False);
-    Bool buildCapIllegal = !isValidCap(b) || getKind(b) != UNSEALED || !isDerivable(a) || (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b); // XXX needs optimisation
+    Bool buildCapIllegal = !isValidCap(b) || getCapPoison(b) != 0 || getKind(b) != UNSEALED || !isDerivable(a) || (getPerms(a) & getPerms(b)) != getPerms(a) || getBase(a) < getBase(b) || getTop(a) > getTop(b)
+        || (!getHardPerms(b).permitPoison &&
+            (getPVer(a) != getPVer(b) || getCapPoison(a) != getCapPoison(b))); // XXX needs optimisation
     CapPipe res = (case(func) matches
             tagged ModifyOffset .offsetOp :
                 modifyOffset(a_mut, getAddr(b), offsetOp == IncOffset).value;
@@ -274,8 +279,9 @@ function CapPipe capModify(CapPipe a, CapPipe b, CapModifyFunc func);
                 (getAddr(a) == 0 ? nullCap : setAddr(b_mut, getAddr(a)).value);
             tagged SetHigh:
                 fromMem(tuple2(False, {getAddr(b), getAddr(a)}));
-            tagged SetPVer: 
-                setPVer(a_mut,  truncate(getAddr(b))); 
+            tagged SetPVer:
+                clearTagIf(setPVer(a_mut, truncate(getAddr(b))),
+                           !getHardPerms(a).permitPoison);
             tagged BuildCap               :
                 setKind(setValidCap(a_mut, !buildCapIllegal), getKind(a)==SENTRY ? SENTRY : UNSEALED);
             tagged Move                   :
@@ -581,7 +587,7 @@ function Maybe#(Trap) checkForException(
     CapPipe pcc_end = cast(addPc(pcc, (fourByteInst?4:2)));
     CapPipe pcc_start = cast(pcc);
     Maybe#(CSR_XCapCause) capException = Invalid;
-    if (!isValidCap(pcc_start)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcTagViolation});
+    if (!isValidCap(pcc_start) || getCapPoison(pcc_start) != 0) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcTagViolation});
     if (getKind(pcc_start) != UNSEALED) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcSealViolation});
     if (!getHardPerms(pcc_start).permitExecute) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcPermitXViolation});
     if (!isInBounds(pcc_end, True)) capException = Valid(CSR_XCapCause{cheri_exc_reg: {1'b1,pack(scrAddrPCC)}, cheri_exc_code: cheriExcLengthViolation});

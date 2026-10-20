@@ -70,6 +70,9 @@ typedef struct {
     CLine line;
     Bit#(16) pcHash;
     Bool permitPoison;
+    Bit#(8) pver;
+    Bit#(64) length;
+    Bit#(3) alloc_policy;
 } SBEntry deriving(Bits, Eq, FShow);
 
 // result of searching (e.g. load byass)
@@ -81,7 +84,7 @@ typedef struct {
 interface StoreBuffer;
     method Bool isEmpty;
     method Maybe#(SBIndex) getEnqIndex(Addr paddr);
-    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash, Bool permitPoison);
+    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash, Bool permitPoison, Bit#(8) pver, Bit#(64) length, Bit#(3) alloc_policy);
     method ActionValue#(SBEntry) deq(SBIndex idx);
     method ActionValue#(Tuple2#(SBIndex, SBEntry)) issue;
     method SBSearchRes search(Addr paddr, ByteOrTagEn be); // load bypass/stall or atomic inst stall
@@ -160,7 +163,7 @@ module mkStoreBufferEhr(StoreBuffer);
         function Bool matchEntry(Integer i);
             // entry must be valid, addr should match, byte enable should overlap
             Bool sameAddr = getSBBlockAddr(paddr) == entry[i][searchPort].addr;
-            Bool beOverlap = be == TagMemAccess || (ldBE & getEntryBE(fromInteger(i))) != 0;
+            Bool beOverlap = be == TagMemAccess || getEntryBE(fromInteger(i)) != 0;
             return valid[i][searchPort] && sameAddr && beOverlap;
         endfunction
 
@@ -185,7 +188,9 @@ module mkStoreBufferEhr(StoreBuffer);
         endfunction
         Maybe#(SBIndex) matchIdx = searchIndex(matchEntry, idxVec);
         if(isValid(matchIdx)) begin
-            return matchIdx;
+            // Preserve the order of poison writes and checks. Coalescing
+            // could erase a poison written by an earlier buffered store.
+            return Invalid;
         end
         else begin
             // if no existing entry match, then find an empty entry
@@ -193,56 +198,32 @@ module mkStoreBufferEhr(StoreBuffer);
         end
     endmethod
 
-    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData d, Bit#(16) pcHash, Bool permitPoison) if(inited);
+    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData d, Bit#(16) pcHash, Bool permitPoison, Bit#(8) pver, Bit#(64) length, Bit#(3) alloc_policy) if(inited);
         // get data offset
         SBBlockMemDataSel sel = getSBBlockMemDataSel(paddr);
-        // check whether the entry already exists
-        if(valid[idx][enqPort]) begin
-            // existing entry: merge
-            doAssert(getSBBlockAddr(paddr) == entry[idx][enqPort].addr, "SB enq to existing entry addr should match");
-            // update data
-            CLine block = entry[idx][enqPort].line;
-            block.data[sel] = mergeDataBE(block.data[sel], d.data, be);
-            // update tag
-            if (pack(be) == ~0) block.tag[sel] = d.tag;
-            else if (pack(be) != 0) block.tag[sel] = False;
-            // update byte enable
-            Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = unpack(pack(entry[idx][enqPort].byteEn));
-            byteEn[sel] = unpack(pack(byteEn[sel]) | pack(be));
-            // update entry
-            entry[idx][enqPort] <= SBEntry {
-                addr: getSBBlockAddr(paddr),
-                byteEn: unpack(pack(byteEn)),
-                line: block,
-                pcHash: pcHash,
-                permitPoison: permitPoison
-            };
-            // this entry must have been sent to issueQ
+        doAssert(!valid[idx][enqPort], "poison-aware SB must allocate a fresh entry");
+        valid[idx][enqPort] <= True;
+        CLine block = unpack(0);
+        Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = replicate(replicate(False));
+        if (alloc_policy == 3'b001 || alloc_policy == 3'b011) begin
+            block.data = replicate(d.data);
+            block.tag = replicate(d.tag);
+            byteEn = replicate(replicate(True));
         end
         else begin
-            // new entry: set valid
-            valid[idx][enqPort] <= True;
-            // setup entry
-            CLine block = ?;
             block.data[sel] = d.data;
-            if (pack(be) == ~0) block.tag[sel] = d.tag;
-            else if (pack(be) != 0) block.tag[sel] = False;
-            Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = replicate(replicate(False));
+            block.tag[sel] = pack(be) == ~0 && d.tag;
             byteEn[sel] = be;
-            entry[idx][enqPort] <= SBEntry {
-                addr: getSBBlockAddr(paddr),
-                byteEn: unpack(pack(byteEn)),
-                line: block,
-                pcHash: pcHash,
-                permitPoison: permitPoison
-            };
-            // send this entry to issueQ
-            doAssert(issueQ.notFull, "SB issueQ should not be full");
-            issueQ.enq(idx);
-            // remove from freeQ
-            doAssert(freeQ.notEmpty, "SB freeQ should not be empty");
-            freeQ.deq;
         end
+        entry[idx][enqPort] <= SBEntry {
+            addr: getSBBlockAddr(paddr), byteEn: unpack(pack(byteEn)),
+            line: block, pcHash: pcHash, permitPoison: permitPoison,
+            pver: pver, length: length, alloc_policy: alloc_policy
+        };
+        doAssert(issueQ.notFull, "SB issueQ should not be full");
+        issueQ.enq(idx);
+        doAssert(freeQ.notEmpty, "SB freeQ should not be empty");
+        freeQ.deq;
     endmethod
 
     method ActionValue#(SBEntry) deq(SBIndex idx) if(inited);
@@ -275,7 +256,9 @@ module mkStoreBufferEhr(StoreBuffer);
         function Bool matchEntry(Integer i);
             // entry must be valid, addr should match, byte enable should overlap
             Bool sameAddr = getSBBlockAddr(paddr) == entry[i][searchPort].addr;
-            Bool beOverlap = be == TagMemAccess || (ldBE & getEntryBE(fromInteger(i))) != 0;
+            // A narrow store may initialize the whole poison granule. Match
+            // it even if its explicit byte mask does not cover this load.
+            Bool beOverlap = be == TagMemAccess || getEntryBE(fromInteger(i)) != 0;
             return valid[i][searchPort] && sameAddr && beOverlap;
         endfunction
 
@@ -317,7 +300,7 @@ endmodule
 module mkDummyStoreBuffer(StoreBuffer);
     method Bool isEmpty = True;
     method Maybe#(SBIndex) getEnqIndex(Addr paddr) = Invalid;
-    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash, Bool permitPoison);
+    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash, Bool permitPoison, Bit#(8) pver, Bit#(64) length, Bit#(3) alloc_policy);
         doAssert(False, "enq should never be called)");
     endmethod
     method ActionValue#(SBEntry) deq(SBIndex idx);

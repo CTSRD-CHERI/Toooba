@@ -305,6 +305,8 @@ typedef struct {
 
 typedef struct {
     Bool wrongPath;
+    Bool fault;
+    Bool firstResponse;
     Maybe#(PhyDst) dst;
     Bool allowCap;
 //`ifdef INCLUDE_TANDEM_VERIF
@@ -403,7 +405,10 @@ interface SplitLSQ;
     // Get the load to issue
     method LSQIssueLdInfo getIssueLd;
     // Get load resp
-    method ActionValue#(LSQRespLdResult) respLd(LdQTag t, MemTaggedData alignedData);
+    method ActionValue#(LSQRespLdResult) respLd(LdQTag t, MemTaggedData alignedData, Bool fromForward);
+    // Re-read forwarded loads after older stores have completed their poison
+    // checks. The caller also drains the store buffer in the weak model.
+    method ActionValue#(LSQIssueLdInfo) issuePoisonCheck;
     // Deq LQ entry, and wakeup stalled loads. The guard checks the following:
     // (1) valid
     // (2) one of the following is true:
@@ -510,8 +515,9 @@ endfunction
 // whether two memory accesses overlap
 function Bool overlapAddr(Addr addr_1, ByteOrTagEn shift_be_1, Bit#(3) alloc_policy_1,
                           Addr addr_2, ByteOrTagEn shift_be_2, Bit#(3) alloc_policy_2);
-    Bool be_overlap = (pack(shift_be_1.DataMemAccess) & pack(shift_be_2.DataMemAccess)) != 0;
-    Bool dataOverlap = be_overlap && sameDataAlignedAddr(addr_1, addr_2);
+    // A first narrow store can zero the complete poisoned granule. Ordering
+    // and late-alias replay must therefore include even unwritten bytes.
+    Bool dataOverlap = sameDataAlignedAddr(addr_1, addr_2);
     Bool tagOverlap = sameCachelineAlignedAddr(addr_1, addr_2);
     return (shift_be_1 == TagMemAccess || shift_be_2 == TagMemAccess || alloc_policy_1 == 3'b001 || alloc_policy_1 == 3'b011 || alloc_policy_2 == 3'b001 ||  alloc_policy_2 == 3'b011) ? tagOverlap : dataOverlap;
 endfunction
@@ -697,7 +703,11 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_computed        <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_executing       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_done            <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(3, Maybe#(LdKilledBy)))   ld_killed          <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(4, Maybe#(LdKilledBy)))   ld_killed          <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(2, Bool)) ld_poisonFault <- replicateM(mkEhr(False));
+    Vector#(LdQSize, Ehr#(2, Bool)) ld_forwarded <- replicateM(mkEhr(False));
+    Vector#(LdQSize, Ehr#(2, Bool)) ld_checkIssued <- replicateM(mkEhr(False));
+    Vector#(LdQSize, Reg#(MemTaggedData)) ld_forwardedData <- replicateM(mkRegU);
     Vector#(LdQSize, Ehr#(2, Maybe#(StQTag)))       ld_olderSt         <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_olderStVerified <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(StQTag)))       ld_readFrom        <- replicateM(mkEhr(?));
@@ -790,7 +800,8 @@ module mkSplitLSQ(SplitLSQ);
     let ld_killed_updAddr = getVEhrPort(ld_killed, 1); // write
     let ld_killed_issue   = getVEhrPort(ld_killed, 2); // assert
     let ld_killed_enqIss  = getVEhrPort(ld_killed, 2); // assert
-    let ld_killed_enq     = getVEhrPort(ld_killed, 2); // write
+    let ld_killed_resp    = getVEhrPort(ld_killed, 2); // write on forwarding mismatch
+    let ld_killed_enq     = getVEhrPort(ld_killed, 3); // write
 
     let ld_olderSt_findIss = getVEhrPort(ld_olderSt, 0);
     let ld_olderSt_deqLd   = getVEhrPort(ld_olderSt, 0);
@@ -1496,6 +1507,9 @@ module mkSplitLSQ(SplitLSQ);
         ld_computed_enq[ld_enqP] <= False;
         ld_executing_enq[ld_enqP] <= False;
         ld_done_enq[ld_enqP] <= False;
+        ld_poisonFault[ld_enqP][1] <= False;
+        ld_forwarded[ld_enqP][1] <= False;
+        ld_checkIssued[ld_enqP][1] <= False;
         ld_killed_enq[ld_enqP] <= Invalid;
         ld_pcHash[ld_enqP] <= pcHash;
         ld_waitForOlderSt[ld_enqP] <= stlPred.pred(pcHash);
@@ -1698,7 +1712,9 @@ module mkSplitLSQ(SplitLSQ);
             function Bool needKill(LdQTag i);
                 Bool valid = ld_valid_updAddr[i];
                 Bool younger = youngerLds[i];
-                Bool overlap = overlapAddr(pa, shift_be, 3'b000,
+                // Include every granule written by a line poison/clear whose
+                // address resolved after the younger load issued.
+                Bool overlap = overlapAddr(pa, shift_be, alloc_policy,
                                            ld_paddr_updAddr[i],
                                            ld_shiftedBE_updAddr[i],
 					   3'b000);
@@ -1914,7 +1930,7 @@ module mkSplitLSQ(SplitLSQ);
             Bool valid_older = validOlderSts[i];
             Bool acquire = st_acq[i];
             Bool computed = st_computed_issue[i];
-            Bool overlap = overlapAddr(pa, shift_be, alloc_policy,
+            Bool overlap = overlapAddr(pa, shift_be, 3'b000,
                                        st_paddr_issue[i],
                                        DataMemAccess(st_shiftedBE_issue[i]),
 				       st_alloc_policy_issue[i]);
@@ -2040,9 +2056,29 @@ module mkSplitLSQ(SplitLSQ);
         return info;
     endmethod
 
-    method ActionValue#(LSQRespLdResult) respLd(LdQTag t, MemTaggedData alignedData) if (!wrongSpec_conflict);
+    method ActionValue#(LSQIssueLdInfo) issuePoisonCheck if (!wrongSpec_conflict);
+        function Bool needsCheck(LdQTag i);
+            return ld_valid_findIss[i] && ld_forwarded[i][0] &&
+                !ld_checkIssued[i][0] && !ld_done_deqLd[i] &&
+                !isValid(ld_olderSt_findIss[i]) && !ld_waitWPResp_findIss[i];
+        endfunction
+        let nextTag = findOldestLd(map(needsCheck, genWith(fromInteger)));
+        let t = fromMaybe(?, nextTag);
+        when(isValid(nextTag), noAction);
+        ld_checkIssued[t][0] <= True;
+        return LSQIssueLdInfo {
+            tag: t, paddr: ld_paddr_findIss[t],
+            shiftedBE: ld_shiftedBE_findIss[t], pcHash: ld_pcHash[t],
+            permitPoison: ld_permitPoison[t], length: ld_length[t],
+            pver: ld_pver[t], alloc_policy: ld_alloc_policy[t]
+        };
+    endmethod
+
+    method ActionValue#(LSQRespLdResult) respLd(LdQTag t, MemTaggedData alignedData, Bool fromForward) if (!wrongSpec_conflict);
         let res = LSQRespLdResult {
             wrongPath: False,
+            fault: False,
+            firstResponse: False,
             dst: Invalid,
             allowCap: False,
 //`ifdef INCLUDE_TANDEM_VERIF
@@ -2068,9 +2104,8 @@ module mkSplitLSQ(SplitLSQ);
                      "must be computed, executing, not done");
             // we may load into x0 reg, then dst is Invalid, so don't assert
             // that dst is valid
-            // mark load as done, and shift resp
-            ld_done_resp[t] <= True;
             res.wrongPath = False;
+            res.firstResponse = !ld_forwarded[t][0];
 
             // nirajns: checking if this is a 32-bit load response to a FPR
             // In that case, the data needs to be nanboxed before writing to
@@ -2087,13 +2122,46 @@ module mkSplitLSQ(SplitLSQ);
             res.dst = ld_dst[t];
             res.pver = ld_pver[t];
             res.alloc_policy = ld_alloc_policy[t];
-            if (dst.Valid.isFpuReg && is32BitLd)
+            if (isValid(dst) && dst.Valid.isFpuReg && is32BitLd)
                res.data = fv_nanbox_MemTaggedData(
                  gatherLoad(ld_paddr_resp[t], ld_byteOrTagEn[t],
                             ld_unsigned[t], alignedData));
             else
                res.data = gatherLoad(ld_paddr_resp[t], ld_byteOrTagEn[t],
                                      ld_unsigned[t], alignedData);
+
+            // CGetPoison returns an untagged boolean through either path.
+            Bool probe = ld_alloc_policy[t] == 3'b100;
+            if (probe)
+                res.data = fromInteger(isPoisoned(alignedData) ? 1 : 0);
+            Bool denied = !probe && poisonAccessDenied(alignedData,
+                ld_permitPoison[t], ld_length[t]);
+
+            // A forwarded value is speculative. In particular, an older
+            // store may be cancelled or may initialize a poisoned granule.
+            // Also defer a cache poison fault if older stores remain, since
+            // their writes may remove that poison before this load executes.
+            Bool deferCheck = !fromForward && !ld_checkIssued[t][0] &&
+                denied && isValid(ld_olderSt_findIss[t]);
+`ifndef POISON_UNCHECKED_FORWARDING
+            deferCheck = deferCheck || fromForward;
+`endif
+            if (deferCheck) begin
+                if (!fromForward && denied) res.data = unpack(0);
+                ld_forwarded[t][0] <= True;
+                ld_forwardedData[t] <= res.data;
+            end
+            else begin
+                ld_done_resp[t] <= True;
+                ld_poisonFault[t][0] <= denied;
+                res.fault = denied;
+                // Consumers may already have used the forwarded value. If a
+                // cancelled store or a coherence event changed it, replay
+                // the load and all younger instructions before retirement.
+                if (ld_forwarded[t][0] && !denied &&
+                    ld_forwardedData[t] != res.data && !isValid(ld_killed_resp[t]))
+                    ld_killed_resp[t] <= Valid(St);
+            end
         end
         if(verbose) begin
             $display("[LSQ - respLd] ", fshow(t), "; ", fshow(alignedData),
@@ -2119,7 +2187,9 @@ module mkSplitLSQ(SplitLSQ);
             paddr: ld_paddr_deqLd[deqP],
             isMMIO: ld_isMMIO_deqLd[deqP],
             shiftedBE: ld_shiftedBE_deqLd[deqP],
-            fault: ld_fault_deqLd[deqP],
+            fault: isValid(ld_fault_deqLd[deqP]) ? ld_fault_deqLd[deqP] :
+                (ld_poisonFault[deqP][0] && !isValid(ld_killed_deqLd[deqP]) ?
+                    Valid(Exception(excLoadAccessFault)) : Invalid),
             allowCap: ld_allowCap[deqP],
             killed: ld_killed_deqLd[deqP],
             permitPoison: ld_permitPoison[deqP],
@@ -2348,7 +2418,8 @@ module mkSplitLSQ(SplitLSQ);
                     // set wrong path load resp filter
                     if (ld_valid_wrongSpec[i] &&
                         ld_executing_wrongSpec[i] &&
-                        !ld_done_wrongSpec[i]) begin
+                        !ld_done_wrongSpec[i] &&
+                        (!ld_forwarded[i][0] || ld_checkIssued[i][0])) begin
                         ld_waitWPResp_wrongSpec[i] <= True;
                         doAssert(ld_memFunc[i] == Ld,
                                  "only load resp can be wrong path");

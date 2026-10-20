@@ -38,6 +38,8 @@
 `include "ProcConfig.bsv"
 import BRAM::*;
 import Types::*;
+import CHERICap::*;
+import CHERICC_Fat::*;
 import MemoryTypes::*;
 import GetPut::*;
 import ClientServer::*;
@@ -94,8 +96,47 @@ function MemTaggedData getTaggedDataAt(CLine line, CLineMemTaggedDataSel sel) =
 function MemTaggedData getTagsAt(CLine line) =
   MemTaggedData { tag: False, data: cons(zeroExtend(pack(line.tag)), unpack(0)) };
 
+// Always inspect the raw tag, before capability-load permission filtering.
+function Bool isPoisoned(MemTaggedData data);
+  CapPipe cap = fromMem(unpack(pack(data)));
+  return data.tag && getCapPoison(cap) != 0;
+endfunction
+
+function Bool poisonAccessDenied(MemTaggedData data, Bool permitPoison, Bit#(64) length);
+  CapPipe cap = fromMem(unpack(pack(data)));
+  return isPoisoned(data) && !permitPoison && length <= getLength(cap);
+endfunction
+
 function MemTaggedData getPoisonAt(CLine line, CLineMemTaggedDataSel sel) =
-  MemTaggedData { tag: False, data: cons(zeroExtend(pack( getTaggedDataAt(line,sel).data[1][46] ==1'b1&& line.tag[sel])), unpack(0)) };
+  fromInteger(isPoisoned(getTaggedDataAt(line, sel)) ? 1 : 0);
+
+// Check each affected granule before changing any byte of the line. A line
+// operation must not detox other allocations or leave a partial update when
+// one of its granules rejects the store.
+function Tuple2#(Bool, CLine) poisonCheckedStore(CLine oldLine,
+    CLineMemDataByteEn byteEn, CLine writeLine, Bool permitPoison,
+    Bit#(8) pver, Bit#(64) length);
+  Bool allowed = True;
+  CLine baseLine = oldLine;
+  for (Integer i = 0; i < valueOf(CLineNumMemTaggedData); i = i + 1) begin
+    let oldData = getTaggedDataAt(oldLine, fromInteger(i));
+    CapPipe poison = fromMem(unpack(pack(oldData)));
+    if (pack(byteEn[i]) != 0 && poisonAccessDenied(oldData, permitPoison, length)) begin
+      if (pver[0] == getPVer(poison)[0])
+        allowed = False;
+      else
+        // A first narrow write initializes the complete 16-byte granule.
+        baseLine = setTaggedDataAt(baseLine, fromInteger(i), unpack(0));
+    end
+  end
+  CLine result = baseLine;
+  for (Integer i = 0; i < valueOf(CLineNumMemTaggedData); i = i + 1) begin
+    let updated = mergeMemTaggedDataBE(getTaggedDataAt(baseLine, fromInteger(i)),
+                    getTaggedDataAt(writeLine, fromInteger(i)), pack(byteEn[i]));
+    result = setTaggedDataAt(result, fromInteger(i), updated);
+  end
+  return tuple2(allowed, allowed ? result : oldLine);
+endfunction
 
 function CLine setTaggedDataAt(CLine line, CLineMemTaggedDataSel sel, MemTaggedData data);
   let newLine = line;
