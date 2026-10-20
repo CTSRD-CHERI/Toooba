@@ -474,12 +474,12 @@ module mkSelfInvL1Bank#(
         LineMemDataOffset dataSel = getLineMemDataOffset(req.addr);
         case(req.op) matches
             Ld: begin
-                procResp.respLd(req.id, req.objSealRdType, getTaggedDataAt(curLine, dataSel));
+                procResp.respLd(req.id, req.objSealRdType, getTaggedDataAt(curLine, dataSel), req.inlineId.inLine && req.inlineId.expected != 0, inlineIdMismatch(curLine, req.inlineId));
             end
             Lr: begin
-                procResp.respLrScAmo(req.id, getTaggedDataAt(curLine, dataSel));
+                procResp.respLrScAmo(req.id, getTaggedDataAt(curLine, dataSel), inlineIdMismatch(curLine, req.inlineId));
                 // set link addr
-                linkAddr <= Valid (getLineAddr(req.addr));
+                linkAddr <= inlineIdMismatch(curLine, req.inlineId) ? Invalid : Valid (getLineAddr(req.addr));
             end
             Amo: begin
                 noAction;
@@ -489,9 +489,9 @@ module mkSelfInvL1Bank#(
                 Bool succeed = linkAddr == Valid (getLineAddr(req.addr));
                 // resp to proc
                 MemTaggedData respVal = succeed ? fromInteger(valueof(ScSuccVal)) : fromInteger(valueof(ScFailVal));
-                procResp.respLrScAmo(req.id, respVal);
+                procResp.respLrScAmo(req.id, respVal, inlineIdMismatch(curLine, req.inlineId));
                 // calculate new data to write
-                if(succeed) begin
+                if(succeed && !inlineIdMismatch(curLine, req.inlineId)) begin
                     let taggedData = getTaggedDataAt(curLine, dataSel);
                     let newTaggedData =
                       mergeMemTaggedDataBE(taggedData, req.data, zeroExtend(pack(req.byteEn)));
@@ -502,7 +502,7 @@ module mkSelfInvL1Bank#(
             end
             St: begin
                 // resp processor, get write data & BE
-                let {be, wrLine} <- procResp.respSt(req.id);
+                let {be, wrLine} <- procResp.respSt(req.id, curLine);
                 // calculate new data to write
                 newLine = getUpdatedLine(curLine, be, wrLine);
             end
@@ -598,10 +598,11 @@ module mkSelfInvL1Bank#(
             data: unpack(signExtend(wordData[wordIdx]))
           };
         endcase;
-        procResp.respLrScAmo(req.id, resp);
+        procResp.respLrScAmo(req.id, resp, inlineIdMismatch(curLine, req.inlineId));
         // calculate new data to write
         let newData = amoExec(req.amoInst, wordIdx, current, req.data);
-        newLine = setTaggedDataAt(newLine, dataSel, newData);
+        if (!inlineIdMismatch(curLine, req.inlineId))
+            newLine = setTaggedDataAt(newLine, dataSel, newData);
         // deq pipeline or swap in successor
         // Since AMO always hits in M, hit count is 0 and never self inv
         pipeline.deqWrite(succ, RamData {
@@ -640,7 +641,7 @@ module mkSelfInvL1Bank#(
         function Action cRqScEarlyFail(Bool resetOwner);
         action
             // resp to proc
-            procResp.respLrScAmo(procRq.id, fromInteger(valueof(ScFailVal)));
+            procResp.respLrScAmo(procRq.id, fromInteger(valueof(ScFailVal)), False);
             // reset link addr
             linkAddr <= Invalid;
             // deq pipeline (we cannot swap in successor because Sc may not
@@ -755,7 +756,7 @@ module mkSelfInvL1Bank#(
         // check if Sc fails early. If an Sc needs to req parent but it's addr
         // does not match link addr, we can directly respond the Sc with
         // failure, and thus avoid requesting parent.
-        Bool scFail = procRq.op == Sc && linkAddr != Valid (getLineAddr(procRq.addr));
+        Bool scFail = procRq.op == Sc && procRq.inlineId.expected == 0 && linkAddr != Valid (getLineAddr(procRq.addr));
         // check tag match
         Bool tag_match = ram.info.tag == getTag(procRq.addr);
         // check enough cache state for hit

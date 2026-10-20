@@ -65,6 +65,7 @@ endfunction
 
 // store buffer entry
 typedef struct {
+    InlineId inlineId;
     SBBlockAddr addr;
     SBByteEn byteEn;
     CLine line;
@@ -79,11 +80,15 @@ typedef struct {
 
 interface StoreBuffer;
     method Bool isEmpty;
-    method Maybe#(SBIndex) getEnqIndex(Addr paddr);
-    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash);
+    method Maybe#(SBIndex) getEnqIndex(Addr paddr, InlineId inlineId);
+    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash, InlineId inlineId);
     method ActionValue#(SBEntry) deq(SBIndex idx);
     method ActionValue#(Tuple2#(SBIndex, SBEntry)) issue;
-    method SBSearchRes search(Addr paddr, ByteOrTagEn be); // load bypass/stall or atomic inst stall
+    method SBSearchRes search(Addr paddr, ByteOrTagEn be, InlineId inlineId);
+    method SBSearchRes searchMetadata(Addr paddr, ByteOrTagEn be, InlineId inlineId);
+    method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId); // load bypass/stall or atomic inst stall
+    method Bool noMatchInlineLdQ(Addr paddr, InlineId inlineId);
+    method Bool noMatchInlineStQ(Addr paddr, InlineId inlineId);
     // check no matching entry for AMO/Lr/Sc issue
     // XXX assume BE has been shifted approriately for paddr offset
     // (for load we need to do that before calling the methods)
@@ -168,6 +173,71 @@ module mkStoreBufferEhr(StoreBuffer);
         return !any(matchEntry, idxVec);
     endfunction
 
+    function SBSearchRes searchEntry(Addr paddr, ByteOrTagEn be, InlineId inlineId);
+        // input BE has been shifted, just pack it
+        Bit#(MemDataBytes) ldBE = pack(be.DataMemAccess);
+
+        // data offset within block
+        SBBlockMemDataSel sel = getSBBlockMemDataSel(paddr);
+
+        // helper to extract byteEn from entry
+        function Bit#(MemDataBytes) getEntryBE(SBIndex idx);
+            Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = unpack(pack(entry[idx][searchPort].byteEn));
+            return pack(byteEn[sel]);
+        endfunction
+
+        // func to determine whether the load matches a store entry
+        function Bool matchEntry(Integer i);
+            // entry must be valid, addr should match, byte enable should overlap
+            Bool sameAddr = getSBBlockAddr(paddr) == entry[i][searchPort].addr;
+            Bool beOverlap = be == TagMemAccess || (ldBE & getEntryBE(fromInteger(i))) != 0;
+            return valid[i][searchPort] && sameAddr && beOverlap;
+        endfunction
+
+        // find match entry and determine return value
+        Vector#(SBSize, Integer) idxVec = genVector;
+        if(searchIndex(matchEntry, idxVec) matches tagged Valid .idx) begin
+            // check whether bytes reading are all covered by the entry
+            let sourceId = entry[idx][searchPort].inlineId;
+            // A checked producer can still be canceled when it reaches L1.
+            // Its queue slot has already been released, so a weak-memory load
+            // must wait for it to drain rather than retire a speculative value.
+            if(be != TagMemAccess && (getEntryBE(idx) & ldBE) == ldBE &&
+               sourceId.expected == 0) begin
+                // fully covered, forward data
+                CLine block = entry[idx][searchPort].line;
+                return SBSearchRes {
+                    matchIdx: Valid (idx),
+                    forwardData: Valid (MemTaggedData { tag:  block.tag[sel]
+                                                      , data: block.data[sel]})
+                };
+            end
+            else begin
+                // interact byte, not fully covered, stall the load
+                return SBSearchRes {
+                    matchIdx: Valid (idx),
+                    forwardData: Invalid
+                };
+            end
+        end
+        else begin
+            // load should go to memory
+            return SBSearchRes {
+                matchIdx: Invalid,
+                forwardData: Invalid
+            };
+        end
+    endfunction
+
+    function SBSearchRes searchInlineEntry(Addr paddr, InlineId inlineId);
+        MemDataByteEn idBE = replicate(False);
+        idBE[inlineId.offset[3:0]] = True;
+        Addr idAddr = (paddr & ~64'h7f) | zeroExtend(inlineId.offset);
+        return inlineId.inLine
+            ? searchEntry(idAddr, DataMemAccess(idBE), inlineId)
+            : SBSearchRes { matchIdx: Invalid, forwardData: Invalid };
+    endfunction
+
     method Bool isEmpty;
         function Bool entryEmpty(Integer i);
             return !valid[i][emptyPort];
@@ -176,7 +246,7 @@ module mkStoreBufferEhr(StoreBuffer);
         return all(entryEmpty, idxVec);
     endmethod
 
-    method Maybe#(SBIndex) getEnqIndex(Addr paddr);
+    method Maybe#(SBIndex) getEnqIndex(Addr paddr, InlineId inlineId);
         Vector#(SBSize, Integer) idxVec = genVector;
         // first find existing matching entry
         function Bool matchEntry(Integer i);
@@ -184,7 +254,15 @@ module mkStoreBufferEhr(StoreBuffer);
         endfunction
         Maybe#(SBIndex) matchIdx = searchIndex(matchEntry, idxVec);
         if(isValid(matchIdx)) begin
-            return matchIdx;
+            let old = entry[fromMaybe(?, matchIdx)][enqPort];
+            let oldId = old.inlineId;
+            // Retain the per-store check across coalescing. Different IDs or
+            // a write to the generation itself must drain before merging.
+            return oldId.expected == inlineId.expected &&
+                   oldId.inLine == inlineId.inLine &&
+                   !(oldId.inLine && old.byteEn[oldId.offset]) &&
+                   (oldId.expected == 0 || oldId.offset == inlineId.offset)
+                   ? matchIdx : Invalid;
         end
         else begin
             // if no existing entry match, then find an empty entry
@@ -192,7 +270,7 @@ module mkStoreBufferEhr(StoreBuffer);
         end
     endmethod
 
-    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData d, Bit#(16) pcHash) if(inited);
+    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData d, Bit#(16) pcHash, InlineId inlineId) if(inited);
         // get data offset
         SBBlockMemDataSel sel = getSBBlockMemDataSel(paddr);
         // check whether the entry already exists
@@ -210,6 +288,7 @@ module mkStoreBufferEhr(StoreBuffer);
             byteEn[sel] = unpack(pack(byteEn[sel]) | pack(be));
             // update entry
             entry[idx][enqPort] <= SBEntry {
+                inlineId: inlineId,
                 addr: getSBBlockAddr(paddr),
                 byteEn: unpack(pack(byteEn)),
                 line: block,
@@ -228,6 +307,7 @@ module mkStoreBufferEhr(StoreBuffer);
             Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = replicate(replicate(False));
             byteEn[sel] = be;
             entry[idx][enqPort] <= SBEntry {
+                inlineId: inlineId,
                 addr: getSBBlockAddr(paddr),
                 byteEn: unpack(pack(byteEn)),
                 line: block,
@@ -255,55 +335,24 @@ module mkStoreBufferEhr(StoreBuffer);
         return tuple2(idx, entry[idx][issuePort]);
     endmethod
 
-    method SBSearchRes search(Addr paddr, ByteOrTagEn be);
-        // input BE has been shifted, just pack it
-        Bit#(MemDataBytes) ldBE = pack(be.DataMemAccess);
+    method SBSearchRes search(Addr paddr, ByteOrTagEn be, InlineId inlineId);
+        return searchEntry(paddr, be, inlineId);
+    endmethod
 
-        // data offset within block
-        SBBlockMemDataSel sel = getSBBlockMemDataSel(paddr);
+    method SBSearchRes searchMetadata(Addr paddr, ByteOrTagEn be, InlineId inlineId);
+        return searchEntry(paddr, be, inlineId);
+    endmethod
 
-        // helper to extract byteEn from entry
-        function Bit#(MemDataBytes) getEntryBE(SBIndex idx);
-            Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = unpack(pack(entry[idx][searchPort].byteEn));
-            return pack(byteEn[sel]);
-        endfunction
+    method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId);
+        return searchInlineEntry(paddr, inlineId);
+    endmethod
 
-        // func to determine whether the load matches a store entry
-        function Bool matchEntry(Integer i);
-            // entry must be valid, addr should match, byte enable should overlap
-            Bool sameAddr = getSBBlockAddr(paddr) == entry[i][searchPort].addr;
-            Bool beOverlap = be == TagMemAccess || (ldBE & getEntryBE(fromInteger(i))) != 0;
-            return valid[i][searchPort] && sameAddr && beOverlap;
-        endfunction
+    method Bool noMatchInlineLdQ(Addr paddr, InlineId inlineId);
+        return !isValid(searchInlineEntry(paddr, inlineId).matchIdx);
+    endmethod
 
-        // find match entry and determine return value
-        Vector#(SBSize, Integer) idxVec = genVector;
-        if(searchIndex(matchEntry, idxVec) matches tagged Valid .idx) begin
-            // check whether bytes reading are all covered by the entry
-            if(be != TagMemAccess && (getEntryBE(idx) & ldBE) == ldBE) begin
-                // fully covered, forward data
-                CLine block = entry[idx][searchPort].line;
-                return SBSearchRes {
-                    matchIdx: Valid (idx),
-                    forwardData: Valid (MemTaggedData { tag:  block.tag[sel]
-                                                      , data: block.data[sel]})
-                };
-            end
-            else begin
-                // interact byte, not fully covered, stall the load
-                return SBSearchRes {
-                    matchIdx: Valid (idx),
-                    forwardData: Invalid
-                };
-            end
-        end
-        else begin
-            // load should go to memory
-            return SBSearchRes {
-                matchIdx: Invalid,
-                forwardData: Invalid
-            };
-        end
+    method Bool noMatchInlineStQ(Addr paddr, InlineId inlineId);
+        return !isValid(searchInlineEntry(paddr, inlineId).matchIdx);
     endmethod
 
     method noMatchLdQ = noMatch;
@@ -313,8 +362,8 @@ endmodule
 (* synthesize *)
 module mkDummyStoreBuffer(StoreBuffer);
     method Bool isEmpty = True;
-    method Maybe#(SBIndex) getEnqIndex(Addr paddr) = Invalid;
-    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash);
+    method Maybe#(SBIndex) getEnqIndex(Addr paddr, InlineId inlineId) = Invalid;
+    method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash, InlineId inlineId);
         doAssert(False, "enq should never be called)");
     endmethod
     method ActionValue#(SBEntry) deq(SBIndex idx);
@@ -325,9 +374,17 @@ module mkDummyStoreBuffer(StoreBuffer);
         doAssert(False, "issue should never be called)");
         return ?;
     endmethod
-    method SBSearchRes search(Addr paddr, ByteOrTagEn be);
+    method SBSearchRes search(Addr paddr, ByteOrTagEn be, InlineId inlineId);
         return SBSearchRes {matchIdx: Invalid, forwardData: Invalid};
     endmethod
+    method SBSearchRes searchMetadata(Addr paddr, ByteOrTagEn be, InlineId inlineId);
+        return SBSearchRes {matchIdx: Invalid, forwardData: Invalid};
+    endmethod
+    method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId);
+        return SBSearchRes {matchIdx: Invalid, forwardData: Invalid};
+    endmethod
+    method Bool noMatchInlineLdQ(Addr paddr, InlineId inlineId) = True;
+    method Bool noMatchInlineStQ(Addr paddr, InlineId inlineId) = True;
     method Bool noMatchLdQ(Addr paddr, ByteOrTagEn be) = True;
     method Bool noMatchStQ(Addr paddr, ByteOrTagEn be) = True;
 endmodule

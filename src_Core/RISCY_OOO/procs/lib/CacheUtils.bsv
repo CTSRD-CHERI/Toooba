@@ -66,6 +66,28 @@ typedef struct {
   Vector#(CLineNumMemTaggedData, MemTag) tag;
   Vector#(CLineNumMemTaggedData, MemData) data;
 } CLine deriving (Bits, Eq, FShow);
+
+// An ID of zero bypasses temporal checks. Mode 0 stores a full eight-bit
+// generation in the same 128-byte line as the allocation.
+typedef struct {
+  Bool inLine;
+  Bit#(8) expected;
+  Bit#(7) offset;
+  Bit#(6) authority;
+} InlineId deriving (Bits, Eq, FShow);
+
+function Addr inlineIdAddress(Addr base, Bit#(6) loc);
+  return (base & ~64'h7f) + (zeroExtend(loc[4:0]) << 4)
+         - 1 - zeroExtend(loc[5]);
+endfunction
+
+function Bool inlineIdMismatch(CLine line, InlineId id);
+  // QEMU's encoding always selects byte 14 or 15 of a 16-byte slot.
+  // Select among sixteen ID bytes rather than all 128 bytes of payload.
+  let slot = line.data[id.offset[6:4]][1];
+  Bit#(8) generation = id.offset[0] == 1 ? slot[63:56] : slot[55:48];
+  return id.inLine && id.expected != 0 && generation != id.expected;
+endfunction
 function Vector#(CLineNumMemTaggedData, MemTaggedData) clineToMemTaggedDataVector(CLine line);
   function f(x,y) = MemTaggedData{tag: x, data: y};
   return zipWith(f, line.tag, line.data);
