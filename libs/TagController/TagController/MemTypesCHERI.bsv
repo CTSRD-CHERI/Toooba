@@ -49,7 +49,7 @@
 `endif
 
 typedef 8 MaxTransactions;
-typedef 8 MaxNoOfFlits;
+typedef 32 MaxNoOfFlits;
 typedef MaxNoOfFlits CheriBurstSize;
 
 `ifdef CapWidth
@@ -114,21 +114,9 @@ instance Ord#(PhyByteAddress#(a,b));
     endfunction
 endinstance
 
-// physical address for cheri
-`ifdef CheriBusBytes
-  typedef `CheriBusBytes CheriBusBytes;
-`else
-// XXX: Old compatibility definitions; migrate to CheriBusBytes and delete
-`ifdef MEM512
-  typedef 64 CheriBusBytes;
-`elsif MEM128
-  typedef 16 CheriBusBytes;
-`elsif MEM64
-  typedef 8 CheriBusBytes;
-`else
-  typedef 32 CheriBusBytes;
-`endif
-`endif
+// Physical address and datapath configuration for CHERI memory.
+import TagControllerConfig :: *;
+typedef TagControllerBusBytes CheriBusBytes;
 BytesPerFlit cheriBusBytes = unpack(fromInteger(valueOf(TLog#(CheriBusBytes))));
 typedef 40 AddrWidth;
 `ifdef USECAP
@@ -154,7 +142,7 @@ Bit#(4) logLineMinusOne = fromInteger(valueOf(TSub#(LogLine, 1)));
 typedef UInt#(TLog#(MaxNoOfFlits)) Flit;
 typedef Bit#(TSub#(AddrWidth,TAdd#(TLog#(CheriBusBytes),2))) Line;
 
-typedef 64 CpuLineSize; // Largest line that we can serve tag transactions on.
+typedef TagControllerCpuLineBytes CpuLineSize;
 typedef Bit#(TLog#(TDiv#(CpuLineSize, CapBytes))) CapOffsetInLine;
 
 // bytes per flit

@@ -88,10 +88,11 @@ typedef struct {
 // internal types
 ///////////////////////////////////////////////////////////////////////////////
 
-typedef TLog#(TDiv#(CapWidth, CheriDataWidth)) LogFlitsPerCap;
+typedef TMax#(TDiv#(CapWidth, CheriDataWidth), 1) FlitsPerCap;
+typedef TLog#(FlitsPerCap) LogFlitsPerCap;
 typedef TMax#(TDiv#(CheriDataWidth,CapWidth), 1) CapsPerFlit;
 typedef enum {TagLookupReq, StdReq} MemReqType deriving (FShow, Bits, Eq);
-typedef 4 InFlight;
+typedef 8 InFlight;
 typedef 8 MaxBurstLength;
 typedef Bit#(TLog#(MaxBurstLength)) Frame;
 typedef Bit#(8) ReqIdCount;
@@ -203,7 +204,12 @@ module mkTagController(TagControllerIfc);
       // look at the tag lookup response
       case (tagRsp.d.rsp.tags) matches
         tagged Covered .ts : begin
-          CapOffsetInLine base = thisAddrFrame.d.bank + truncate(memoryResponseFrame >> valueOf(LogFlitsPerCap));
+          CapOffsetInLine frameCapOffset;
+          if (valueOf(CheriDataWidth) >= valueOf(CapWidth))
+            frameCapOffset = truncate(memoryResponseFrame) * fromInteger(valueOf(CapsPerFlit));
+          else
+            frameCapOffset = truncate(memoryResponseFrame >> valueOf(LogFlitsPerCap));
+          CapOffsetInLine base = thisAddrFrame.d.bank + frameCapOffset;
           for (Integer i = 0; i < valueOf(CapsPerFlit); i = i + 1)
             tags[i] = ts[base + fromInteger(i)];
         end
@@ -320,7 +326,9 @@ module mkTagController(TagControllerIfc);
             addrFrame.deq(id);
             memoryResponseFrame <= 0;  // reset the current frame
           end else memoryResponseFrame <= memoryResponseFrame + 1; // for non last flits, increment frame
-        end else memoryResponseFrame <= 0;
+        end
+        // Write completions can arrive between read beats. Preserve the read
+        // position so the next beat uses the next group of capability tags.
         debug2("tagcontroller", $display("<time %0t TagController> Returning response: ", $time, fshow(resp)));
         return resp;
       endmethod

@@ -164,9 +164,7 @@ typedef struct {
 
 typedef Bit#(TSub#(SizeOf#(Addr), 12)) ObjIdPhysTag;
 
-typedef Bit#(
-    TSub#(SizeOf#(Addr), 6)
-) ObjIdPLine;
+typedef LineAddr ObjIdPLine;
 
 typedef struct {
     LineAddr line;
@@ -438,7 +436,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, Bool)
         objIdFullFlushQ <- mkCFFifo;
     
-    Reg#(Bit#(2))
+    Reg#(CLineMemTaggedDataSel)
         objIdInvalidateWordIdx <- mkReg(0);
 
 
@@ -1459,7 +1457,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         objIdReverseUpdateQ.enq(
             ObjIdReverseUpdate {
-                pLine: truncate(paddr >> 6),
+                pLine: getLineAddr(paddr),
                 vWord: truncate(vaddr >> 4)
             }
         );
@@ -1501,7 +1499,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         objIdReverseUpdateQ.enq(
             ObjIdReverseUpdate {
-                pLine: truncate(paddr >> 6),
+                pLine: getLineAddr(paddr),
                 vWord: truncate(vaddr >> 4)
             }
         );
@@ -1554,14 +1552,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
              *
              * Therefore:
              *
-             *     vWord >> 2
+             *     vWord >> LogCLineNumMemTaggedData
              *
-             * identifies the surrounding 64-byte
+             * identifies the surrounding cache
              * virtual line.
              */
             if (
-                (oldVWord >> 2) !=
-                (u.vWord >> 2)
+                (oldVWord >> valueOf(LogCLineNumMemTaggedData)) !=
+                (u.vWord >> valueOf(LogCLineNumMemTaggedData))
             ) begin
 
                 hasAlias = True;
@@ -1573,9 +1571,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(hasAlias) begin
 
             /*
-             * Same physical 64B line has been
+             * Same physical cache line has been
              * observed through a different
-             * virtual 64B line.
+             * virtual cache line.
              *
              * Conservatively flush everything.
              */
@@ -2419,12 +2417,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         /*
          * vWord is a 16-byte-word address.
          *
-         * Clear its bottom two bits to obtain
+         * Clear the word offset bits to obtain
          * the first 16-byte word in the
-         * corresponding 64-byte virtual line.
+         * corresponding virtual cache line.
          */
         ObjIdVWord baseWord =
-            (vWord >> 2) << 2;
+            (vWord >> valueOf(LogCLineNumMemTaggedData)) << valueOf(LogCLineNumMemTaggedData);
 
         ObjIdVWord currentWord =
             baseWord +
@@ -2446,10 +2444,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Invalid
         );
 
-        if(objIdInvalidateWordIdx == 3) begin
+        if(objIdInvalidateWordIdx == fromInteger(valueOf(CLineNumMemTaggedData) - 1)) begin
 
             /*
-             * Four 16-byte entries have now
+             * All 16-byte entries in the line have now
              * been invalidated.
              */
             objIdPAddrBuf.update(

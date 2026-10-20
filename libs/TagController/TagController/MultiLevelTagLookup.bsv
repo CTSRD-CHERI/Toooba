@@ -79,7 +79,6 @@ endinterface
 ///////////////////////////////////////////////////////////////////////////////
 
 typedef enum {Init, Idle, ReadTag, SetTag, ClearTag, FoldZeroes} State deriving (Bits, Eq, FShow);
-typedef TMul#(CapsPerFlit,4) CapsPerLine;
 
 typedef union tagged {
   Bool Node;

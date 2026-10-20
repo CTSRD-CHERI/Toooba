@@ -102,7 +102,7 @@ module mkNextLineOnMissPrefetcher(Prefetcher)
         (sentRequestCounter < fromInteger(valueOf(nextLinesOnMiss)));
 
         sentRequestCounter <= sentRequestCounter + 1;
-        let addrToRequest = lastMissAddr + (zeroExtend(sentRequestCounter) + 1)*fromInteger(valueOf(DataSz));
+        let addrToRequest = lastMissAddr + (zeroExtend(sentRequestCounter) + 1)*fromInteger(valueOf(CLineDataNumBytes));
         if (verbose) $display("%t Prefetcher getNextPrefetchAddr requesting %h", $time, addrToRequest);
         return addrToRequest;
     endmethod
@@ -133,7 +133,7 @@ module mkNextLineOnAllPrefetcher(Prefetcher)
         (sentRequestCounter < fromInteger(valueOf(nextLinesOnAccess)));
 
         sentRequestCounter <= sentRequestCounter + 1;
-        let addrToRequest = lastAccessAddr + (zeroExtend(sentRequestCounter) + 1)*fromInteger(valueOf(DataSz));
+        let addrToRequest = lastAccessAddr + (zeroExtend(sentRequestCounter) + 1)*fromInteger(valueOf(CLineDataNumBytes));
         if (verbose) $display("%t Prefetcher getNextPrefetchAddr requesting %h", $time, addrToRequest);
         return addrToRequest;
     endmethod
@@ -413,9 +413,9 @@ module mkTargetTable(TargetTable#(narrowTableSize, wideTableSize)) provisos
     Alias#(narrowTargetEntryT, NarrowTargetEntry#(narrowTableTagBits, narrowDistanceBits)),
     Alias#(wideTargetEntryT, WideTargetEntry#(wideTableTagBits)),
     Add#(a__, TLog#(narrowTableSize), 32),
-    Add#(b__, TLog#(narrowTableSize), 58),
+    Add#(b__, TLog#(narrowTableSize), LineAddrSz),
     Add#(c__, TLog#(wideTableSize), 32),
-    Add#(d__, TLog#(wideTableSize), 58)
+    Add#(d__, TLog#(wideTableSize), LineAddrSz)
 );
     Bool verbose = False;
     Vector#(narrowTableSize, Ehr#(2, Maybe#(narrowTargetEntryT))) narrowTable <- replicateM(mkEhr(Invalid));
@@ -477,9 +477,9 @@ module mkTargetTableBRAM(TargetTableBRAM#(narrowTableSize, wideTableSize)) provi
     Alias#(narrowTargetEntryT, NarrowTargetEntry#(narrowTableTagBits, narrowDistanceBits)),
     Alias#(wideTargetEntryT, WideTargetEntry#(wideTableTagBits)),
     Add#(a__, TLog#(narrowTableSize), 32),
-    Add#(b__, TLog#(narrowTableSize), 58),
+    Add#(b__, TLog#(narrowTableSize), LineAddrSz),
     Add#(c__, TLog#(wideTableSize), 32),
-    Add#(d__, TLog#(wideTableSize), 58)
+    Add#(d__, TLog#(wideTableSize), LineAddrSz)
 );
     Bool verbose = False;
     RWBramCore#(Bit#(narrowTableIdxBits), Maybe#(narrowTargetEntryT)) narrowTable <- mkRWBramCore;
@@ -564,9 +564,9 @@ module mkTargetTableDouble(TargetTableDouble#(narrowTableSize, wideTableSize)) p
     Alias#(narrowTargetEntryT, NarrowTargetEntry#(narrowTableTagBits, narrowDistanceBits)),
     Alias#(wideTargetEntryT, WideTargetEntry#(wideTableTagBits)),
     Add#(a__, TLog#(narrowTableSize), 32),
-    Add#(b__, TLog#(narrowTableSize), 58),
+    Add#(b__, TLog#(narrowTableSize), LineAddrSz),
     Add#(c__, TLog#(wideTableSize), 32),
-    Add#(d__, TLog#(wideTableSize), 58)
+    Add#(d__, TLog#(wideTableSize), LineAddrSz)
 );
 
     Bool verbose = False;
@@ -1318,7 +1318,7 @@ provisos(
                 end
                 else begin
                     //state == STEADY
-                    if (se.lastAddr[11:6] != addr[11:6]) begin
+                    if ((se.lastAddr >> valueOf(LgLineSzBytes)) != (addr[11:0] >> valueOf(LgLineSzBytes))) begin
                         //This means we have crossed a cache line since last access
                         seNext.cLinesPrefetched = 
                             (se.cLinesPrefetched == 0) ? 0 : se.cLinesPrefetched - 1;
@@ -1352,7 +1352,7 @@ provisos(
             //can prefetch
             
             Bit#(13) strideToUse;
-            Bit#(13) cLineSize = fromInteger(valueof(DataSz));
+            Bit#(13) cLineSize = fromInteger(valueof(CLineDataNumBytes));
             if (se.stride[12] == 1 && se.stride > -cLineSize) begin
                 //stride is negative and jumps less than one cline
                 strideToUse = -cLineSize;
@@ -1478,7 +1478,7 @@ provisos(
         end
         else if (se.state == STEADY && observedStride != 0) begin
             if (observedStride == se.stride) begin
-                if (se.lastAddr[11:6] != addr[11:6]) begin
+                if ((se.lastAddr >> valueOf(LgLineSzBytes)) != (addr[11:0] >> valueOf(LgLineSzBytes))) begin
                     //This means we have crossed a cache line since last access
                     seNext.cLinesPrefetched = 
                         (se.cLinesPrefetched == 0) ? 0 : se.cLinesPrefetched - 1;
@@ -1515,7 +1515,7 @@ provisos(
         //If this rule is looping, then we'll have a valid cLinesPrefetchedLatest
         Bit#(2) cLinesPrefetched = fromMaybe(se.cLinesPrefetched, cLinesPrefetchedLatest);
 
-        Int#(16) cLineSize = fromInteger(valueof(DataSz));
+        Int#(16) cLineSize = fromInteger(valueof(CLineDataNumBytes));
         Int#(16) strideToUse = signExtend(se.stride);
         if (abs(strideToUse) < cLineSize) begin
             strideToUse = (strideToUse < 0) ? -cLineSize : cLineSize; 
@@ -1615,7 +1615,7 @@ provisos(
             if (prefetchesIssued[0] < fromInteger(valueOf(cLinesAheadToPrefetch)));
         
         Int#(13) strideToUse = strideToPrefetch;
-        Int#(13) cLineSize = fromInteger(valueof(DataSz));
+        Int#(13) cLineSize = fromInteger(valueof(CLineDataNumBytes));
         if (abs(strideToPrefetch) < cLineSize) begin
             strideToUse = (strideToPrefetch < 0) ? -cLineSize : cLineSize;
         end
@@ -1761,7 +1761,7 @@ provisos(
         end
         else if (stateAtLeastSteady(se.state) && observedStride != 0) begin
             if (observedStride == se.stride) begin
-                if (se.lastAddr[11:6] != addr[11:6]) begin
+                if ((se.lastAddr >> valueOf(LgLineSzBytes)) != (addr[11:0] >> valueOf(LgLineSzBytes))) begin
                     //This means we have crossed a cache line since last access
                     seNext.cLinesPrefetched = 
                         (se.cLinesPrefetched == 0) ? 0 : se.cLinesPrefetched - 1;
@@ -1799,7 +1799,7 @@ provisos(
             //can prefetch
             
             Bit#(13) strideToUse;
-            Bit#(13) cLineSize = fromInteger(valueof(DataSz));
+            Bit#(13) cLineSize = fromInteger(valueof(CLineDataNumBytes));
             if (se.stride[12] == 1 && se.stride > -cLineSize) begin
                 //stride is negative and jumps less than one cline
                 strideToUse = -cLineSize;

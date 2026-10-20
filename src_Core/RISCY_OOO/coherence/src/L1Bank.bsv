@@ -474,16 +474,18 @@ endfunction
          * Old cheap ObjID address filter.
          *
          * 1 KiB candidate:
-         *     one out of every 16 cache lines
+         *     the final cache line in each 1 KiB region
          *
          * 4 KiB candidate:
-         *     one out of every 64 cache lines
+         *     the final cache line in each 4 KiB region
          */
+        Bit#(TSub#(10, LgLineSzBytes)) objIdLineIn1k = truncate(lineAddr);
+        Bit#(TSub#(12, LgLineSzBytes)) objIdLineIn4k = truncate(lineAddr);
         Bool flushObjIDbuf1k =
-            (lineAddr[3:0] == 4'hF);
+            (objIdLineIn1k == '1);
 
         Bool flushObjIDbuf4k =
-            (lineAddr[5:0] == 6'h3F);
+            (objIdLineIn4k == '1);
         
         if(flushObjIDbuf1k) begin
             procResp.objIdEvict(
@@ -531,13 +533,15 @@ endfunction
         Bool actuallyInvalidated =
             (req.toState == I);
             
+        Bit#(TSub#(10, LgLineSzBytes)) objIdLineIn1k = truncate(lineAddr);
+        Bit#(TSub#(12, LgLineSzBytes)) objIdLineIn4k = truncate(lineAddr);
         Bool flushObjIDbuf1k =
             actuallyInvalidated &&
-            (lineAddr[3:0] == 4'hF);
+            (objIdLineIn1k == '1);
             
         Bool flushObjIDbuf4k =
             actuallyInvalidated &&
-            (lineAddr[5:0] == 6'h3F);
+            (objIdLineIn4k == '1);
 
         if(flushObjIDbuf1k) begin
             procResp.objIdEvict(

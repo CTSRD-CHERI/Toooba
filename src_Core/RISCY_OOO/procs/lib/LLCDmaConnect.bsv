@@ -104,7 +104,7 @@ typedef union tagged {
 } LLCDmaReqId deriving(Bits, Eq, FShow);
 
 // ================================================================
-// Help functions for read-modify-writes of 4-Byte values on a 64-Byte Cache Line
+// Help functions for read-modify-writes within a cache line
 
 typedef enum {CACHELINE_CACHE_INVALID,
               CACHELINE_CACHE_WRITING_BACK,
@@ -115,7 +115,7 @@ typedef enum {CACHELINE_CACHE_INVALID,
 deriving (Bits, Eq, FShow);
 
 function Addr fn_align_addr_to_line (Addr addr);
-   Addr line_addr = { addr [63:6], 6'b0 };
+   Addr line_addr = (addr >> valueOf(LgLineSzBytes)) << valueOf(LgLineSzBytes);
    return line_addr;
 endfunction
 

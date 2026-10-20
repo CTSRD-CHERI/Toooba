@@ -105,7 +105,7 @@ typedef Bit#(LgMemDataSzBytes) MemDataBytesOffset;
 typedef TDiv#(Inst16_Sz, 8) InstSzBytes;
 typedef TLog#(InstSzBytes) LgInstSzBytes;
 
-// 64B cache line -- XXX same with parameters in CacheUtils.bsv
+// Cache-line geometry is defined in CacheUtils.bsv.
 typedef CacheUtils::LogCLineNumMemTaggedData LgLineSzData;
 typedef CacheUtils::LogCLineNumMemDataBytes LgLineSzBytes;
 typedef CacheUtils::CLineAddrSz LineAddrSz;

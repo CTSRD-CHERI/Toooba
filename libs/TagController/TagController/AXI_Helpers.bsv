@@ -120,12 +120,17 @@ function DRAMReq#(id_, addr_) mem2axi_req(CheriMemRequest mr)
       // support addresses up to 64 bits, only considers bottom 40 bits
       Bit#(64) tmp = zeroExtend(pack(mr.addr) & (~0 << pack(cheriBusBytes)));
       Bit#(TAdd#(1, TLog#(CheriBusBytes))) byteEnableOnes = pack(countOnes(pack(w.byteEnable)));
+      // Multi-flit writes advance by a complete CHERI bus beat. Sparse byte
+      // enables describe valid lanes, not the burst's transfer size. Shrinking
+      // AWSIZE here makes a width converter retire the burst before WLAST.
+      Bool burst = w.length != 0;
       req = tagged Write WriteReqFlit{
         aw: AXI4_AWFlit{
           awid: zeroExtend(pack(getReqId(mr))),
-          awaddr: truncate(tmp + zeroExtend(pack(countZerosLSB(pack(w.byteEnable))))),
+          awaddr: truncate(burst ? tmp : tmp + zeroExtend(pack(countZerosLSB(pack(w.byteEnable))))),
           awlen: w.length,
-          awsize: unpack(pack(countZerosLSB(byteEnableOnes))), // XXX: Must have power-of-two number of byte-enables set
+          awsize: burst ? unpack(pack(cheriBusBytes))
+                        : unpack(pack(countZerosLSB(byteEnableOnes))), // Single-flit byte count must be a power of two
           awburst: INCR,
           awlock: NORMAL,
           awcache: fabric_default_awcache,

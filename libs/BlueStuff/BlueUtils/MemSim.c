@@ -212,7 +212,11 @@ void mem_zero (t_mem * mem_ptr)
   #if (DEBUG_LVL > 0)
   printf("---- mem_zero ----\n");
   #endif
+  #if defined(__APPLE__) || defined(__FreeBSD__) || defined(__NetBSD__) || defined(__OpenBSD__)
+  memset((void *) mem_ptr->data, 0, mem_ptr->size);
+  #else
   explicit_bzero((void *) mem_ptr->data, mem_ptr->size);
+  #endif
 }
 
 t_data mem_read ( t_mem * mem_ptr
