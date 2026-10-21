@@ -501,6 +501,10 @@ interface SplitLSQ;
     // Kill loads when a cache line is evicted (TSO only)
     method Action cacheEvict(LineAddr a);
 `else
+    // Move forwarded-load dependencies with the committed producer and
+    // resolve them only at that producer's coherent cache callback.
+    method Action transferStIdCheckToSB(SBIndex sbIdx);
+    method Action completeSBIdCheck(SBIndex sbIdx, Vector#(SBBlockNumMemData, Bool) idOk);
     // Wake up younger loads when SB deq (only WEAK model has SB)
     method Action wakeupLdStalledBySB(SBIndex sbIdx);
 `endif
@@ -748,7 +752,7 @@ module mkSplitLSQ(SplitLSQ);
     let ld_inlineId_findIss = getVEhrPort(ld_inlineId, 0);
     let ld_inlineId_deqLd = getVEhrPort(ld_inlineId, 0);
     let ld_inlineId_resp = getVEhrPort(ld_inlineId, 1);
-    Vector#(LdQSize, Ehr#(2, Maybe#(Addr)))         ld_objIdPAddr      <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(3, Maybe#(Addr)))         ld_objIdPAddr      <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bit#(7)))              ld_objIdOffset     <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bit#(8)))              ld_mte     <- replicateM(mkEhr(?));
 
@@ -756,7 +760,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(Trap)))         ld_fault           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_computed        <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(4, Maybe#(Bool)))         ld_objIdSealOk     <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(5, Maybe#(Bool)))         ld_objIdSealOk     <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_executing       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_done            <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(LdKilledBy)))   ld_killed          <- replicateM(mkEhr(?));
@@ -765,11 +769,20 @@ module mkSplitLSQ(SplitLSQ);
     // No extra memory request is needed when a forwarded load can share the
     // still-live source store's same-ID check at L1. Port 1 observes an issue
     // on port 0 even when the source completes in that very cycle.
-    Vector#(LdQSize, Ehr#(3, Bool)) ld_storeIdCheck <- replicateM(mkEhr(False));
+    Vector#(LdQSize, Ehr#(4, Bool)) ld_storeIdCheck <- replicateM(mkEhr(False));
     Vector#(LdQSize, Ehr#(3, Maybe#(StQTag)))       ld_readFrom        <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(LdQTag)))       ld_depLdQDeq       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(StQTag)))       ld_depStQDeq       <- replicateM(mkEhr(?));
 `ifndef TSO_MM
+    // issue < completion < SQ-to-SB transfer < slot reset. SB refuses an
+    // enqueue to the completing index, so a transfer cannot miss its verdict
+    // or accidentally consume the previous occupant's result.
+    Vector#(LdQSize, Ehr#(4, Maybe#(SBIndex))) ld_sourceSB <- replicateM(mkEhr(Invalid));
+    // The word's condition cannot change while the entry is live: merges
+    // require identical predicates within a word. Reuse its actual store
+    // verdict instead of replicating ID comparators for every waiting load.
+    Vector#(LdQSize, Ehr#(2, SBBlockMemDataSel)) ld_sourceWord <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(3, Bool)) ld_sourceCanceled <- replicateM(mkEhr(False));
     Vector#(LdQSize, Ehr#(3, Maybe#(LdQTag)))       ld_depLdEx         <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(SBIndex)))      ld_depSBDeq        <- replicateM(mkEhr(?));
 `endif
@@ -813,7 +826,7 @@ module mkSplitLSQ(SplitLSQ);
     let ld_objIdPAddr_updAddr       = getVEhrPort(ld_objIdPAddr, 0); // write
     let ld_objIdPAddr_updObjIdSeal  = getVEhrPort(ld_objIdPAddr, 1); // assert
     let ld_objIdPAddr_issue         = getVEhrPort(ld_objIdPAddr, 1);
-    let ld_objIdPAddr_enq           = getVEhrPort(ld_objIdPAddr, 1); // write
+    let ld_objIdPAddr_enq           = getVEhrPort(ld_objIdPAddr, 2); // after fast-forward completion
 
     let ld_objIdOffset_findIss      = getVEhrPort(ld_objIdOffset, 0);
     let ld_objIdOffset_deqLd        = getVEhrPort(ld_objIdOffset, 0);
@@ -855,11 +868,11 @@ module mkSplitLSQ(SplitLSQ);
     let ld_objIdSealOk_wrongSpec    = getVEhrPort(ld_objIdSealOk, 0);
     let ld_objIdSealOk_deqLd        = getVEhrPort(ld_objIdSealOk, 0);
     let ld_objIdSealOk_findIss      = getVEhrPort(ld_objIdSealOk, 0);
-    let ld_objIdSealOk_issue        = getVEhrPort(ld_objIdSealOk, 0); // assert
+    let ld_objIdSealOk_issue        = getVEhrPort(ld_objIdSealOk, 1); // fast-forward completion
     let ld_objIdSealOk_updObjIdSeal = getVEhrPort(ld_objIdSealOk, 0); // write
-    let ld_objIdSealOk_storeResp    = getVEhrPort(ld_objIdSealOk, 1);
-    let ld_objIdSealOk_resp         = getVEhrPort(ld_objIdSealOk, 2); // combined data/ID response
-    let ld_objIdSealOk_enq          = getVEhrPort(ld_objIdSealOk, 3); // write
+    let ld_objIdSealOk_storeResp    = getVEhrPort(ld_objIdSealOk, 2);
+    let ld_objIdSealOk_resp         = getVEhrPort(ld_objIdSealOk, 3); // combined data/ID response
+    let ld_objIdSealOk_enq          = getVEhrPort(ld_objIdSealOk, 4); // write
 
     let ld_executing_findIss   = getVEhrPort(ld_executing, 0);
     let ld_executing_wrongSpec = getVEhrPort(ld_executing, 0);
@@ -1493,8 +1506,14 @@ module mkSplitLSQ(SplitLSQ);
             else begin
                 Bool no_older_st = !isValid(ld_olderSt_deqLd[deqP]);
                 if(ld_memFunc[deqP] == Ld && !ld_isMMIO_deqLd[deqP]) begin
+                    Bool sourcePending = False;
+`ifndef TSO_MM
+                    // ID0 bypasses its own ID check, but still cannot retire
+                    // a value from a producer that might be canceled.
+                    sourcePending = ld_storeIdCheck[deqP][0];
+`endif
                     // normal non-MMIO Ld: done, older St (if exists) verified
-                    return ld_done_deqLd[deqP] &&
+                    return ld_done_deqLd[deqP] && !sourcePending &&
                            (no_older_st || ld_olderStVerified_deqLd[deqP]) &&
                            (!isValid(ld_objIdPAddr_deqLd[deqP]) || isValid(ld_objIdSealOk_deqLd[deqP]));
                 end
@@ -1628,7 +1647,7 @@ module mkSplitLSQ(SplitLSQ);
         ld_fault_enq[ld_enqP] <= Invalid;
         ld_computed_enq[ld_enqP] <= False;
         ld_objIdSealOk_enq[ld_enqP] <= Invalid;
-        ld_storeIdCheck[ld_enqP][2] <= False;
+        ld_storeIdCheck[ld_enqP][3] <= False;
         ld_executing_enq[ld_enqP] <= False;
         ld_done_enq[ld_enqP] <= False;
         ld_killed_enq[ld_enqP] <= Invalid;
@@ -1639,6 +1658,8 @@ module mkSplitLSQ(SplitLSQ);
         ld_depStQDeq_enq[ld_enqP] <= Invalid;
         ld_objIdPAddr_enq[ld_enqP] <= Invalid;
 `ifndef TSO_MM
+        ld_sourceSB[ld_enqP][3] <= Invalid;
+        ld_sourceCanceled[ld_enqP][2] <= False;
         ld_depLdEx_enq[ld_enqP] <= Invalid;
         ld_depSBDeq_enq[ld_enqP] <= Invalid;
 `endif
@@ -2175,6 +2196,30 @@ module mkSplitLSQ(SplitLSQ);
         Vector#(StQSize, Bool) validOlderSts = map(isValidOlderSt,
                                                    genWith(fromInteger));
 
+        // Ignore metadata ordering only if a full payload forward is
+        // available. A mode-0 load sent to cache retains its ID obligation.
+        function Bool overlapsPayload(StQTag i);
+            return validOlderSts[i] && st_computed_issue[i] &&
+                overlapAddr(pa, shift_be, st_paddr_issue[i],
+                            DataMemAccess(st_shiftedBE_issue[i]));
+        endfunction
+        Vector#(StQSize, Bool) payloadSts = map(overlapsPayload, genWith(fromInteger));
+        Bool uncheckedPayload = isValid(sbRes.forwardData);
+        if(findYoungestSt(payloadSts) matches tagged Valid .payloadSt) begin
+            uncheckedPayload = st_memFunc[payloadSt] == St &&
+                be1CoverBe2(DataMemAccess(st_shiftedBE_issue[payloadSt]), shift_be);
+        end
+        uncheckedPayload = inlineId.forwardUnchecked && uncheckedPayload;
+
+        // Inline generation checks read one byte, not the complete metadata
+        // word. Preserve legacy metadata dependencies, but avoid blocking a
+        // disjoint payload load on stores to other bytes in that word.
+        MemDataByteEn objIdBE = replicate(True);
+        if (inlineId.inLine && inlineId.expected != 0) begin
+            objIdBE = replicate(False);
+            objIdBE[inlineId.offset[3:0]] = True;
+        end
+
 `ifdef TSO_MM
         // TSO does not need to stall a load on fence or AMO. This is because
         // verfication of fence or AMO will be stalled until their fencing
@@ -2195,8 +2240,8 @@ module mkSplitLSQ(SplitLSQ);
             Bool overlap = overlapAddr(pa, shift_be,
                                        st_paddr_issue[i],
                                        DataMemAccess(st_shiftedBE_issue[i])) ||
-                           (isValid(objIdPAddr) ?
-                                overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
+                           (isValid(objIdPAddr) && !uncheckedPayload ?
+                                overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(objIdBE),
                                        st_paddr_issue[i],
                                        DataMemAccess(st_shiftedBE_issue[i])) :
                                 False);
@@ -2217,7 +2262,7 @@ module mkSplitLSQ(SplitLSQ);
                     // check if forwarding is possible
                     if(overlapAddr(pa, shift_be, st_paddr_issue[stTag], DataMemAccess(st_shiftedBE_issue[stTag])) &&
                        be1CoverBe2(DataMemAccess(st_shiftedBE_issue[stTag]), shift_be) &&
-                       (st_inlineId_issue[stTag].expected == 0 ||
+                       (inlineId.forwardUnchecked || st_inlineId_issue[stTag].expected == 0 ||
                         (inlineId.expected == st_inlineId_issue[stTag].expected &&
                          inlineId.offset == st_inlineId_issue[stTag].offset))) begin
                         // Share the source store's check only if the IDs and
@@ -2225,7 +2270,7 @@ module mkSplitLSQ(SplitLSQ);
                         Bool writesId = getLineMemDataOffset(st_paddr_issue[stTag]) ==
                                             truncate(inlineId.offset >> 4) &&
                                         st_shiftedBE_issue[stTag][inlineId.offset[3:0]];
-                        Bool shareId = inlineId.inLine && inlineId.expected != 0 &&
+                        Bool shareId = !inlineId.forwardUnchecked && inlineId.inLine && inlineId.expected != 0 &&
                                        st_inlineId_issue[stTag].inLine &&
                                        st_inlineId_issue[stTag].expected == inlineId.expected &&
                                        st_inlineId_issue[stTag].offset == inlineId.offset && !writesId;
@@ -2321,8 +2366,8 @@ module mkSplitLSQ(SplitLSQ);
                         //    overlapAddr(pa, shift_be,
                         //                st_paddr_issue[i],
                         //                DataMemAccess(st_shiftedBE_issue[i])) ||
-                           (isValid(objIdPAddr) ?
-                                overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
+                           (isValid(objIdPAddr) && !uncheckedPayload ?
+                                overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(objIdBE),
                                        st_paddr_issue[i],
                                        DataMemAccess(st_shiftedBE_issue[i])) :
                                 False) //||
@@ -2376,15 +2421,23 @@ module mkSplitLSQ(SplitLSQ);
                         ld_depStQDeq_issue[tag] <= matchStTag;
                     end
                     St: begin
-                        // Weak-memory stores move to the buffer before their
-                        // L1 ID verdict. Keep checked producers from supplying
-                        // a value that could retire before the producer cancels.
+                        let sourceId = st_inlineId_issue[stTag];
+                        Bool writesId = getLineMemDataOffset(st_paddr_issue[stTag]) ==
+                                            truncate(sourceId.offset >> 4) &&
+                                        st_shiftedBE_issue[stTag][sourceId.offset[3:0]];
+                        Bool shareId = !inlineId.forwardUnchecked && sourceId.inLine && sourceId.expected != 0 && !writesId &&
+                            ((!isValid(objIdPAddr) && inlineId.expected == 0) ||
+                             (inlineId.inLine && inlineId.expected == sourceId.expected &&
+                              inlineId.offset == sourceId.offset));
                         if(overlapAddr(pa, shift_be, st_paddr_issue[stTag], DataMemAccess(st_shiftedBE_issue[stTag])) &&
                            be1CoverBe2(DataMemAccess(st_shiftedBE_issue[stTag]), shift_be) &&
-                           st_inlineId_issue[stTag].expected == 0) begin
+                           (inlineId.forwardUnchecked || sourceId.expected == 0 || shareId)) begin
+                            ld_storeIdCheck[tag][0] <= shareId;
+                            ld_sourceWord[tag][0] <= getSBBlockMemDataSel(pa);
+                            ld_sourceSB[tag][0] <= Invalid;
                             // store covers the issuing load, forward
                             issRes = Forward (LSQForwardResult {
-                                storeIdCheck: False,
+                                storeIdCheck: shareId,
                                 dst: ld_dst[tag],
                                 data: st_stData_issue[stTag]
                             });
@@ -2407,9 +2460,13 @@ module mkSplitLSQ(SplitLSQ);
         else begin
             // nothing found in LQ or SQ, check SB search result
             if(sbRes.forwardData matches tagged Valid .d) begin
+                Bool shareId = !inlineId.forwardUnchecked && sbRes.sourceId.inLine && sbRes.sourceId.expected != 0;
+                ld_storeIdCheck[tag][0] <= shareId;
+                ld_sourceWord[tag][0] <= getSBBlockMemDataSel(pa);
+                ld_sourceSB[tag][0] <= sbRes.matchIdx;
                 // get forward from SB
                 issRes = Forward (LSQForwardResult {
-                            storeIdCheck: False,
+                    storeIdCheck: shareId,
                     dst: ld_dst[tag],
                     data: d
                 });
@@ -2450,6 +2507,14 @@ module mkSplitLSQ(SplitLSQ);
         end
 `endif
 
+        if(inlineId.forwardUnchecked &&& issRes matches tagged Forward .forwarded) begin
+            // No ID request or producer-verdict subscription exists for this
+            // load. Complete that obligation now, before a squash can mistake
+            // it for an outstanding metadata response. A replayed cache load
+            // receives its original metadata address again through updateAddr.
+            ld_objIdSealOk_issue[tag] <= Valid(True);
+            ld_objIdPAddr_issue[tag] <= Invalid;
+        end
         return issRes;
     endmethod
 
@@ -2518,7 +2583,11 @@ module mkSplitLSQ(SplitLSQ);
     method LdQDeqEntry firstLd if(deqLdGuard);
         LdQTag deqP = ld_deqP_deqLd;
         Maybe#(Trap) fault = ld_fault_deqLd[deqP];
-        if (!isValid(fault) && !isValid(ld_killed_deqLd[deqP]) &&& ld_objIdSealOk_deqLd[deqP] matches tagged Valid .o &&& !o) begin
+        Maybe#(LdKilledBy) killed = ld_killed_deqLd[deqP];
+`ifndef TSO_MM
+        if(ld_sourceCanceled[deqP][0]) killed = Valid(St);
+`endif
+        if (!isValid(fault) && !isValid(killed) &&& ld_objIdSealOk_deqLd[deqP] matches tagged Valid .o &&& !o) begin
             // objId seal check failed, set fault
             fault = Valid(CapException(CSR_XCapCause{cheri_exc_reg: ld_inlineId_deqLd[deqP].authority, cheri_exc_code: cheriExcSealViolation}));
         end
@@ -2538,7 +2607,7 @@ module mkSplitLSQ(SplitLSQ);
             shiftedBE: ld_shiftedBE_deqLd[deqP],
             fault: fault, //ld_fault_deqLd[deqP],
             allowCap: ld_allowCap[deqP],
-            killed: ld_killed_deqLd[deqP],
+            killed: killed,
             objIdPAddr: ld_objIdPAddr_deqLd[deqP],
             objIdOffset: ld_objIdOffset_deqLd[deqP],
             inlineId: ld_inlineId_deqLd[deqP]
@@ -2556,6 +2625,9 @@ module mkSplitLSQ(SplitLSQ);
                      "at commit means zero spec bits");
         end
         Bool killedLd = isValid(ld_killed_deqLd[deqP]);
+`ifndef TSO_MM
+        killedLd = killedLd || ld_sourceCanceled[deqP][0];
+`endif
         if(killedLd) begin
             doAssert(ld_memFunc[deqP] == Ld && !ld_isMMIO_deqLd[deqP],
                      "must be non-MMIO Ld");
@@ -2724,6 +2796,39 @@ module mkSplitLSQ(SplitLSQ);
 
 `else
 
+    method Action transferStIdCheckToSB(SBIndex sbIdx) if(deqStGuard && !wrongSpec_conflict);
+        function Action transfer(LdQTag i);
+        action
+            if(ld_storeIdCheck[i][2] && ld_readFrom_deqSt[i] == Valid(st_deqP))
+                ld_sourceSB[i][2] <= Valid(sbIdx);
+        endaction
+        endfunction
+        Vector#(LdQSize, LdQTag) indices = genWith(fromInteger);
+        joinActions(map(transfer, indices));
+    endmethod
+
+    method Action completeSBIdCheck(SBIndex sbIdx, Vector#(SBBlockNumMemData, Bool) idOk) if(!wrongSpec_conflict);
+        function Action complete(LdQTag i);
+        action
+            if(ld_storeIdCheck[i][1] && ld_sourceSB[i][1] == Valid(sbIdx)) begin
+                Bool sourceOk = idOk[ld_sourceWord[i][1]];
+                if(ld_inlineId_resp[i].expected == 0) begin
+                    doAssert(!isValid(ld_objIdPAddr_wrongSpec[i]),
+                             "shared source with ID0 consumer must have no independent metadata check");
+                    // This load has no ID fault of its own. If its source was
+                    // canceled, use the existing killed-load ROB replay path.
+                    if(!sourceOk) ld_sourceCanceled[i][1] <= True;
+                end
+                else ld_objIdSealOk_storeResp[i] <= Valid(sourceOk);
+                ld_storeIdCheck[i][1] <= False;
+                ld_sourceSB[i][1] <= Invalid;
+            end
+        endaction
+        endfunction
+        Vector#(LdQSize, LdQTag) indices = genWith(fromInteger);
+        joinActions(map(complete, indices));
+    endmethod
+
     method Action wakeupLdStalledBySB(SBIndex sbIdx) if (!wrongSpec_conflict);
         if(verbose) begin
             $display("[LSQ - wakeupBySB] ", fshow(sbIdx));
@@ -2795,7 +2900,15 @@ module mkSplitLSQ(SplitLSQ);
             action
                 if(ldNeedKill[i]) begin
                     ld_valid_wrongSpec[i] <= False;
+`ifdef TSO_MM
                     ld_storeIdCheck[i][1] <= False;
+`else
+                    // Reads below still see the pre-kill pending bit at port0.
+                    // Callback port1 observes the clear, without introducing
+                    // a global conflict on otherwise unrelated cache replies.
+                    ld_storeIdCheck[i][0] <= False;
+                    ld_sourceSB[i][0] <= Invalid;
+`endif
                     if (verbose) $display("[LSQ - killLdQ] ", fshow(i));
                     // set wrong path load resp filter
                     if (ld_valid_wrongSpec[i] &&

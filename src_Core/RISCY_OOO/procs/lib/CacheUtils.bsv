@@ -67,10 +67,13 @@ typedef struct {
   Vector#(CLineNumMemTaggedData, MemData) data;
 } CLine deriving (Bits, Eq, FShow);
 
-// An ID of zero bypasses temporal checks. Mode 0 stores a full eight-bit
-// generation in the same 128-byte line as the allocation.
+// Modes 0 and 7 use the same full eight-bit generation and location encoding.
+// Mode 0 explicitly skips temporal checks on payload forwarding; mode 7
+// retains checked forwarding. The flag is also explicit for uncolored mode-0
+// authorities, so a zero descriptor in legacy modes never implies a bypass.
 typedef struct {
   Bool inLine;
+  Bool forwardUnchecked;
   Bit#(8) expected;
   Bit#(7) offset;
   Bit#(6) authority;

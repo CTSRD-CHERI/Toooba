@@ -65,7 +65,9 @@ endfunction
 
 // store buffer entry
 typedef struct {
-    InlineId inlineId;
+    // Each capability-sized payload word has one cancellation condition.
+    // This also keeps its tag owned by the same condition as all its bytes.
+    Vector#(SBBlockNumMemData, InlineId) inlineIds;
     SBBlockAddr addr;
     SBByteEn byteEn;
     CLine line;
@@ -75,12 +77,13 @@ typedef struct {
 // result of searching (e.g. load byass)
 typedef struct {
     Maybe#(SBIndex) matchIdx;
+    InlineId sourceId;
     Maybe#(MemTaggedData) forwardData; // XXX data is not shifted to match load addr offset
 } SBSearchRes deriving(Bits, Eq, FShow);
 
 interface StoreBuffer;
     method Bool isEmpty;
-    method Maybe#(SBIndex) getEnqIndex(Addr paddr, InlineId inlineId);
+    method Maybe#(SBIndex) getEnqIndex(Addr paddr, MemDataByteEn be, InlineId inlineId);
     method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash, InlineId inlineId);
     method ActionValue#(SBEntry) deq(SBIndex idx);
     method ActionValue#(Tuple2#(SBIndex, SBEntry)) issue;
@@ -131,6 +134,9 @@ module mkStoreBufferEhr(StoreBuffer);
     // freeQ needs initialization
     Reg#(Bool) inited <- mkReg(False);
     Reg#(SBIndex) initIdx <- mkReg(0);
+    // Do not attach new waiters to a slot in its completion cycle. This
+    // makes the index a stable producer identity until all waiters resolve.
+    Wire#(Maybe#(SBIndex)) completing <- mkDWire(Invalid);
 
     rule initFreeQ(!inited);
         freeQ.enq(initIdx);
@@ -198,16 +204,22 @@ module mkStoreBufferEhr(StoreBuffer);
         Vector#(SBSize, Integer) idxVec = genVector;
         if(searchIndex(matchEntry, idxVec) matches tagged Valid .idx) begin
             // check whether bytes reading are all covered by the entry
-            let sourceId = entry[idx][searchPort].inlineId;
-            // A checked producer can still be canceled when it reaches L1.
-            // Its queue slot has already been released, so a weak-memory load
-            // must wait for it to drain rather than retire a speculative value.
+            let sourceId = entry[idx][searchPort].inlineIds[sel];
+            Bool shareId = sourceId.inLine && sourceId.expected != 0 &&
+                !entry[idx][searchPort].byteEn[sourceId.offset] &&
+                (inlineId.expected == 0 ||
+                 (inlineId.inLine && inlineId.expected == sourceId.expected &&
+                  inlineId.offset == sourceId.offset));
+            // Checked values may forward, but the load cannot retire until
+            // the producer's L1 callback resolves its dependency. Mode 0
+            // explicitly opts out of that temporal forwarding guarantee.
             if(be != TagMemAccess && (getEntryBE(idx) & ldBE) == ldBE &&
-               sourceId.expected == 0) begin
+               (inlineId.forwardUnchecked || sourceId.expected == 0 || shareId)) begin
                 // fully covered, forward data
                 CLine block = entry[idx][searchPort].line;
                 return SBSearchRes {
                     matchIdx: Valid (idx),
+                    sourceId: sourceId,
                     forwardData: Valid (MemTaggedData { tag:  block.tag[sel]
                                                       , data: block.data[sel]})
                 };
@@ -216,6 +228,7 @@ module mkStoreBufferEhr(StoreBuffer);
                 // interact byte, not fully covered, stall the load
                 return SBSearchRes {
                     matchIdx: Valid (idx),
+                    sourceId: unpack(0),
                     forwardData: Invalid
                 };
             end
@@ -224,6 +237,7 @@ module mkStoreBufferEhr(StoreBuffer);
             // load should go to memory
             return SBSearchRes {
                 matchIdx: Invalid,
+                sourceId: unpack(0),
                 forwardData: Invalid
             };
         end
@@ -235,7 +249,7 @@ module mkStoreBufferEhr(StoreBuffer);
         Addr idAddr = (paddr & ~64'h7f) | zeroExtend(inlineId.offset);
         return inlineId.inLine
             ? searchEntry(idAddr, DataMemAccess(idBE), inlineId)
-            : SBSearchRes { matchIdx: Invalid, forwardData: Invalid };
+            : SBSearchRes { matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid };
     endfunction
 
     method Bool isEmpty;
@@ -246,7 +260,7 @@ module mkStoreBufferEhr(StoreBuffer);
         return all(entryEmpty, idxVec);
     endmethod
 
-    method Maybe#(SBIndex) getEnqIndex(Addr paddr, InlineId inlineId);
+    method Maybe#(SBIndex) getEnqIndex(Addr paddr, MemDataByteEn be, InlineId inlineId);
         Vector#(SBSize, Integer) idxVec = genVector;
         // first find existing matching entry
         function Bool matchEntry(Integer i);
@@ -255,18 +269,37 @@ module mkStoreBufferEhr(StoreBuffer);
         Maybe#(SBIndex) matchIdx = searchIndex(matchEntry, idxVec);
         if(isValid(matchIdx)) begin
             let old = entry[fromMaybe(?, matchIdx)][enqPort];
-            let oldId = old.inlineId;
-            // Retain the per-store check across coalescing. Different IDs or
-            // a write to the generation itself must drain before merging.
-            return oldId.expected == inlineId.expected &&
-                   oldId.inLine == inlineId.inLine &&
-                   !(oldId.inLine && old.byteEn[oldId.offset]) &&
-                   (oldId.expected == 0 || oldId.offset == inlineId.offset)
-                   ? matchIdx : Invalid;
+            SBBlockMemDataSel sel = getSBBlockMemDataSel(paddr);
+            Vector#(SBBlockNumMemData, MemDataByteEn) oldBE = unpack(pack(old.byteEn));
+            Vector#(SBBlockNumMemData, MemDataByteEn) newBE = replicate(replicate(False));
+            newBE[sel] = be;
+            SBByteEn newBytes = unpack(pack(newBE));
+            let wordId = old.inlineIds[sel];
+            // Differently conditioned writes cannot share a word: canceling
+            // the younger write must not lose the older bytes or tag.
+            Bool compatible = pack(oldBE[sel]) == 0 ||
+                (wordId.expected == inlineId.expected &&
+                 wordId.inLine == inlineId.inLine &&
+                 (wordId.expected == 0 || wordId.offset == inlineId.offset));
+            // All predicates use the pre-write coherent line. Drain whenever
+            // one store changes another's predicate, in either age direction.
+            // A store writing its own ID must also remain alone.
+            if(inlineId.inLine && inlineId.expected != 0) begin
+                compatible = compatible && !old.byteEn[inlineId.offset] &&
+                             !newBytes[inlineId.offset];
+            end
+            for(Integer w = 0; w < valueOf(SBBlockNumMemData); w = w + 1) begin
+                let oldId = old.inlineIds[w];
+                if(pack(oldBE[w]) != 0 && oldId.inLine && oldId.expected != 0)
+                    compatible = compatible && !newBytes[oldId.offset] &&
+                                 !old.byteEn[oldId.offset];
+            end
+            return compatible && completing != matchIdx ? matchIdx : Invalid;
         end
         else begin
             // if no existing entry match, then find an empty entry
-            return freeQ.notEmpty ? Valid (freeQ.first) : Invalid;
+            return freeQ.notEmpty && completing != Valid(freeQ.first)
+                ? Valid (freeQ.first) : Invalid;
         end
     endmethod
 
@@ -286,9 +319,11 @@ module mkStoreBufferEhr(StoreBuffer);
             // update byte enable
             Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = unpack(pack(entry[idx][enqPort].byteEn));
             byteEn[sel] = unpack(pack(byteEn[sel]) | pack(be));
+            let inlineIds = entry[idx][enqPort].inlineIds;
+            inlineIds[sel] = inlineId;
             // update entry
             entry[idx][enqPort] <= SBEntry {
-                inlineId: inlineId,
+                inlineIds: inlineIds,
                 addr: getSBBlockAddr(paddr),
                 byteEn: unpack(pack(byteEn)),
                 line: block,
@@ -306,8 +341,10 @@ module mkStoreBufferEhr(StoreBuffer);
             else if (pack(be) != 0) block.tag[sel] = False;
             Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = replicate(replicate(False));
             byteEn[sel] = be;
+            Vector#(SBBlockNumMemData, InlineId) inlineIds = replicate(unpack(0));
+            inlineIds[sel] = inlineId;
             entry[idx][enqPort] <= SBEntry {
-                inlineId: inlineId,
+                inlineIds: inlineIds,
                 addr: getSBBlockAddr(paddr),
                 byteEn: unpack(pack(byteEn)),
                 line: block,
@@ -323,6 +360,7 @@ module mkStoreBufferEhr(StoreBuffer);
     endmethod
 
     method ActionValue#(SBEntry) deq(SBIndex idx) if(inited);
+        completing <= Valid(idx);
         doAssert(valid[idx][deqPort], "SB deq entry must be valid");
         valid[idx][deqPort] <= False; // set entry to invalid
         freeQ.enq(idx); // recycle entry
@@ -340,7 +378,11 @@ module mkStoreBufferEhr(StoreBuffer);
     endmethod
 
     method SBSearchRes searchMetadata(Addr paddr, ByteOrTagEn be, InlineId inlineId);
-        return searchEntry(paddr, be, inlineId);
+        // Legacy metadata consumers do not subscribe to producer validation.
+        // Only unconditional stores can supply their bytes speculatively.
+        let res = searchEntry(paddr, be, inlineId);
+        if(res.sourceId.expected != 0) res.forwardData = Invalid;
+        return res;
     endmethod
 
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId);
@@ -362,7 +404,7 @@ endmodule
 (* synthesize *)
 module mkDummyStoreBuffer(StoreBuffer);
     method Bool isEmpty = True;
-    method Maybe#(SBIndex) getEnqIndex(Addr paddr, InlineId inlineId) = Invalid;
+    method Maybe#(SBIndex) getEnqIndex(Addr paddr, MemDataByteEn be, InlineId inlineId) = Invalid;
     method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash, InlineId inlineId);
         doAssert(False, "enq should never be called)");
     endmethod
@@ -375,13 +417,13 @@ module mkDummyStoreBuffer(StoreBuffer);
         return ?;
     endmethod
     method SBSearchRes search(Addr paddr, ByteOrTagEn be, InlineId inlineId);
-        return SBSearchRes {matchIdx: Invalid, forwardData: Invalid};
+        return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
     endmethod
     method SBSearchRes searchMetadata(Addr paddr, ByteOrTagEn be, InlineId inlineId);
-        return SBSearchRes {matchIdx: Invalid, forwardData: Invalid};
+        return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
     endmethod
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId);
-        return SBSearchRes {matchIdx: Invalid, forwardData: Invalid};
+        return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
     endmethod
     method Bool noMatchInlineLdQ(Addr paddr, InlineId inlineId) = True;
     method Bool noMatchInlineStQ(Addr paddr, InlineId inlineId) = True;

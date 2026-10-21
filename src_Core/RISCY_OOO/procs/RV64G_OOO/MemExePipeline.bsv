@@ -607,7 +607,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             events.evt_STORE_WAIT = saturating_truncate(lat);
             events_reg[2] <= events;
 `endif
-            return tuple2(inlineIdMismatch(current, e.inlineId) ? replicate(replicate(False)) : unpack(pack(e.byteEn)), e.line); // return SB entry
+            CLineMemDataByteEn be = unpack(pack(e.byteEn));
+            Vector#(SBBlockNumMemData, Bool) idOk = replicate(True);
+            for(Integer w = 0; w < valueOf(SBBlockNumMemData); w = w + 1) begin
+                idOk[w] = !inlineIdMismatch(current, e.inlineIds[w]);
+                if(!idOk[w]) be[w] = replicate(False);
+            end
+            lsq.completeSBIdCheck(idx, idOk);
+            return tuple2(be, e.line);
         endmethod
 `endif
         
@@ -733,7 +740,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let tloc = getTloc(rVal1);
         if( alloc_policy == 3'h1 || alloc_policy == 3'h2) begin 
             //vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
-            if(getTmode(rVal1) == 'h0) begin 
+            if(getTmode(rVal1) == 'h0 || getTmode(rVal1) == 'h7) begin
                 //vaddr = setAddr(vaddr, (getAddr(vaddr) & ~'h3f) + zeroExtend(getTloc(rVal1) << 2) -1).value;
                 vaddr = setAddr(vaddr, inlineIdAddress(getBase(rVal1), tloc)).value;
             end 
@@ -856,14 +863,20 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             return (top & mask) + (zeroExtend(loc[4:0]) << shift) - 1 - zeroExtend(loc[5]);
         endfunction
         InlineId inlineId = unpack(0);
+        // ID0 mode-0 authorities also select the explicit fast forwarding
+        // policy. Legacy modes keep their zero descriptor and old behavior.
+        inlineId.forwardUnchecked = isValidCap(x.rVal1) &&
+            getTmode(x.rVal1) == 0 && getMTE(x.rVal1) == 0 && x.alloc_policy == 0;
         if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 0 &&
-            getTmode(x.rVal1) == 0 && x.alloc_policy == 0 &&
+            (getTmode(x.rVal1) == 0 || getTmode(x.rVal1) == 7) && x.alloc_policy == 0 &&
             (x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr ||
              x.mem_func == Sc || x.mem_func == Amo)) begin
             Addr idAddr = inlineIdAddress(getBase(x.rVal1), getTloc(x.rVal1));
             objIdVAddrs[pack(x.ldstq_tag)] <= idAddr;
             inlineId = InlineId {
                 expected: getMTE(x.rVal1), offset: truncate(idAddr),
+                forwardUnchecked: getTmode(x.rVal1) == 0 &&
+                    getLineAddr(idAddr) == getLineAddr(getAddr(x.vaddr)),
                 authority: x.cap_checks.check_authority_src == Ddc
                     ? {1'b1, pack(scrAddrDDC)} : x.cap_checks.rn1,
                 inLine: getLineAddr(idAddr) == getLineAddr(getAddr(x.vaddr))
@@ -875,7 +888,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 objIdOffset = zeroExtend(idAddr[3:0]);
             end
         end
-        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 && getTmode(x.rVal1) > 'h0 && x.alloc_policy == 'h0 ) begin 
+        if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 &&
+            getTmode(x.rVal1) > 0 && getTmode(x.rVal1) < 7 && x.alloc_policy == 'h0 ) begin
             if ( (x.mem_func == Ld || x.mem_func == St  || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo)) begin
             
                     let top = getTop(x.vaddr);
@@ -1310,13 +1324,20 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `ifdef TSO_MM
         let sbRes = SBSearchRes {
             matchIdx: Invalid,
+            sourceId: unpack(0),
             forwardData: Invalid
         };
 `else
         SBSearchRes sbRes = stb.search(info.paddr, info.shiftedBE, info.inlineId);
         let sbId = stb.searchInlineId(info.paddr, info.inlineId);
-        if (!isValid(sbRes.forwardData) && isValid(sbId.matchIdx)) begin
-            sbRes = SBSearchRes { matchIdx: sbId.matchIdx, forwardData: Invalid };
+        // An empty inline descriptor also represents legacy modes 1-6.
+        // Those consumers have an independent metadata obligation and cannot
+        // substitute the mode-0 producer's verdict for their own check.
+        if(info.inlineId.expected == 0 && isValid(info.objIdPAddr) &&
+           sbRes.sourceId.expected != 0) sbRes.forwardData = Invalid;
+        if (isValid(sbId.matchIdx) &&
+            !(info.inlineId.forwardUnchecked && isValid(sbRes.forwardData))) begin
+            sbRes = SBSearchRes { matchIdx: sbId.matchIdx, sourceId: unpack(0), forwardData: Invalid };
         end
 `endif
 `ifdef PERFORMANCE_MONITORING
@@ -1332,7 +1353,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // summarize
         if(issRes matches tagged Forward .forward) begin
             forwardQ.enq(tuple2(info.tag, forward.data));
-            if (!forward.storeIdCheck &&& info.objIdPAddr matches tagged Valid .a) begin
+            if (!info.inlineId.forwardUnchecked && !forward.storeIdCheck &&&
+                info.objIdPAddr matches tagged Valid .a) begin
                 $display("Forward: Issuing objIdSeal ", fshow(info));
                 reqObjIdSealLdQ.enq(tuple3(zeroExtend(info.tag), a, info.objIdOffset));
             end
@@ -2071,9 +2093,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doDeqStQ_St_Mem(
         !isValid(lsqDeqSt.fault) &&&
         lsqDeqSt.memFunc == St &&& !lsqDeqSt.isMMIO &&&
-        stb.getEnqIndex(lsqDeqSt.paddr, lsqDeqSt.inlineId) matches tagged Valid .sbIdx //&&&
+        stb.getEnqIndex(lsqDeqSt.paddr, lsqDeqSt.shiftedBE, lsqDeqSt.inlineId) matches tagged Valid .sbIdx //&&&
         // lsqDeqSt.objIdSealOk
     );
+        lsq.transferStIdCheckToSB(sbIdx);
         lsq.deqSt;
         // send to SB
         stb.enq(sbIdx, lsqDeqSt.paddr, lsqDeqSt.shiftedBE, lsqDeqSt.stData, lsqDeqSt.pcHash, lsqDeqSt.inlineId);
