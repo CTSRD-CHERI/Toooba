@@ -58,6 +58,7 @@ import GetPut::*;
 import ClientServer::*;
 import Cntrs::*;
 import Fifos::*;
+import ObjIdReqBuffer::*;
 import Ehr::*;
 import Map::*;
 import Types::*;
@@ -404,14 +405,23 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     // fifo for req mem
     Fifo#(1, Tuple5#(LdQTag, Addr, Bool, Bit#(16), InlineId)) reqLdQ <- mkBypassFifo;
-    Fifo#(1, Tuple3#(LdQTag, Addr, Bit#(7))) reqObjIdSealLdQ <- mkBypassFifo;
-    Fifo#(1, Tuple3#(StQTag, Addr, Bit#(7))) reqObjIdSealStQ <- mkBypassFifo;
+    ObjIdReqBuffer#(LdQSize) reqObjIdSealLdQ <- mkLdObjIdReqBuffer;
+    ObjIdReqBuffer#(StQSize) reqObjIdSealStQ <- mkStObjIdReqBuffer;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
     Fifo#(1, Tuple2#(Addr, Bit#(16))) reqStQ <- mkBypassFifo;
 `else
     Fifo#(1, Tuple3#(SBIndex, Addr, Bit#(16))) reqStQ <- mkBypassFifo;
 `endif
+    // Preserve normal load priority, but bound deferral of a pending store.
+    // Responses remain independent, so backpressured cache requests can drain.
+    Reg#(Bit#(5)) storeWaitAge <- mkReg(0);
+    PulseWire sentStoreReq <- mkPulseWire;
+    Bool storeUrgent = reqStQ.notEmpty && storeWaitAge == '1;
+    rule ageStoreRequest;
+        if(!reqStQ.notEmpty || sentStoreReq) storeWaitAge <= 0;
+        else if(storeWaitAge != '1) storeWaitAge <= storeWaitAge + 1;
+    endrule
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
     Fifo#(2, Tuple4#(StQTag, MemTaggedData, Addr, Bit#(7)))  memObjIdForwardQ <- mkCFFifo;
@@ -2570,7 +2580,25 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     idLoadStalled = idLoadStalled || (idLoadSearch == ObjIdToCache &&
                     isValid(sbIdLoad.matchIdx) && !isValid(sbIdLoad.forwardData));
 `endif
-    rule sendLdObjSealRdToMem (!idLoadStalled);
+    let idStoreReq = reqObjIdSealStQ.first;
+    let idStoreSearch = lsq.searchObjIDSt(tpl_1(idStoreReq), tpl_2(idStoreReq), tpl_3(idStoreReq));
+    Bool idStoreStalled = case (idStoreSearch) matches
+        tagged Stall .by: True;
+        default: False;
+    endcase;
+`ifndef TSO_MM
+    MemDataByteEn idStoreBE = replicate(False);
+    Bit#(4) idStoreByte = truncate(tpl_3(idStoreReq));
+    idStoreBE[idStoreByte] = True;
+    let sbIdStore = stb.searchMetadataSt(tpl_2(idStoreReq), DataMemAccess(idStoreBE), unpack(0));
+    idStoreStalled = idStoreStalled || (idStoreSearch == ObjIdToCache &&
+                    isValid(sbIdStore.matchIdx) && !isValid(sbIdStore.forwardData));
+`endif
+    rule retryLdObjSealRd (idLoadStalled);
+        reqObjIdSealLdQ.retry;
+    endrule
+
+    rule sendLdObjSealRdToMem (!idLoadStalled && !storeUrgent);
         let req = reqObjIdSealLdQ.first;
         let {lsqTag, addr, offset} = req;
         DProcReqId dId = zeroExtend(lsqTag);
@@ -2604,7 +2632,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     (* descending_urgency = "sendLdObjSealRdToMem, sendLdToMem" *)
-    rule sendLdToMem;
+    rule sendLdToMem (!storeUrgent);
         let {lsqTag, addr, loadTags, pcHash, inlineId} <- toGet(reqLdQ).get;
         DProcReqId dId = zeroExtend(lsqTag);
         dMem.procReq.req(ProcRq {
@@ -2623,10 +2651,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(verbose) $display("[sendLdToMem] ", fshow(lsqTag), "; ", fshow(addr));
     endrule
 
-    // (* descending_urgency = "sendLdToMem, sendStObjSealRdToMem, sendStToMem" *)
-    rule sendStObjSealRdToMem;
-        let {lsqTag, addr, offset} <- toGet(reqObjIdSealStQ).get;
-        LSQObjIdSearchResult result <- lsq.searchObjIDSt(lsqTag, addr, offset);
+    rule retryStObjSealRd (idStoreStalled);
+        reqObjIdSealStQ.retry;
+    endrule
+
+    rule sendStObjSealRdToMem (!idStoreStalled && !storeUrgent);
+        let {lsqTag, addr, offset} = idStoreReq;
+        reqObjIdSealStQ.deq;
+        LSQObjIdSearchResult result = idStoreSearch;
         DProcReqId dId = zeroExtend(lsqTag);
         StQTag tag = truncate(dId);
 
@@ -2635,6 +2667,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Addr objIdVAddr =
             objIdVAddrs[pack(ldstqTag)];
 
+`ifndef TSO_MM
+        if(result == ObjIdToCache &&& sbIdStore.forwardData matches tagged Valid .data)
+            result = ObjIdForward(data);
+`endif
         if(result matches tagged ObjIdForward .forward) begin
             memObjIdForwardQ.enq(tuple4(tag, forward, objIdVAddr, offset));
         end else begin 
@@ -2664,6 +2700,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     (* descending_urgency = "sendLdToMem, sendStObjSealRdToMem, sendStToMem" *) // prioritize Ld over St
     rule sendStToMem;
+        sentStoreReq.send;
 `ifdef TSO_MM
         let {addr, pcHash} <- toGet(reqStQ).get;
         DProcReqId id = 0;

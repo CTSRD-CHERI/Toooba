@@ -418,7 +418,7 @@ interface SplitLSQ;
     method Action updateLdObjIdSeal(LdQTag tag, MemTaggedData d);
     method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc)))  updateStObjIdSeal(StQTag t, MemTaggedData d);
     // Issue a load, and remove dependence on this load issue.
-    method ActionValue#(LSQObjIdSearchResult) searchObjIDSt(
+    method LSQObjIdSearchResult searchObjIDSt(
                                 StQTag requester,
                                 Addr objIdPAddr,
                                 Bit#(7) objIDoffset) ;
@@ -2020,7 +2020,7 @@ module mkSplitLSQ(SplitLSQ);
         end
     endmethod
 
-    method ActionValue#(LSQObjIdSearchResult) searchObjIDSt(
+    method LSQObjIdSearchResult searchObjIDSt(
                                 StQTag requester,
                                 Addr objIdPAddr,
                                 Bit#(7) objIDoffset) if (!wrongSpec_conflict);
@@ -2037,17 +2037,10 @@ module mkSplitLSQ(SplitLSQ);
 
         Vector#(StQSize, Bool) validOlderSts =
                 map(isValidOlderSt, genWith(fromInteger));
-        $display("searchObjIDSt requesterVTag", fshow(requesterVTag) );
-        $display("searchObjIDSt validOlderSts", fshow(validOlderSts) );
         MemDataByteEn objIdByteBE = replicate(False);
 
         Bit#(TLog#(MemDataBytes)) objIdByteIndex =
             truncate(objIDoffset);
-
-        doAssert(
-            objIDoffset < fromInteger(valueOf(MemDataBytes)),
-            "ObjID offset is outside metadata word"
-        );
 
         objIdByteBE[objIdByteIndex] = True;
 
@@ -2061,31 +2054,25 @@ module mkSplitLSQ(SplitLSQ);
         endfunction
         Vector#(StQSize, Bool) overlapSts = map(isOverlapSt,
                                                 genWith(fromInteger));
-        $display("searchObjIDSt overlapSts", fshow(overlapSts) );
-        // search the youngest store, and derive issue result
-        if(findYoungestSt(overlapSts) matches tagged Valid .stTag) begin
-            // find an overlaping SQ entry, check its type
+        function Bool isUnresolvedOlderSt(StQTag i);
+            return validOlderSts[i] && !st_computed_issue[i];
+        endfunction
+        Vector#(StQSize, Bool) unresolvedOlderSts =
+            map(isUnresolvedOlderSt, genWith(fromInteger));
+        // Stores have no younger-load replay to repair an early metadata
+        // verdict. Wait until all older addresses are known, and never use
+        // bytes from a producer which may still cancel at its L1 callback.
+        if(findYoungestSt(unresolvedOlderSts) matches tagged Valid .stTag) begin
+            result = tagged Stall StQ;
+        end
+        else if(findYoungestSt(overlapSts) matches tagged Valid .stTag) begin
             case(st_memFunc[stTag])
-                St: begin
-                    // check if forwarding is possible
-                        // store covers the issuing load, forward
-                        result = ObjIdForward (st_stData_issue[stTag]);
-                    //end
-                    //else begin
-                    //    // cannot forward, stall
-                    //    issRes = Stall (StQ);
-                    //end
-                end
-                default: begin
-                    doAssert(False, "unknown st mem func");
-                end
+                St: result = st_inlineId_issue[stTag].expected == 0
+                    ? tagged ObjIdForward st_stData_issue[stTag]
+                    : tagged Stall StQ;
+                default: result = tagged Stall StQ;
             endcase
         end
-        else begin
-            // no overlaping SQ entry is found, send to mem
-            result = ObjIdToCache;
-        end
-        $display("searchObjIDSt result", fshow(result) );
         return result;
 
     endmethod 

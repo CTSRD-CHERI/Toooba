@@ -89,6 +89,7 @@ interface StoreBuffer;
     method ActionValue#(Tuple2#(SBIndex, SBEntry)) issue;
     method SBSearchRes search(Addr paddr, ByteOrTagEn be, InlineId inlineId);
     method SBSearchRes searchMetadata(Addr paddr, ByteOrTagEn be, InlineId inlineId);
+    method SBSearchRes searchMetadataSt(Addr paddr, ByteOrTagEn be, InlineId inlineId);
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId); // load bypass/stall or atomic inst stall
     method Bool noMatchInlineLdQ(Addr paddr, InlineId inlineId);
     method Bool noMatchInlineStQ(Addr paddr, InlineId inlineId);
@@ -385,6 +386,14 @@ module mkStoreBufferEhr(StoreBuffer);
         return res;
     endmethod
 
+    // Independent read port: load and store metadata request guards both
+    // need their SB dependencies without arbitrating a value-method port.
+    method SBSearchRes searchMetadataSt(Addr paddr, ByteOrTagEn be, InlineId inlineId);
+        let res = searchEntry(paddr, be, inlineId);
+        if(res.sourceId.expected != 0) res.forwardData = Invalid;
+        return res;
+    endmethod
+
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId);
         return searchInlineEntry(paddr, inlineId);
     endmethod
@@ -420,6 +429,9 @@ module mkDummyStoreBuffer(StoreBuffer);
         return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
     endmethod
     method SBSearchRes searchMetadata(Addr paddr, ByteOrTagEn be, InlineId inlineId);
+        return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
+    endmethod
+    method SBSearchRes searchMetadataSt(Addr paddr, ByteOrTagEn be, InlineId inlineId);
         return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
     endmethod
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId);
