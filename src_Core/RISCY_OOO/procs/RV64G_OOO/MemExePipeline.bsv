@@ -137,7 +137,8 @@ typedef struct {
     ByteOrTagEn shiftedBE;
     CapPipe vaddr;         // virtual addr
     InlineId inlineId;
-    Bool translateObjId; // True for the first (metadata) translation only.
+    Bool translateObjId; // True only for the optional second translation.
+    Maybe#(TlbResp) dataTranslation; // Preserve data permissions/address across metadata lookup.
     Maybe#(Addr) objIdAddr;
     Bit#(7) objIdOffset;
 `ifdef INCLUDE_TANDEM_VERIF
@@ -378,10 +379,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     DTlbSynth dTlb <- mkDTlbSynth;
 
     let dTlbReqQ <- mkDTlbReqFifo;
-    // Reserve the retry slot before admitting a metadata translation. Ordinary
-    // data requests remain nonblocking; a metadata request holds admission only
-    // until its data retry is issued (or it faults/is squashed).
+    // Reserve retry capacity before admitting an access that may need metadata.
+    // Consume the data response into the retry FIFO before requesting metadata: a
+    // full DTLB must never require procReq in order to dequeue procResp.
     SpecFifo_SB_deq_enq_C_deq_enq#(1, Bool) objIdTranslation <-
+        mkSpecFifo_SB_deq_enq_C_deq_enq(True);
+    SpecFifo_SB_deq_enq_C_deq_enq#(2, DTlbResp#(MemExeToFinish)) finishTranslationQ <-
         mkSpecFifo_SB_deq_enq_C_deq_enq(True);
 
     // store buffer only used in WEAK model
@@ -835,7 +838,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         });
     endrule
 
-    // A speculation-aware reservation guarantees room to consume the ObjID
+    // A speculation-aware reservation guarantees room to consume the data
     // response even when all TLB request slots are occupied. A one-entry
     // reservation has no invalid head holes after selective speculation kills.
     rule doExeMem (!objIdTranslation.notEmpty);
@@ -958,74 +961,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(getTmode(x.rVal1) == 'h3)
             objIdMode3Seen.send;
 
-        if (!inlineId.inLine && inlineId.expected == 0 &&& objIdVAddr matches tagged Valid .objIdAddr) begin
-
-            objIdVAddrs[pack(x.ldstq_tag)] <= objIdAddr;
-
-            Addr objIdWordAddr =
-                objIdAddr & ~64'hF;
-
-            let lookup =
-                objIdBuf.lookup(
-                    MapKeyIndex {
-                        key: objIdWordAddr,
-                        index: hash(objIdWordAddr)
-                    }
-                );
-
-            if (lookup matches
-                    tagged Valid (tagged Valid .objIdTableEnt)) begin
-
-                Bool mismatch =
-                    mteMismatch(
-                        objIdTableEnt,
-                        getMTE(x.rVal1),
-                        objIdOffset
-                    );
-
-                if (!mismatch)
-                    objIdVAddr = Invalid;
-            end
-        end
-
-        if (isValid(objIdVAddr) && getTmode(x.rVal1) != 1) begin
+        if (!inlineId.inLine && inlineId.expected == 0 &&& objIdVAddr matches tagged Valid .addr)
+            objIdVAddrs[pack(x.ldstq_tag)] <= addr;
+        if (isValid(objIdVAddr) && getTmode(x.rVal1) != 1)
             objIdTranslation.enq(ToSpecFifo { data: True, spec_bits: regToExe.spec_bits });
-            dTlb.procReq(DTlbReq {
-                inst: MemExeToFinish {
-                    inlineId: inlineId,
-                    translateObjId: True,
-                    mem_func: x.mem_func,
-                    tag: x.tag,
-                    ldstq_tag: x.ldstq_tag,
-                    shiftedBE: shiftBE,
-                    vaddr: x.vaddr,
-                    objIdAddr: objIdVAddr, //Valid('h80010000),
-                    objIdOffset: objIdOffset,
-                    mte: getMTE(x.rVal1),
-                    tmode: getTmode(x.rVal1),
-                    alloc_policy: x.alloc_policy,
-`ifdef INCLUDE_TANDEM_VERIF
-                    store_data: x.rVal2,
-                    store_data_BE: origBE,
-`endif
-                    misaligned: memAddrMisaligned(getAddr(x.vaddr), x.origBE, x.alloc_policy),
-                    capStore: isValidCap(x.rVal2) && x.origBE == DataMemAccess(unpack(~0)),
-                    allowCapLoad: getHardPerms(x.rVal1).permitLoadCap && x.origBE == DataMemAccess(unpack(~0)),
-                    capException: capChecksMem(x.rVal1, x.rVal2, x.cap_checks, x.mem_func, x.origBE),
-                    check: prepareBoundsCheck(x.rVal1, x.rVal2, almightyCap/*ToDo: pcc*/,
-                                            ddc, getAddr(x.vaddr), accessByteCount, x.cap_checks)
-`ifdef KONATA
-                    , u_id: x.u_id
-`endif
-                },
-                specBits: regToExe.spec_bits
-            });
-        end
-        else begin
+        begin
             dTlb.procReq(DTlbReq {
                 inst: MemExeToFinish {
                     inlineId: inlineId,
                     translateObjId: False,
+                    dataTranslation: Invalid,
                     mem_func: x.mem_func,
                     tag: x.tag,
                     ldstq_tag: x.ldstq_tag,
@@ -1078,12 +1023,46 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             });
         end
     endrule
-    (* descending_urgency = "doObjIdTlb, sendDataTranslation, doExeMem" *)
-    rule sendDataTranslation;
+    (* descending_urgency = "doObjIdTlb, sendObjIdTranslation, doExeMem" *)
+    rule sendObjIdTranslation;
         let r = dTlbReqQ.first;
         dTlbReqQ.deq;
         objIdTranslation.deq;
         dTlb.procReq(DTlbReq { inst: r.data, specBits: r.spec_bits });
+    endrule
+
+    rule doDataTlb (!dTlb.procResp.inst.translateObjId);
+        let r = dTlb.procResp;
+        dTlb.deqProcResp;
+        let x = r.inst;
+        Bool reservedRetry = isValid(x.objIdAddr) && x.tmode != 1;
+        Bool needsMetadata = reservedRetry;
+        Bool dataFault = True;
+        if (r.resp matches tagged Valid .rsp)
+            dataFault = isValid(tpl_2(rsp));
+        if (isValid(x.objIdAddr)) begin
+            if (!x.inlineId.inLine && x.inlineId.expected == 0) begin
+                Addr wordAddr = fromMaybe(?, x.objIdAddr) & ~64'hF;
+                let lookup = objIdBuf.lookup(MapKeyIndex { key: wordAddr, index: hash(wordAddr) });
+                if (lookup matches tagged Valid (tagged Valid .entry)) begin
+                    if (!mteMismatch(entry, x.mte, x.objIdOffset)) begin
+                        x.objIdAddr = Invalid;
+                        needsMetadata = False;
+                    end
+                end
+            end
+            if (reservedRetry && (!needsMetadata || dataFault))
+                objIdTranslation.deq;
+        end
+        if (needsMetadata && !dataFault) begin
+            x.dataTranslation = r.resp;
+            x.translateObjId = True;
+            dTlbReqQ.enq(ToSpecFifo { data: x, spec_bits: r.specBits });
+        end
+        else begin
+            r.inst = x;
+            finishTranslationQ.enq(ToSpecFifo { data: r, spec_bits: r.specBits });
+        end
     endrule
 
     rule doObjIdTlb (dTlb.procResp.inst.translateObjId);
@@ -1105,7 +1084,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(isValid(cause) && verbose) $display("  [doObjIdTlb - objIdTlb response] PAGEFAULT!");
 
         if(isValid(cause)) begin
-            objIdTranslation.deq;
             // update LSQ with fault
             doAssert(isValid(x.objIdAddr), "fault must have come from translation of valid objId VAddr");
             inIfc.rob_setExecuted_doFinishMem(x.tag, fromMaybe(0, x.objIdAddr),
@@ -1126,21 +1104,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         );
         end
         else begin
-            // Release the metadata slot before requesting the data translation.
-            // Direct procResp -> procReq recirculation deadlocks on a full TLB.
-            x.translateObjId = False;
             x.objIdAddr = objIdPAddr;
-            dTlbReqQ.enq(ToSpecFifo {
-                data: x,
+            finishTranslationQ.enq(ToSpecFifo {
+                data: DTlbResp { inst: x, resp: x.dataTranslation, specBits: objIdTlbResp.specBits },
                 spec_bits: objIdTlbResp.specBits
             });
         end
     endrule
     
 
-    rule doFinishMem (!dTlb.procResp.inst.translateObjId);
-        dTlb.deqProcResp;
-        let dTlbResp = dTlb.procResp;
+    rule doFinishMem;
+        let dTlbResp = finishTranslationQ.first.data;
+        finishTranslationQ.deq;
         let x = dTlbResp.inst;
         Addr paddr = 0;
         Bool allowCapPTE = False;
@@ -2735,7 +2710,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     interface recvBypass = map(getRecvBypassIfc, bypassWire);
     interface rsMemIfc = rsMem;
     interface dTlbIfc = dTlb;
-    method tlbNoPendingReq = dTlb.noPendingReq && !objIdTranslation.notEmpty;
+    method tlbNoPendingReq = dTlb.noPendingReq && !objIdTranslation.notEmpty && !dTlbReqQ.notEmpty && !finishTranslationQ.notEmpty;
     interface lsqIfc = lsq;
     interface stbIfc = stb;
     interface dMemIfc = dMem;
@@ -2743,6 +2718,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         rsMem.specUpdate,
         dispToRegQ.specUpdate,
         regToExeQ.specUpdate,
+        finishTranslationQ.specUpdate,
         dTlbReqQ.specUpdate,
         objIdTranslation.specUpdate,
         dTlb.specUpdate,
