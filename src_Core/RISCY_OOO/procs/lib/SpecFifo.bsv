@@ -72,17 +72,21 @@ module mkSpecFifo#(
 )(
     SpecFifo#(size, t, validPortNum, sbPortNum)
 ) provisos (
-    Alias#(idxT, Bit#(TLog#(size))),
+    Alias#(idxT, Bit#(TMax#(1, TLog#(size)))),
     Bits#(t, _tsz),
     FShow#(t)
 );
-    staticAssert(sched.validDeqPort < sched.validEnqPort, "enq must schedule after deq");
+    staticAssert(sched.validDeqPort != sched.validEnqPort, "enq and deq need distinct valid ports");
+    staticAssert(sched.validDeqPort < sched.validEnqPort || lazyEnq,
+                 "enq before deq requires lazy enqueue readiness");
 
     // correct spec is always the last
     Integer sbCorrectSpecPort = valueof(sbPortNum) - 1;
 
     Vector#(size, Ehr#(validPortNum, Bool))  valid    <- replicateM(mkEhr(False));
-    Vector#(size, Reg#(t))                   row      <- replicateM(mkRegU);
+    // Forward the payload as well as validity for enqueue-before-dequeue.
+    Integer rowDeqPort = sched.validDeqPort < sched.validEnqPort ? 0 : 1;
+    Vector#(size, Ehr#(2, t))                row      <- replicateM(mkEhr(?));
     Vector#(size, Ehr#(sbPortNum, SpecBits)) specBits <- replicateM(mkEhr(?));
 
     Reg#(idxT) enqP <- mkReg(0);
@@ -151,7 +155,7 @@ module mkSpecFifo#(
         doAssert(!valid_for_enq, "enq entry cannot be valid");
         enqP <= getNextPtr(enqP);
         valid[enqP][sched.validEnqPort] <= True;
-        row[enqP] <= x.data;
+        row[enqP][0] <= x.data;
         specBits[enqP][sched.sbEnqPort] <= x.spec_bits;
     endmethod
 
@@ -165,7 +169,7 @@ module mkSpecFifo#(
 
     method ToSpecFifo#(t) first if (valid[deqP][sched.validDeqPort]);
         return ToSpecFifo{
-            data: row[deqP],
+            data: row[deqP][rowDeqPort],
             spec_bits: specBits[deqP][sched.sbDeqPort]
         };
     endmethod
@@ -215,7 +219,7 @@ module mkSpecFifoCF#(
 )(
     SpecFifo#(size, t, validPortNum, sbPortNum)
 ) provisos (
-    Alias#(idxT, Bit#(TLog#(size))),
+    Alias#(idxT, Bit#(TMax#(1, TLog#(size)))),
     Bits#(t, _tsz),
     FShow#(t)
 );
@@ -328,7 +332,7 @@ module mkSpecFifoCF2#(
 )(
     SpecFifo#(size, t, validPortNum, sbPortNum)
 ) provisos (
-    Alias#(idxT, Bit#(TLog#(size))),
+    Alias#(idxT, Bit#(TMax#(1, TLog#(size)))),
     Bits#(t, _tsz),
     FShow#(t)
 );
@@ -491,7 +495,7 @@ module mkSpecFifo_SB_deq_enq_C_deq_enq#(Bool lazyEnq)(
 endmodule
 
 
-// deq < enq (< correctSpec)
+// enq < deq (< correctSpec)
 // wrongSpec C enq
 // wrongSpec C deq
 typedef SpecFifo#(
@@ -499,13 +503,13 @@ typedef SpecFifo#(
 ) SpecFifo_SB_enq_deq_C_enq_deq#(numeric type size, type t);
 
 module mkSpecFifo_SB_enq_deq_C_enq_deq(
-    SpecFifo_SB_deq_enq_C_deq_enq#(size, t)
+    SpecFifo_SB_enq_deq_C_enq_deq#(size, t)
 ) provisos(Bits#(t, w), FShow#(t));
     let sched = SpecFifoSched {
         validDeqPort: 1,
         validEnqPort: 0,
         validWrongSpecPort: 0,
-        sbDeqPort: 0,
+        sbDeqPort: 1,
         sbEnqPort: 0,
         sbWrongSpecPort: 0,
         wrongSpec_conflict_enq: True,
@@ -519,7 +523,7 @@ endmodule
 module mkSpecFifoUG#(Bool lazyEnq)(
     SpecFifo#(size, t, validPortNum, sbPortNum)
 ) provisos (
-    Alias#(idxT, Bit#(TLog#(size))),
+    Alias#(idxT, Bit#(TMax#(1, TLog#(size)))),
     Bits#(t, _tsz),
     FShow#(t)
 );
@@ -566,7 +570,7 @@ module mkSearchableSpecFifoCF#(
 )(
     SearchableSpecFifo#(size, t, searchOut, searchIn)
 ) provisos (
-    Alias#(idxT, Bit#(TLog#(size))),
+    Alias#(idxT, Bit#(TMax#(1, TLog#(size)))),
     Bits#(t, _tsz),
     FShow#(t)
 );
