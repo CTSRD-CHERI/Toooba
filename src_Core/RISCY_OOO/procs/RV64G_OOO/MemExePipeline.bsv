@@ -160,6 +160,11 @@ typedef struct {
 `endif
 } MemExeToFinish deriving(Bits, FShow);
 
+// Lookup ownership is independent of speculation: even a squashed request
+// must drain its BRAM response. Instruction results are captured after one
+// cycle, before a reused LSQ slot can receive its own data-TLB response.
+typedef Tuple3#(LdStQTag, Bit#(8), Bit#(7)) ObjIdLookupClient;
+
 // bookkeeping when waiting for MMIO resp which may cause exception
 typedef struct {
     Bool isLd;
@@ -460,7 +465,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // Each record is a Maybe#(MemTaggedData); essentially a 128-bit word with a validity bit.
     // 4-way associative, so 64 entries total
     // Default value of Invalid
-    Map#(Addr, Bit#(4), Maybe#(MemTaggedData), 4) objIdBuf <- mkMapLossy(Invalid);
+    MapSplit#(Addr, Bit#(4), Maybe#(MemTaggedData), 4) objIdBuf <- mkMapLossyBRAM;
+    Fifo#(1, ObjIdLookupClient) objIdLookupQ <- mkPipelineFifo;
+    Vector#(TExp#(SizeOf#(LdStQTag)), Ehr#(2, Bool))
+        objIdLookupHits <- replicateM(mkEhr(False));
     Map#(ObjIdPLine, Bit#(4), Maybe#(ObjIdVWord), 4) objIdPAddrBuf <- mkMapLossy(Invalid);
     
     function Action updateObjIdBuf(
@@ -963,6 +971,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         if (!inlineId.inLine && inlineId.expected == 0 &&& objIdVAddr matches tagged Valid .addr)
             objIdVAddrs[pack(x.ldstq_tag)] <= addr;
+        if (!inlineId.inLine && inlineId.expected == 0 && isValid(objIdVAddr)) begin
+            Addr wordAddr = fromMaybe(?, objIdVAddr) & ~64'hF;
+            objIdBuf.lookupStart(MapKeyIndex { key: wordAddr, index: hash(wordAddr) });
+            objIdLookupQ.enq(tuple3(x.ldstq_tag, getMTE(x.rVal1), objIdOffset));
+        end
         if (isValid(objIdVAddr) && getTmode(x.rVal1) != 1)
             objIdTranslation.enq(ToSpecFifo { data: True, spec_bits: regToExe.spec_bits });
         begin
@@ -1031,6 +1044,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         dTlb.procReq(DTlbReq { inst: r.data, specBits: r.spec_bits });
     endrule
 
+    rule saveObjIdLookup;
+        let {tag, mte, offset} = objIdLookupQ.first;
+        let result = objIdBuf.lookupRead;
+        objIdLookupQ.deq;
+        Bool hit = False;
+        if (result matches tagged Valid (tagged Valid .data))
+            hit = !mteMismatch(data, mte, offset);
+        objIdLookupHits[pack(tag)][0] <= hit;
+    endrule
+
     rule doDataTlb (!dTlb.procResp.inst.translateObjId);
         let r = dTlb.procResp;
         dTlb.deqProcResp;
@@ -1042,13 +1065,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             dataFault = isValid(tpl_2(rsp));
         if (isValid(x.objIdAddr)) begin
             if (!x.inlineId.inLine && x.inlineId.expected == 0) begin
-                Addr wordAddr = fromMaybe(?, x.objIdAddr) & ~64'hF;
-                let lookup = objIdBuf.lookup(MapKeyIndex { key: wordAddr, index: hash(wordAddr) });
-                if (lookup matches tagged Valid (tagged Valid .entry)) begin
-                    if (!mteMismatch(entry, x.mte, x.objIdOffset)) begin
-                        x.objIdAddr = Invalid;
-                        needsMetadata = False;
-                    end
+                if (objIdLookupHits[pack(x.ldstq_tag)][1]) begin
+                    x.objIdAddr = Invalid;
+                    needsMetadata = False;
                 end
             end
             if (reservedRetry && (!needsMetadata || dataFault))
@@ -1645,68 +1664,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
 
-    function MemTaggedData clearObjIdByte(
-        MemTaggedData oldData,
-        Bit#(7) objIdOffset
-    );
-        MemTaggedData newData = oldData;
-
-        Vector#(MemDataBytes, Bit#(8)) dataBytes =
-            unpack(pack(oldData.data));
-
-        Bit#(TLog#(MemDataBytes)) byteIndex =
-            truncate(objIdOffset);
-
-        dataBytes[byteIndex] = 0;
-
-        newData.data = unpack(pack(dataBytes));
-
-        return newData;
-    endfunction
-
-    //(* descending_urgency =
-    //    "doObjIdFullFlush, doObjIdRespStForward"
-    //*)
+    // A forwarded store makes the cached ObjectID word suspect. This is
+    // rare: discard the whole word and let the next access reload it.
     rule doObjIdRespStForward;
-
-        let {
-            requesterTag,
-            forwardedData,
-            objIdVAddr,
-            objIdOffset
-        } = memObjIdForwardQ.first;
-
+        let {requesterTag, forwardedData, objIdVAddr, objIdOffset} = memObjIdForwardQ.first;
         memObjIdForwardQ.deq;
-
-        doAssert(
-            objIdOffset < fromInteger(valueOf(MemDataBytes)),
-            "forwarded ObjID offset is outside objIdBuf entry"
-        );
-
-        Addr objIdWordAddr =
-            objIdVAddr & ~64'hF;
-            
-        let key = MapKeyIndex {
-            key: objIdWordAddr,
-            index: hash(objIdWordAddr)
-        };
-            
-        let oldLookup = objIdBuf.lookup(key);
-            
-        if (oldLookup matches
-                tagged Valid (tagged Valid .oldData)) begin
-            
-            MemTaggedData updatedData =
-                clearObjIdByte(
-                    oldData,
-                    objIdOffset
-                );
-            
-            objIdBuf.update(
-                key,
-                Valid(updatedData)
-            );
-        end
+        Addr wordAddr = objIdVAddr & ~64'hF;
+        objIdBuf.updateMayInsert(
+            MapKeyIndex { key: wordAddr, index: hash(wordAddr) }, Invalid, False);
 
         let mInstInfo <-
             lsq.updateStObjIdSeal(
@@ -2710,7 +2675,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     interface recvBypass = map(getRecvBypassIfc, bypassWire);
     interface rsMemIfc = rsMem;
     interface dTlbIfc = dTlb;
-    method tlbNoPendingReq = dTlb.noPendingReq && !objIdTranslation.notEmpty && !dTlbReqQ.notEmpty && !finishTranslationQ.notEmpty;
+    method tlbNoPendingReq = dTlb.noPendingReq && !objIdTranslation.notEmpty && !dTlbReqQ.notEmpty && !finishTranslationQ.notEmpty && !objIdLookupQ.notEmpty;
     interface lsqIfc = lsq;
     interface stbIfc = stb;
     interface dMemIfc = dMem;

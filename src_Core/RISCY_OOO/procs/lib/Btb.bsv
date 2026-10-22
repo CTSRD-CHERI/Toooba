@@ -158,7 +158,7 @@ module mkBtbCore(NextAddrPred#(hashSz))
     endmethod
 
 `ifdef SECURITY
-    method Action flush method Action flush;
+    method Action flush;
         for (Integer i = 0; i < valueOf(SupSizeX2); i = i + 1) begin
             fullRecords[i].clear;
             compressedRecords[i].clear;
