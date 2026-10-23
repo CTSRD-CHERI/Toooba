@@ -1,0 +1,3 @@
+[submodule "libs/cheri-cap-lib"]
+	path = libs/cheri-cap-lib
+	url = https://github.com/CTSRD-CHERI/cheri-cap-lib.git
