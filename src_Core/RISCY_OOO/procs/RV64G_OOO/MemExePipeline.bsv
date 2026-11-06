@@ -1260,7 +1260,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end 
 
         if (x.inlineId.inLine && x.mem_func == Ld && !isMMIO) begin
-            objIdPAddr = Valid((paddr & ~64'h7f) | zeroExtend(x.inlineId.offset));
+            objIdPAddr = Valid((paddr & ~fromInteger(valueOf(CLineDataNumBytes) - 1)) | zeroExtend(x.inlineId.offset));
             x.objIdOffset = zeroExtend(x.inlineId.offset[3:0]);
         end
         if (isMMIO) x.inlineId = unpack(0);

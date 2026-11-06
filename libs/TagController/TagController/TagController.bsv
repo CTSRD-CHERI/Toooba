@@ -206,7 +206,7 @@ module mkTagController(TagControllerIfc);
         tagged Covered .ts : begin
           CapOffsetInLine frameCapOffset;
           if (valueOf(CheriDataWidth) >= valueOf(CapWidth))
-            frameCapOffset = truncate(memoryResponseFrame) * fromInteger(valueOf(CapsPerFlit));
+            frameCapOffset = truncate(memoryResponseFrame) << valueOf(TLog#(CapsPerFlit));
           else
             frameCapOffset = truncate(memoryResponseFrame >> valueOf(LogFlitsPerCap));
           CapOffsetInLine base = thisAddrFrame.d.bank + frameCapOffset;

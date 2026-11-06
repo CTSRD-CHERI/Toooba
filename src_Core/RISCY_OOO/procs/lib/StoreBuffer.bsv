@@ -247,7 +247,7 @@ module mkStoreBufferEhr(StoreBuffer);
     function SBSearchRes searchInlineEntry(Addr paddr, InlineId inlineId);
         MemDataByteEn idBE = replicate(False);
         idBE[inlineId.offset[3:0]] = True;
-        Addr idAddr = (paddr & ~64'h7f) | zeroExtend(inlineId.offset);
+        Addr idAddr = (paddr & ~fromInteger(valueOf(CLineDataNumBytes) - 1)) | zeroExtend(inlineId.offset);
         return inlineId.inLine
             ? searchEntry(idAddr, DataMemAccess(idBE), inlineId)
             : SBSearchRes { matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid };

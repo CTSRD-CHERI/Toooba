@@ -111,6 +111,9 @@
 // ==== CACHE SIZE ====
 //
 
+// Shared L1/LLC line size in bytes (power of two, at least 16 bytes).
+`define CACHE_LINE_BYTES 64
+
 `ifdef CACHE_TEST
 
     // L1
