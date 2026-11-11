@@ -172,17 +172,11 @@ typedef struct {
 
 typedef Bit#(TSub#(SizeOf#(Addr), 12)) ObjIdPhysTag;
 
-typedef LineAddr ObjIdPLine;
-
 typedef struct {
     LineAddr line;
     Bool flush1k;
     Bool flush4k;
 } ObjIdEvictReq deriving(Bits, FShow);
-
-typedef Bit#(
-    TSub#(SizeOf#(Addr), 4)
-) ObjIdVWord;
 
 typedef union tagged {
     void Invalid;
@@ -201,11 +195,6 @@ typedef struct {
     MemTaggedData shiftedData;
     InlineId inlineId;
 } WaitStResp deriving(Bits, Eq, FShow);
-
-typedef struct {
-    ObjIdPLine pLine;
-    ObjIdVWord vWord;
-} ObjIdReverseUpdate deriving(Bits, FShow);
 
 //SpecFifo#(2,IncorrectSpec,1,1) incorrectSpec_ff <- mkSpecFifoCF(True);
 // synthesized pipeline fifos
@@ -447,18 +436,20 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdEvictQ <- mkCFFifo;
 
 
-    Reg#(Maybe#(Tuple2#(ObjIdPLine, ObjIdVWord))) objIdInvalidateResult <- mkReg(Invalid);
     PulseWire objIdMode3Seen <- mkPulseWire;
+    // Single-hash Bloom filter: bits are only removed on a whole-buffer flush.
+    // Collisions cause extra flushes, never missed invalidations.
+    Reg#(Bit#(256)) objIdPAddrFilter <- mkReg(0);
+    RWire#(Addr) objIdPAddrFilterLdUpdate <- mkRWire;
+    RWire#(Addr) objIdPAddrFilterStUpdate <- mkRWire;
+    Reg#(Bool) objIdFlushPending <- mkReg(False);
 
-    Fifo#(2, ObjIdReverseUpdate)
-    objIdReverseUpdateQ <- mkCFFifo;
-
-    Fifo#(1, Bool)
-        objIdFullFlushQ <- mkCFFifo;
-    
-    Reg#(CLineMemTaggedDataSel)
-        objIdInvalidateWordIdx <- mkReg(0);
-
+    function Bit#(8) objIdPAddrFilterIndex(Addr paddr);
+        // Hash line addresses using the configured cache-line geometry.
+        Addr line = zeroExtend(getLineAddr(paddr));
+        return line[7:0] ^ line[15:8] ^ line[23:16] ^ line[31:24]
+             ^ line[39:32] ^ line[47:40] ^ line[55:48] ^ line[63:56];
+    endfunction
 
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
     // 4-bit index == 16 entries per set.
@@ -469,7 +460,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, ObjIdLookupClient) objIdLookupQ <- mkPipelineFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)), Ehr#(2, Bool))
         objIdLookupHits <- replicateM(mkEhr(False));
-    Map#(ObjIdPLine, Bit#(4), Maybe#(ObjIdVWord), 4) objIdPAddrBuf <- mkMapLossy(Invalid);
     
     function Action updateObjIdBuf(
         Addr objIDVAddr,
@@ -658,13 +648,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Bool flushObjIDbuf4k
         );
 
-            //objIdEvictQ.enq(
-              //  ObjIdEvictReq {
-              //      line: lineAddr,
-              //      flush1k: flushObjIDbuf1k,
-              //      flush4k: flushObjIDbuf4k
-              //  }
-           // );
+            objIdEvictQ.enq(ObjIdEvictReq {
+                line: lineAddr,
+                flush1k: flushObjIDbuf1k,
+                flush4k: flushObjIDbuf4k
+            });
 
         endmethod
 
@@ -1500,10 +1488,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endfunction
 
     // (* descending_urgency = "doObjIdRespLdMem, doRespLdMem" *)
-    //(* descending_urgency =
-    //"doObjIdFullFlush, doObjIdRespLdMem"*)
 
-    rule doObjIdRespLdMem;
+    rule doObjIdRespLdMem (!objIdFlushPending);
         let {
             tag,
             d,
@@ -1519,12 +1505,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             d
         );
 
-        objIdReverseUpdateQ.enq(
-            ObjIdReverseUpdate {
-                pLine: getLineAddr(paddr),
-                vWord: truncate(vaddr >> 4)
-            }
-        );
+        objIdPAddrFilterLdUpdate.wset(paddr);
 
         end
 
@@ -1551,11 +1532,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
 
     
-    //(* descending_urgency =
-    //"doObjIdFullFlush, doObjIdRespStMem"*)
     (* descending_urgency = "doObjIdRespStMem, doObjIdRespStForward" *) // prioritize mem resp
 
-    rule doObjIdRespStMem;
+    rule doObjIdRespStMem (!objIdFlushPending);
         let {t, d, vaddr, paddr} = memObjIdRespStQ.first;
         memObjIdRespStQ.deq;
         if (!lsq.skipStIdFill(t)) begin
@@ -1564,12 +1543,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             d
         );
 
-        objIdReverseUpdateQ.enq(
-            ObjIdReverseUpdate {
-                pLine: getLineAddr(paddr),
-                vWord: truncate(vaddr >> 4)
-            }
-        );
+        objIdPAddrFilterStUpdate.wset(paddr);
         end
         let mInstInfo <- lsq.updateStObjIdSeal(t, d);
         if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(d), "; instTagReady=", fshow(isValid(mInstInfo)));
@@ -1593,76 +1567,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
     endrule
 
-    rule doObjIdReverseUpdate;
-
-        let u = objIdReverseUpdateQ.first;
-        objIdReverseUpdateQ.deq;
-
-        let key =
-            MapKeyIndex {
-                key: u.pLine,
-                index: hash(u.pLine)
-            };
-
-        let oldMapping =
-            objIdPAddrBuf.lookup(key);
-
-        Bool hasAlias = False;
-
-        if (
-            oldMapping matches
-                tagged Valid
-                    (tagged Valid .oldVWord)
-        ) begin
-
-            /*
-             * One ObjID entry represents 16 bytes.
-             *
-             * Therefore:
-             *
-             *     vWord >> LogCLineNumMemTaggedData
-             *
-             * identifies the surrounding cache
-             * virtual line.
-             */
-            if (
-                (oldVWord >> valueOf(LogCLineNumMemTaggedData)) !=
-                (u.vWord >> valueOf(LogCLineNumMemTaggedData))
-            ) begin
-
-                hasAlias = True;
-
-            end
-
-        end
-
-        if(hasAlias) begin
-
-            /*
-             * Same physical cache line has been
-             * observed through a different
-             * virtual cache line.
-             *
-             * Conservatively flush everything.
-             */
-            //objIdFullFlushQ.enq(True);
-            objIdPAddrBuf.update(
-                key,
-                Valid(u.vWord)
-            );
-
-        end
-        else begin
-
-            objIdPAddrBuf.update(
-                key,
-                Valid(u.vWord)
-            );
-
-        end
-
+    (* descending_urgency = "doObjIdFlush, doUpdateObjIdPAddrFilter" *)
+    rule doUpdateObjIdPAddrFilter (isValid(objIdPAddrFilterLdUpdate.wget) ||
+                                  isValid(objIdPAddrFilterStUpdate.wget));
+        Bit#(256) nextFilter = objIdPAddrFilter;
+        if (objIdPAddrFilterLdUpdate.wget matches tagged Valid .paddr)
+            nextFilter[objIdPAddrFilterIndex(paddr)] = 1;
+        if (objIdPAddrFilterStUpdate.wget matches tagged Valid .paddr)
+            nextFilter[objIdPAddrFilterIndex(paddr)] = 1;
+        objIdPAddrFilter <= nextFilter;
     endrule
-
 
     // A forwarded store makes the cached ObjectID word suspect. This is
     // rare: discard the whole word and let the next access reload it.
@@ -2371,139 +2285,37 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         doAssert(!isValid(lsqDeqSt.fault), "no fault");
     endrule
 
-    //(* descending_urgency =
-    //    "setObjIdBufMayContainMode3, doObjIdFullFlush"
-    //*)
     rule setObjIdBufMayContainMode3(
         objIdMode3Seen
     );
         objIdBufMayContainMode3 <= True;
     endrule
 
-    rule doObjIdReverseLookup(
-        !isValid(objIdInvalidateResult)
-    );
-
+    rule doObjIdFilterLookup (!objIdFlushPending);
         let req = objIdEvictQ.first;
         objIdEvictQ.deq;
-
-        Bool shouldCheck =
-            req.flush4k ||
-            (
-                objIdBufMayContainMode3 &&
-                req.flush1k
-            );
-
-        if(shouldCheck) begin
-
-            ObjIdPLine pLine =
-                truncate(pack(req.line));
-
-            let mapping =
-                objIdPAddrBuf.lookup(
-                    MapKeyIndex {
-                        key: pLine,
-                        index: hash(pLine)
-                    }
-                );
-
-            if (
-                mapping matches
-                    tagged Valid
-                        (tagged Valid .vWord)
-            ) begin
-
-                objIdInvalidateResult <=
-                    Valid(
-                        tuple2(
-                            pLine,
-                            vWord
-                        )
-                    );
-                objIdInvalidateWordIdx <= 0;
-
-            end
-
-        end
-
+        Bool shouldCheck = req.flush4k ||
+            ((objIdBufMayContainMode3 || objIdMode3Seen) && req.flush1k);
+        Addr paddr = zeroExtend(req.line) << valueOf(LgLineSzBytes);
+        let idx = objIdPAddrFilterIndex(paddr);
+        Bool maybePresent = objIdPAddrFilter[idx] == 1;
+        // Include fills accepted in this cycle, before their bits commit.
+        if (objIdPAddrFilterLdUpdate.wget matches tagged Valid .a)
+            maybePresent = maybePresent || objIdPAddrFilterIndex(a) == idx;
+        if (objIdPAddrFilterStUpdate.wget matches tagged Valid .a)
+            maybePresent = maybePresent || objIdPAddrFilterIndex(a) == idx;
+        if (shouldCheck && maybePresent)
+            objIdFlushPending <= True;
     endrule
 
-
-    rule doObjIdBufInvalidate(
-        objIdInvalidateResult matches
-            tagged Valid {.pLine, .vWord}
-    );
-
-        /*
-         * vWord is a 16-byte-word address.
-         *
-         * Clear the word offset bits to obtain
-         * the first 16-byte word in the
-         * corresponding virtual cache line.
-         */
-        ObjIdVWord baseWord =
-            (vWord >> valueOf(LogCLineNumMemTaggedData)) << valueOf(LogCLineNumMemTaggedData);
-
-        ObjIdVWord currentWord =
-            baseWord +
-            zeroExtend(
-                objIdInvalidateWordIdx
-            );
-
-        Addr vWordAddr =
-            zeroExtend(currentWord) << 4;
-
-        /*
-         * Invalidate ONE entry this cycle.
-         */
-        objIdBuf.update(
-            MapKeyIndex {
-                key: vWordAddr,
-                index: hash(vWordAddr)
-            },
-            Invalid
-        );
-
-        if(objIdInvalidateWordIdx == fromInteger(valueOf(CLineNumMemTaggedData) - 1)) begin
-
-            /*
-             * All 16-byte entries in the line have now
-             * been invalidated.
-             */
-            objIdPAddrBuf.update(
-                MapKeyIndex {
-                    key: pLine,
-                    index: hash(pLine)
-                },
-                Invalid
-            );
-
-            objIdInvalidateResult <= Invalid;
-            objIdInvalidateWordIdx <= 0;
-
-        end
-        else begin
-
-            objIdInvalidateWordIdx <=
-                objIdInvalidateWordIdx + 1;
-
-        end
-
-    endrule
-    /*
-    rule doObjIdFullFlush;
-
-        objIdFullFlushQ.deq;
-
+    // MapSplit.clear starts a multi-cycle BRAM clear. Its lookupRead returns
+    // misses during clearing, and fills are discarded until clearDone.
+    // Do not accept a fill in this cycle: it would outlive the filter reset.
+    rule doObjIdFlush (objIdFlushPending && objIdBuf.clearDone);
         objIdBuf.clear;
-        objIdPAddrBuf.clear;
-
-        objIdReverseUpdateQ.clear; 
-        objIdInvalidateResult <= Invalid;
-        objIdInvalidateWordIdx <= 0;
-        objIdBufMayContainMode3 <= False;
+        objIdPAddrFilter <= 0;
+        objIdFlushPending <= False;
     endrule
-    */
 
     // send req to D$
     let idLoadReq = reqObjIdSealLdQ.first;
