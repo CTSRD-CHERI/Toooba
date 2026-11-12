@@ -58,6 +58,7 @@ import GetPut::*;
 import ClientServer::*;
 import Cntrs::*;
 import Fifos::*;
+import FIFOF::*;
 import ObjIdReqBuffer::*;
 import Ehr::*;
 import Map::*;
@@ -401,7 +402,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     Fifo#(1, WaitStResp) waitStRespQ <- mkCFFifo;
 `endif
     // fifo for req mem
-    Fifo#(1, Tuple5#(LdQTag, Addr, Bool, Bit#(16), InlineId)) reqLdQ <- mkBypassFifo;
+    // Registered queues keep LSQ selection/ObjID checks off L1 address inputs.
+    // No bypass: a request checked this cycle can issue no earlier than next cycle.
+    FIFOF#(Tuple5#(LdQTag, Addr, Bool, Bit#(16), InlineId)) reqLdQ <- mkSizedFIFOF(2);
+    FIFOF#(ProcRq#(DProcReqId)) checkedObjIdLdQ <- mkSizedFIFOF(2);
+    FIFOF#(ProcRq#(DProcReqId)) checkedObjIdStQ <- mkSizedFIFOF(2);
     ObjIdReqBuffer#(LdQSize) reqObjIdSealLdQ <- mkLdObjIdReqBuffer;
     ObjIdReqBuffer#(StQSize) reqObjIdSealStQ <- mkStObjIdReqBuffer;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
@@ -436,6 +441,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdEvictQ <- mkCFFifo;
 
 
+    // Bloom tracking and eviction-triggered ObjID-buffer flushes.
+    Bool objIdBloomEnabled = True;
     PulseWire objIdMode3Seen <- mkPulseWire;
     // Single-hash Bloom filter: bits are only removed on a whole-buffer flush.
     // Collisions cause extra flushes, never missed invalidations.
@@ -648,7 +655,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Bool flushObjIDbuf4k
         );
 
-            objIdEvictQ.enq(ObjIdEvictReq {
+            if (objIdBloomEnabled) objIdEvictQ.enq(ObjIdEvictReq {
                 line: lineAddr,
                 flush1k: flushObjIDbuf1k,
                 flush4k: flushObjIDbuf4k
@@ -1568,8 +1575,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     (* descending_urgency = "doObjIdFlush, doUpdateObjIdPAddrFilter" *)
-    rule doUpdateObjIdPAddrFilter (isValid(objIdPAddrFilterLdUpdate.wget) ||
-                                  isValid(objIdPAddrFilterStUpdate.wget));
+    rule doUpdateObjIdPAddrFilter (objIdBloomEnabled &&
+                                  (isValid(objIdPAddrFilterLdUpdate.wget) ||
+                                   isValid(objIdPAddrFilterStUpdate.wget)));
         Bit#(256) nextFilter = objIdPAddrFilter;
         if (objIdPAddrFilterLdUpdate.wget matches tagged Valid .paddr)
             nextFilter[objIdPAddrFilterIndex(paddr)] = 1;
@@ -2291,7 +2299,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdBufMayContainMode3 <= True;
     endrule
 
-    rule doObjIdFilterLookup (!objIdFlushPending);
+    rule doObjIdFilterLookup (objIdBloomEnabled && !objIdFlushPending);
         let req = objIdEvictQ.first;
         objIdEvictQ.deq;
         Bool shouldCheck = req.flush4k ||
@@ -2311,7 +2319,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // MapSplit.clear starts a multi-cycle BRAM clear. Its lookupRead returns
     // misses during clearing, and fills are discarded until clearDone.
     // Do not accept a fill in this cycle: it would outlive the filter reset.
-    rule doObjIdFlush (objIdFlushPending && objIdBuf.clearDone);
+    rule doObjIdFlush (objIdBloomEnabled && objIdFlushPending && objIdBuf.clearDone);
         objIdBuf.clear;
         objIdPAddrFilter <= 0;
         objIdFlushPending <= False;
@@ -2350,7 +2358,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         reqObjIdSealLdQ.retry;
     endrule
 
-    rule sendLdObjSealRdToMem (!idLoadStalled && !storeUrgent);
+    rule checkLdObjSealRd (!idLoadStalled && !storeUrgent);
         let req = reqObjIdSealLdQ.first;
         let {lsqTag, addr, offset} = req;
         DProcReqId dId = zeroExtend(lsqTag);
@@ -2373,14 +2381,19 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end else if (result == ObjIdToCache) begin
             reqObjIdSealLdQ.deq;
             objIdPAddrs[pack(ldstqTag)] <= addr;
-            dMem.procReq.req(ProcRq {
+            checkedObjIdLdQ.enq(ProcRq {
                 id: dId, addr: addr, toState: S, op: Ld,
                 byteEn: ?, data: ?, amoInst: ?, loadTags: False,
                 objSealRdType: Ld, inlineId: unpack(0), pcHash: ?
             });
         end
 
-        if(verbose) $display("[sendLdObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
+        if(verbose) $display("[checkLdObjSealRd] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
+    endrule
+
+    rule sendLdObjSealRdToMem (!storeUrgent);
+        dMem.procReq.req(checkedObjIdLdQ.first);
+        checkedObjIdLdQ.deq;
     endrule
 
     (* descending_urgency = "sendLdObjSealRdToMem, sendLdToMem" *)
@@ -2407,7 +2420,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         reqObjIdSealStQ.retry;
     endrule
 
-    rule sendStObjSealRdToMem (!idStoreStalled && !storeUrgent);
+    rule checkStObjSealRd (!idStoreStalled && !storeUrgent);
         let {lsqTag, addr, offset} = idStoreReq;
         reqObjIdSealStQ.deq;
         LSQObjIdSearchResult result = idStoreSearch;
@@ -2433,7 +2446,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 pack(ldstq_tag)
             ] <= addr;
 
-            dMem.procReq.req(ProcRq {
+            checkedObjIdStQ.enq(ProcRq {
                 id: dId,
                 addr: addr,
                 toState: S,
@@ -2447,7 +2460,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 pcHash: ?
             });
         end 
-        if(verbose) $display("[sendStObjSealRdToMem] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
+        if(verbose) $display("[checkStObjSealRd] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
+    endrule
+
+    rule sendStObjSealRdToMem (!storeUrgent);
+        dMem.procReq.req(checkedObjIdStQ.first);
+        checkedObjIdStQ.deq;
     endrule
 
     (* descending_urgency = "sendLdToMem, sendStObjSealRdToMem, sendStToMem" *) // prioritize Ld over St
