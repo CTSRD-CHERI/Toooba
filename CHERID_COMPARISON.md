@@ -10,13 +10,14 @@ and library RTL remain. The original-to-imported mapping is in
 `comparison/import-commit-map.txt`.
 
 The original private capability-library revision `75870abd` was unavailable.
-The public `cheri-cap-lib` branch `CHERID_eval_Picasso` reconstructs its API.
-Following [the paper, section 6.1](https://arxiv.org/pdf/2602.09131), it uses
-21 type/color bits by reclaiming one reserved bit and two software-permission
-bits. Colors satisfy `0 < otype < CCPT`; equality remains sealed.
-See `libs/cheri-cap-lib/PICASSO_RECONSTRUCTION.md` for the remaining packing
-assumptions. The corrected encoding/API test passes; simulator results below
-were obtained with the earlier 20-bit reconstruction and do not validate this pin.
+The local `cheri-cap-lib` branch `CHERID_eval_Picasso` now imports the authors'
+[published library patch](https://github.com/coloredcapabilities/colored-artifact/blob/fb467f5b0b3137b997f4415fa55fdaa59b6d2213/patches/cheri-cap-lib_colored.patch)
+on public base `7d9fdce`. Its source files match that patch application.
+It uses 21 type/color bits and two software-permission bits. Tests cover the
+published zero behavior, strict threshold boundary and SW1 permission gate.
+See `libs/cheri-cap-lib/PICASSO_RECONSTRUCTION.md` for provenance. The earlier
+reconstructions are superseded. Simulator results below refer to the initial
+20-bit reconstruction; the published implementation is being rebuilt.
 
 No branch has been pushed. See the local comparison-results report for build
 and TestRIG outcomes before publishing. Binary ISA fixtures can be supplied
