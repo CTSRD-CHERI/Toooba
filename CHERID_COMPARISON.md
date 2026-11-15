@@ -10,11 +10,13 @@ and library RTL remain. The original-to-imported mapping is in
 `comparison/import-commit-map.txt`.
 
 The original private capability-library revision `75870abd` was unavailable.
-The public `cheri-cap-lib` branch `CHERID_eval_Picasso` reconstructs its API
-with a 20-bit type/color field by reclaiming two reserved bits. The core
-retains its 21-bit API. See `libs/cheri-cap-lib/PICASSO_RECONSTRUCTION.md`
-for encoding and threshold assumptions. This is not a recovered copy of
-the private library. Its encoding/API unit test passes.
+The public `cheri-cap-lib` branch `CHERID_eval_Picasso` reconstructs its API.
+Following [the paper, section 6.1](https://arxiv.org/pdf/2602.09131), it uses
+21 type/color bits by reclaiming one reserved bit and two software-permission
+bits. Colors satisfy `0 < otype < CCPT`; equality remains sealed.
+See `libs/cheri-cap-lib/PICASSO_RECONSTRUCTION.md` for the remaining packing
+assumptions. The corrected encoding/API test passes; simulator results below
+were obtained with the earlier 20-bit reconstruction and do not validate this pin.
 
 No branch has been pushed. See the local comparison-results report for build
 and TestRIG outcomes before publishing. Binary ISA fixtures can be supplied
@@ -38,7 +40,8 @@ sequences. The TestRIG wrapper rejects dead-simulator results (some engine
 versions otherwise print SUCCESS after an IO exception) and has a wall limit.
 Use --include/--exclude to isolate a group; excluded groups do not count as passes.
 
-The reconstructed-library API test and RVFI-DII Bluesim build pass. Diagnostic
+The corrected reconstructed-library API test passes. The prior 20-bit
+RVFI-DII Bluesim build passed; the corrected 21-bit simulator is being rebuilt. Diagnostic
 runs pass 100 tests per group for arith, mem, control, arith64, mem64, muldiv,
 muldiv64, compressed, capinspect and cloadtags. caparith, capmisc, capcontrol,
 capdecode and caprandom show mismatches against the local Sail model. Capability
