@@ -22,7 +22,7 @@ simdir = repo/'builds/RV64ACDFIMSUxCHERI_Toooba_RVFI_DII_bluesim'
 sim = simdir/'exe_HW_sim'
 if not sim.exists():
     sys.exit('First run: make -C builds/RV64ACDFIMSUxCHERI_Toooba_RVFI_DII_bluesim compile simulator')
-arch = 'rv64i' if a.suite == 'riscv' else 'rv64xcheri'
+arch = 'rv64gc' if a.suite == 'riscv' else 'rv64xcheri'
 cmd = [sys.executable, str(rig/'utils/scripts/runTestRIG.py'), '-a', 'sail', '-b', 'toooba',
        '-r', 'rv64gcxcheri', '--verification-archstring', arch,
        '--path-to-toooba', str(sim),
