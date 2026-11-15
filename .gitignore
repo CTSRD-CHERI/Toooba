@@ -53,3 +53,8 @@ Tests/isa/
 **/exe_HW_sim*
 **/Mem.hex*
 **/isa_test_report*
+
+**/.depends.mk
+/comparison-results/
+src_SSITH_P3/GenerateHPMVector.bsv
+src_SSITH_P3/StatCounters.bsv
