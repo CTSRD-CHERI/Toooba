@@ -20,5 +20,7 @@ externally when using make isa_tests; TestRIG generates its own instruction test
 Build: `make -C builds/RV64ACDFIMSUxCHERI_Toooba_RVFI_DII_bluesim compile simulator`.
 Run `python3 comparison/run_testrig.py riscv` and `python3 comparison/run_testrig.py cheri`.
 The runner uses the existing TestRIG engine and Sail model, with 100 tests and
-64-instruction tests by default. Set TEST_RIG_ROOT if this checkout is elsewhere.
+64-instruction tests per eligible group by default. The RISC-V run selects
+`rv64gc`; the CHERI run selects `rv64xcheri` (including the engine's common
+integer groups). Set TEST_RIG_ROOT if this checkout is elsewhere.
 These are differential smoke tests, not a claim to pass the complete ISA suites.
