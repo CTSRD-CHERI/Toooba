@@ -212,6 +212,10 @@ with (contextlib.nullcontext(workspace) if workspace else tempfile.TemporaryDire
     code = code.replace('__METADATA_FIRST__', 'True' if os.environ.get('TOOOBA_METADATA_FIRST') == '1' else 'False')
     code = code.replace('__KILL_ALL__', 'True' if os.environ.get('TOOOBA_KILL_ALL') == '1' else 'False')
     (base / 'Test.bsv').write_text(code)
+    # Source-only checkouts generate this build dependency locally.
+    events = root/'libs/RISCV_HPM_Events'
+    subprocess.run(['python3', str(events/'parse_counters.py'), str(events/'counters.yaml'),
+                    '-m', 'ProcTypes', '-s', str(base/'StatCounters.bsv')], check=True)
     dry_run = subprocess.check_output(['make', '-n', 'compile_synth'], cwd=root/'src_SSITH_P3', text=True)
     cmd = next(line for line in dry_run.splitlines() if line.startswith('bsc '))
     args = shlex.split(cmd)[1:]

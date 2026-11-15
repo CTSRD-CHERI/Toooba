@@ -103,6 +103,10 @@ endpackage
 with tempfile.TemporaryDirectory(prefix='toooba-l1-pipeline-') as temp:
     base = Path(temp)
     (base / 'Test.bsv').write_text(code)
+    # Source-only checkouts generate this build dependency locally.
+    events = root/'libs/RISCV_HPM_Events'
+    subprocess.run(['python3', str(events/'parse_counters.py'), str(events/'counters.yaml'),
+                    '-m', 'ProcTypes', '-s', str(base/'StatCounters.bsv')], check=True)
     dry_run = subprocess.check_output(['make', '-n', 'compile_synth'], cwd=root/'src_SSITH_P3', text=True)
     cmd = next(line for line in dry_run.splitlines() if line.startswith('bsc '))
     args = shlex.split(cmd)[1:]
