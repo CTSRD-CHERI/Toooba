@@ -9,7 +9,12 @@ logs, memory images, and compiled ISA test images are excluded. Required source
 and library RTL remain. The original-to-imported mapping is in
 `comparison/import-commit-map.txt`.
 
-The Picasso capability library is pinned to original commit 75870abd on the private GitLab URL in .gitmodules; access or a mirror is needed.
+The original private capability-library revision `75870abd` was unavailable.
+The public `cheri-cap-lib` branch `CHERID_eval_Picasso` reconstructs its API
+with a 20-bit type/color field by reclaiming two reserved bits. The core
+retains its 21-bit API. See `libs/cheri-cap-lib/PICASSO_RECONSTRUCTION.md`
+for encoding and threshold assumptions. This is not a recovered copy of
+the private library. Its encoding/API unit test passes.
 
 No branch has been pushed. See the local comparison-results report for build
 and TestRIG outcomes before publishing. Binary ISA fixtures can be supplied
