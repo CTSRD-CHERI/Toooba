@@ -3,6 +3,7 @@
 from pathlib import Path
 import argparse
 import os
+import signal
 import subprocess
 import sys
 
@@ -11,6 +12,9 @@ p.add_argument('suite', choices=['riscv', 'cheri'])
 p.add_argument('--tests', type=int, default=100)
 p.add_argument('--length', type=int, default=64)
 p.add_argument('--timeout', type=int, default=60)
+p.add_argument('--wall-timeout', type=int, default=300)
+p.add_argument('--include', help='TestRIG group-name regular expression')
+p.add_argument('--exclude', help='TestRIG group-name regular expression')
 a = p.parse_args()
 repo = Path(__file__).resolve().parents[1]
 rig = next((x for x in repo.parents if (x/'utils/scripts/runTestRIG.py').is_file()), None)
@@ -29,8 +33,30 @@ cmd = [sys.executable, str(rig/'utils/scripts/runTestRIG.py'), '-a', 'sail', '-b
        '--path-to-sail-riscv-dir', str(rig/'riscv-implementations/sail-cheri-riscv/c_emulator'),
        '-n', str(a.tests), '--test-len', str(a.length), '--timeout', str(a.timeout),
        '--no-save', '--no-shrink']
-if a.suite == 'cheri':
-    cmd += ['--test-include-regex', '^(cap|cloadtags)']
+if a.include or a.suite == 'cheri':
+    cmd += ['--test-include-regex', a.include or '^(cap|cloadtags)']
+if a.exclude:
+    cmd += ['--test-exclude-regex', a.exclude]
 print(' '.join(cmd), flush=True)
 # Simulator runtime files must be found relative to the build directory.
-raise SystemExit(subprocess.call(cmd, cwd=simdir))
+proc = subprocess.Popen(cmd, cwd=simdir, stdout=subprocess.PIPE,
+                        stderr=subprocess.STDOUT, text=True, start_new_session=True)
+expired = False
+try:
+    output, _ = proc.communicate(timeout=a.wall_timeout)
+except subprocess.TimeoutExpired:
+    expired = True
+    os.killpg(proc.pid, signal.SIGINT)
+    try:
+        output, _ = proc.communicate(timeout=15)
+    except subprocess.TimeoutExpired:
+        os.killpg(proc.pid, signal.SIGKILL)
+        output, _ = proc.communicate()
+print(output, end='', flush=True)
+if expired:
+    print('FAIL: TestRIG wall-clock limit reached', flush=True)
+# Some TestRIG versions force later tests to SUCCESS after a dead simulator.
+invalid = any(marker in output for marker in
+              ['Forcing all future tests', '*** Failed', 'Warning: no tests selected',
+               'ERROR:', 'Error: implementation', 'implementations are not alive'])
+raise SystemExit(1 if expired or invalid else proc.returncode)
