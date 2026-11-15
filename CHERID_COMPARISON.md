@@ -14,3 +14,11 @@ The missing root .gitmodules entry for the already-pinned capability library has
 No branch has been pushed. See the local comparison-results report for build
 and TestRIG outcomes before publishing. Binary ISA fixtures can be supplied
 externally when using make isa_tests; TestRIG generates its own instruction tests.
+
+## Differential testing
+
+Build: `make -C builds/RV64ACDFIMSUxCHERI_Toooba_RVFI_DII_bluesim compile simulator`.
+Run `python3 comparison/run_testrig.py riscv` and `python3 comparison/run_testrig.py cheri`.
+The runner uses the existing TestRIG engine and Sail model, with 100 tests and
+64-instruction tests by default. Set TEST_RIG_ROOT if this checkout is elsewhere.
+These are differential smoke tests, not a claim to pass the complete ISA suites.
