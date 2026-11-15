@@ -10,7 +10,7 @@ p = argparse.ArgumentParser()
 p.add_argument('suite', choices=['riscv', 'cheri'])
 p.add_argument('--tests', type=int, default=100)
 p.add_argument('--length', type=int, default=64)
-p.add_argument('--timeout', type=int, default=600)
+p.add_argument('--timeout', type=int, default=60)
 a = p.parse_args()
 repo = Path(__file__).resolve().parents[1]
 rig = next((x for x in repo.parents if (x/'utils/scripts/runTestRIG.py').is_file()), None)
