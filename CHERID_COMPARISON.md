@@ -26,3 +26,18 @@ The runner uses the existing TestRIG engine and Sail model, with 100 tests and
 `rv64gc`; the CHERI run selects capability groups (`cap*`, `cloadtags`)
 under `rv64gcxcheri`, including capability atomics. Set TEST_RIG_ROOT if this checkout is elsewhere.
 These are differential smoke tests, not a claim to pass the complete ISA suites.
+
+## Validation status
+
+The imported designs are not certified as passing the complete ISA suites.
+The local comparison-results report contains commands, logs and first failing
+sequences. The TestRIG wrapper rejects dead-simulator results (some engine
+versions otherwise print SUCCESS after an IO exception) and has a wall limit.
+Use --include/--exclude to isolate a group; excluded groups do not count as passes.
+
+The RVFI-DII Bluesim build passes. Diagnostic runs pass 100 tests per group for
+arith, mem, control, arith64, mem64, muldiv, muldiv64, compressed, capinspect
+and cloadtags. Atomic, floating-point and several CHERI groups show differential
+mismatches against the local Sail model. The full RV64GC selection also hits
+a TestRIG stc-generator exception (Prelude.!!: negative index). These results
+are comparison evidence, not a claim that every mismatch is an RTL defect.
