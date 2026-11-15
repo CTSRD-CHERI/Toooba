@@ -33,3 +33,8 @@ Tests/isa/
 /comparison-results/
 src_SSITH_P3/GenerateHPMVector.bsv
 src_SSITH_P3/StatCounters.bsv
+
+# Generated simulator configuration sources
+/builds/*/GenerateHPMVector.bsv
+/builds/*/StatCounters.bsv
+/builds/*/TagTableStructure.bsv
