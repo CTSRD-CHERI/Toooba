@@ -29,3 +29,11 @@ The runner uses the existing TestRIG engine and Sail model, with 100 tests and
 `rv64gc`; the CHERI run selects capability groups (`cap*`, `cloadtags`)
 under `rv64gcxcheri`, including capability atomics. Set TEST_RIG_ROOT if this checkout is elsewhere.
 These are differential smoke tests, not a claim to pass the complete ISA suites.
+
+## Validation status
+
+The imported designs are not certified as passing the complete ISA suites.
+The local comparison-results report contains commands, logs and first failing
+sequences. The TestRIG wrapper rejects dead-simulator results (some engine
+versions otherwise print SUCCESS after an IO exception) and has a wall limit.
+Use --include/--exclude to isolate a group; excluded groups do not count as passes.
