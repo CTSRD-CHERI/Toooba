@@ -25,7 +25,7 @@ externally when using make isa_tests; TestRIG generates its own instruction test
 Build: `make -C builds/RV64ACDFIMSUxCHERI_Toooba_RVFI_DII_bluesim compile simulator`.
 Run `python3 comparison/run_testrig.py riscv` and `python3 comparison/run_testrig.py cheri`.
 The runner uses the existing TestRIG engine and Sail model, with 100 tests and
-64-instruction tests per eligible group by default. The RISC-V run selects
+`--test-len 64` per eligible group by default. The RISC-V run selects
 `rv64gc`; the CHERI run selects capability groups (`cap*`, `cloadtags`)
 under `rv64gcxcheri`, including capability atomics. Set TEST_RIG_ROOT if this checkout is elsewhere.
 These are differential smoke tests, not a claim to pass the complete ISA suites.
@@ -37,3 +37,10 @@ The local comparison-results report contains commands, logs and first failing
 sequences. The TestRIG wrapper rejects dead-simulator results (some engine
 versions otherwise print SUCCESS after an IO exception) and has a wall limit.
 Use --include/--exclude to isolate a group; excluded groups do not count as passes.
+
+The reconstructed-library API test and RVFI-DII Bluesim build pass. Diagnostic
+runs pass 100 tests per group for arith, mem, control, arith64, mem64, muldiv,
+muldiv64, compressed, capinspect and cloadtags. caparith, capmisc, capcontrol,
+capdecode and caprandom show mismatches against the local Sail model. Capability
+atomics and capability-cache groups were excluded in this isolated diagnostic run;
+the ordinary atomic/floating-point groups were not tested on Picasso.
