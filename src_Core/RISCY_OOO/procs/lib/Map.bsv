@@ -35,8 +35,6 @@ import DReg::*;
 import RegFile::*;
 import Vector::*;
 import RWBramCore::*;
-import Ehr::*;
-import RWire::*;
 
 typedef struct {
     ky key;
@@ -127,12 +125,6 @@ interface MapSplit#(type ky, type ix, type vl, numeric type as);
     method Bool clearDone;
 endinterface
 
-typedef struct {
-    ix index;
-    Bit#(TLog#(as)) way;
-    Maybe#(ky) key;
-} MapSplitCommit#(type ky, type ix, numeric type as) deriving(Bits, FShow);
-
 module mkMapLossyBRAM(MapSplit#(ky,ix,vl,as)) provisos (
 Bits#(ky,ky_sz), Bits#(vl,vl_sz), Eq#(ky), Arith#(ky),
 Bounded#(ix), Literal#(ix), Bits#(ix, ix_sz),
@@ -150,15 +142,9 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
 
     Reg#(Bool) clearReg <- mkReg(True);
     Reg#(ix) clearCount <- mkReg(0);
-    Reg#(Maybe#(MapSplitCommit#(ky, ix, as))) lastCommit <- mkDReg(Invalid);
-    RWire#(MapSplitCommit#(ky, ix, as)) committing <- mkRWire;
-
-    // The caller owns response flow control. lookupRead observes the most
-    // recent request; lookupStart may replace it every cycle. A held result
-    // becomes a miss after a same-set write, rather than exposing stale data.
+    // Read the BRAM snapshot without forwarding recent writes or masking
+    // same-set updates. A held lookup may therefore return older data.
     Reg#(Bool) lookupValid <- mkReg(False);
-    Ehr#(2, Bool) lookupDirty <- mkEhr(False);
-    Reg#(Bool) lookupCollision <- mkReg(False);
 
     // Separate rules avoid ordering initialization's clearReg write against
     // lookup/training requests, which must overlap committed updates.
@@ -177,11 +163,6 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
         Maybe#(Bit#(TLog#(as))) hitWay = Invalid;
         for (Integer i = 0; i < a; i = i + 1) begin
             Maybe#(ky) tag = updateKeys[i].rdResp;
-            // Consecutive updates can read a tag bank while the preceding
-            // update writes it. Match against the committed tag in that way.
-            if (lastCommit matches tagged Valid .previous &&&
-                previous.index == u.index && previous.way == fromInteger(i))
-                tag = previous.key;
             if (tag matches tagged Valid .key &&& key == u.key)
                 hitWay = Valid(fromInteger(i));
         end
@@ -192,11 +173,6 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
             Maybe#(ky) tag = Valid(u.key);
             mem[way].wrReq(u.index, entry);
             updateKeys[way].wrReq(u.index, tag);
-            let commitInfo = MapSplitCommit {index: u.index, way: way, key: tag};
-            lastCommit <= Valid(commitInfo);
-            committing.wset(commitInfo);
-            if (lookupValid && lookupReg.index == u.index)
-                lookupDirty[0] <= True;
             // Preserve MapSplit's replacement policy: conditional misses
             // neither allocate nor advance the victim way.
             wayNext <= (wayNext == fromInteger(a-1)) ? 0 : (wayNext + 1);
@@ -223,11 +199,6 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     method Action lookupStart(MapKeyIndex#(ky,ix) ki);
         lookupReg <= ki;
         lookupValid <= !clearReg;
-        lookupDirty[1] <= False;
-        Bool collision = False;
-        if (committing.wget matches tagged Valid .commitInfo)
-            collision = commitInfo.index == ki.index;
-        lookupCollision <= collision;
         if (!clearReg)
             for (Integer i = 0; i < a; i = i + 1)
                 mem[i].rdReq(ki.index);
@@ -235,9 +206,7 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
 
     method Maybe#(vl) lookupRead;
         Maybe#(vl) readVal = Invalid;
-        // Observe the snapshot before same-cycle update commits. A write
-        // in the original read-request cycle is masked by lookupCollision.
-        if (!clearReg && lookupValid && !lookupCollision && !lookupDirty[0])
+        if (!clearReg && lookupValid)
             for (Integer i = 0; i < a; i = i + 1)
                 if (mem[i].rdResp matches tagged Valid .entry &&& entry.key == lookupReg.key)
                     readVal = Valid(entry.value);
