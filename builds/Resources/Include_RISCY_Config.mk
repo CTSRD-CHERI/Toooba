@@ -11,6 +11,8 @@ PROC := RV64G_OOO
 CORE_SIZE ?= SMALL
 # cache size
 CACHE_SIZE ?= LARGE
+# Optional independent ObjID queue depth; unset defaults to half of LQ + SQ.
+OBJIDQ_SIZE ?=
 # always include perf counter
 PERF_COUNT := true
 # dram type in simulation: VC707 or AWSF1
@@ -94,6 +96,10 @@ endif
 
 XILINX_FP_FMA_LATENCY = 3
 XILINX_INT_MUL_LATENCY = 2
+
+ifneq ($(strip $(OBJIDQ_SIZE)),)
+BSC_COMPILATION_FLAGS += -D OBJIDQ_SIZE=$(OBJIDQ_SIZE)
+endif
 
 
 BSC_COMPILATION_FLAGS += \

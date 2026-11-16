@@ -69,19 +69,45 @@ module mkTest(Empty);
     Bit#(16) creditDrainDelay = fromInteger(valueOf(ObjIdQSize)+3);
     Stmt test = seq
         delay(4);
-        // Reserving independent metadata credit must not halve LQ capacity
-        // or consume an ordinary LQ slot for each store.
-        while (filled < fromInteger(valueOf(LdQSize))) action
-            check(isValid(lsq.enqLdTag), "ordinary LQ capacity reduced");
+        // Unresolved instructions exhaust the independent ObjID credit pool.
+        while (filled < fromInteger(min(valueOf(ObjIdQSize), valueOf(LdQSize)))) action
+            check(isValid(lsq.enqLdTag), "load reservation blocked early");
             lsq.enqLd(unpack(zeroExtend(pack(filled))), instruction(False), Invalid, 1, 0);
             filled <= filled + 1;
         endaction
-        while (stores < fromInteger(valueOf(StQSize))) action
-            check(isValid(lsq.enqStTag), "store admission consumed ordinary LQ credit");
+        while (stores < fromInteger(max(0, min(valueOf(ObjIdQSize)-valueOf(LdQSize), valueOf(StQSize))))) action
+            check(isValid(lsq.enqStTag), "store reservation blocked early");
             lsq.enqSt(unpack(128+zeroExtend(pack(stores))), instruction(True), Invalid, 1, 0);
             stores <= stores + 1;
         endaction
-        check(!isValid(lsq.enqLdTag) && !isValid(lsq.enqStTag), "full queues over-allocated");
+        check(!isValid(lsq.enqLdTag) && !isValid(lsq.enqStTag), "reservation pool over-allocated");
+        lsq.specUpdate.incorrectSpeculation(True, 0);
+        delay(creditDrainDelay);
+        filled <= 0;
+        stores <= 0;
+        // Resolving no-check reservations allows the full payload queues
+        // to fill even when ObjID credit capacity is smaller than either.
+        while (filled < fromInteger(valueOf(LdQSize))) seq
+            action
+                check(isValid(lsq.enqLdTag), "no-check load failed to return credit");
+                lsq.enqLd(unpack(zeroExtend(pack(filled))), instruction(False), Invalid, 1, 0);
+            endaction
+            action
+                address(tagged Ld truncate(pack(filled)), 'h10000 + (zeroExtend(pack(filled)) << 4), Invalid, 0);
+                filled <= filled + 1;
+            endaction
+        endseq
+        while (stores < fromInteger(valueOf(StQSize))) seq
+            action
+                check(isValid(lsq.enqStTag), "no-check store failed to return credit");
+                lsq.enqSt(unpack(128+zeroExtend(pack(stores))), instruction(True), Invalid, 1, 0);
+            endaction
+            action
+                address(tagged St truncate(pack(stores)), 'h20000 + (zeroExtend(pack(stores)) << 4), Invalid, 0);
+                stores <= stores + 1;
+            endaction
+        endseq
+        check(!isValid(lsq.enqLdTag) && !isValid(lsq.enqStTag), "full payload queues over-allocated");
         lsq.specUpdate.incorrectSpeculation(True, 0);
         delay(creditDrainDelay);
         // Buffer-hit/no-check reservation is returned while the payload is
@@ -192,7 +218,7 @@ module mkTest(Empty);
             check(entry.objIdSealOk, "fence acquired metadata obligation");
             lsq.deqSt;
         endaction
-        $display("PASS: full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences");
+        $display("PASS: independent ObjID credit exhaustion/wraparound, full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences");
         $finish(0);
     endseq;
     mkAutoFSM(test);
@@ -206,7 +232,7 @@ with (contextlib.nullcontext(workspace) if workspace else tempfile.TemporaryDire
     (base/'Test.bsv').write_text(code)
     events = root/'libs/RISCV_HPM_Events'
     subprocess.run(['python3', str(events/'parse_counters.py'), str(events/'counters.yaml'), '-m', 'ProcTypes', '-s', str(base/'StatCounters.bsv')], check=True)
-    dry = subprocess.check_output(['make', '-n', 'compile_synth'], cwd=root/'src_SSITH_P3', text=True)
+    dry = subprocess.check_output(['make', '-n', 'compile_synth', *(['OBJIDQ_SIZE='+os.environ['TOOOBA_OBJIDQ_SIZE']] if os.environ.get('TOOOBA_OBJIDQ_SIZE') else [])], cwd=root/'src_SSITH_P3', text=True)
     args = shlex.split(next(line for line in dry.splitlines() if line.startswith('bsc ')))[1:]
     flags = []
     for i, arg in enumerate(args[:-1]):

@@ -117,10 +117,13 @@ typedef union tagged {
     StQTag St;
 } LdStQTag deriving(Bits, Eq, FShow);
 
-// Independent ObjID lookup queue. A reservation for each live memory
-// instruction preserves the existing LQ/SQ admission window; buffer hits
-// return their reservation at execute, independently of data retirement.
-typedef TAdd#(LdQSize, StQSize) ObjIdQSize;
+// Reserve ObjID credit at rename; buffer hits return it during execute.
+// Override independently with -D OBJIDQ_SIZE=N (make OBJIDQ_SIZE=N).
+`ifdef OBJIDQ_SIZE
+typedef `OBJIDQ_SIZE ObjIdQSize;
+`else
+typedef TDiv#(TAdd#(LdQSize, StQSize), 2) ObjIdQSize;
+`endif
 typedef Bit#(TLog#(ObjIdQSize)) ObjIdQTag;
 
 typedef enum {Ld, St, Cache} LdKilledBy deriving(Bits, Eq, FShow);

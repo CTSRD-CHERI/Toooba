@@ -7,8 +7,18 @@ with independent allocation, issue-selection and reclamation pointers.
 
 ## Admission and lifetime
 
-Each memory instruction reserves an ObjID queue credit at rename. The initial
-capacity is `LdQSize + StQSize`. Reserving before execute avoids a deadlock in
+Each memory instruction reserves an ObjID queue credit at rename. The default
+capacity is half of `LdQSize + StQSize`: **19 entries per core** for CORE_SMALL
+(24 LQ + 14 SQ). Override it independently with a positive `OBJIDQ_SIZE`:
+
+```sh
+make -C src_SSITH_P3 compile_synth OBJIDQ_SIZE=12
+```
+
+This passes `-D OBJIDQ_SIZE=12` to BSC. Rebuild generated RTL/compiler objects
+when changing the setting. Smaller sizes can stall rename while the payload
+queues still have room; no-check/buffer-hit reservations return credit during
+execute. Reserving before execute avoids a deadlock in
 which younger lookups fill the queue while waiting for an older store that
 cannot execute because no metadata credit remains.
 
@@ -45,17 +55,22 @@ backpressure. Run these alongside the existing ObjID Bloom/buffer tests.
 
 Passing checks:
 
+The sizing update passes the real LSQ regression at the default 19 entries
+and an explicit `OBJIDQ_SIZE=7`, including credit exhaustion and wraparound.
+Run the override regression with `TOOOBA_OBJIDQ_SIZE=7 python3 Tests/test_objid_lsoq.py`.
+
 - Real LSQ lifetime/capacity regression, including LR metadata gating and fence admission.
 - Registered cache-request arbitration, ordering, backpressure and duplication.
 - Stale responses with payload-first/branch squash and metadata-first/full squash.
 - Existing Bloom eviction, collision, same-cycle fill and BRAM flush regression.
 - FPGA-configuration Verilog generation of `mkObjIdLoadQueue`.
-- Full RVFI-DII Bluesim compilation and simulator linking.
+- Full RVFI-DII Bluesim compilation and simulator linking (initial 38-entry configuration).
 
 Fences bypass address translation, so their parent verdict is initialized as
 satisfied at rename. The focused regression and an exact TestRIG replay cover
 this case. The `mem`, `mem64`, `capinspect` and `cloadtags` differential smoke groups
-pass 100 tests each with up to 64 instructions per test. These are selected
+pass 100 tests each with up to 64 instructions per test, using the initial
+38-entry configuration. These are selected
 smoke groups, not full ISA-suite certification. Logs are kept
 outside tracked history in the parent checkout's `comparison-results` directory,
 with the `Reloaded-lsoq-` prefix. No FPGA area or timing improvement is claimed
