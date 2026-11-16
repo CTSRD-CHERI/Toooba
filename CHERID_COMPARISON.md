@@ -41,3 +41,7 @@ and cloadtags. Atomic, floating-point and several CHERI groups show differential
 mismatches against the local Sail model. The full RV64GC selection also hits
 a TestRIG stc-generator exception (Prelude.!!: negative index). These results
 are comparison evidence, not a claim that every mismatch is an RTL defect.
+
+## Coherence comparison variant
+
+This is `CHERID_eval_Reloaded_bloom`. See [coherence variant](comparison/COHERENCE_VARIANT.md).
