@@ -45,3 +45,18 @@ are comparison evidence, not a claim that every mismatch is an RTL defect.
 ## Coherence comparison variant
 
 This is `CHERID_eval_Reloaded_reversemap`. See [coherence variant](comparison/COHERENCE_VARIANT.md).
+
+## Metadata translation reservations
+
+The reservation pool and the metadata-translation retry FIFO both use the
+shared `ObjIdTranslationSlots` depth of **3** in `MemExePipeline.bsv`.
+This capacity is separate from the ObjID lookup queue depth. The retry FIFO
+is inlined into the core so its squash-hole canonicalization can be scheduled
+with the DTLB response/retry rules; its obsolete standalone
+`mkDTlbReqFifo.v` entry is removed from component.xml.
+
+`python3 Tests/test_objid_translation_reservations.py` exercises the production
+data-response and retry rules with the real DTLB and speculative FIFOs. It checks
+consecutive-cycle admission with forced ObjID-buffer hits and DTLB bare-mode
+(hit-path-latency) responses, full three-slot retry backpressure, draining without
+a shared-DTLB deadlock, speculative cancellation, and reuse. The regression passes.

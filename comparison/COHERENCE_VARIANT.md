@@ -22,3 +22,5 @@ standalone generated RTL file to component.xml. Existing RegFile primitives are
 already packaged. This branch has no Bloom-filter state or Bloom hash logic.
 
 The focused reverse-map regression passes (`python3 Tests/test_objid_reversemap.py`), including full-tag collisions, same-cycle load/store fills, aliases, mode gating, conservative saturation and paired clearing. The Bloom-only regression explicitly skips on this branch. Full RVFI-DII Bluesim BSV compilation (through `mkTop_HW_Side`) passes. Simulator linking, new differential smoke runs and FPGA implementation have not been run for this variant. Neither branch has been pushed by the agent.
+
+This variant also includes the shared three-entry metadata-translation reservation/retry capacity change, as documented in CHERID_COMPARISON.md.
