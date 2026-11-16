@@ -16,11 +16,11 @@ on public base `7d9fdce`. Its source files match that patch application.
 It uses 21 type/color bits and two software-permission bits. Tests cover the
 published zero behavior, strict threshold boundary and SW1 permission gate.
 See `libs/cheri-cap-lib/PICASSO_RECONSTRUCTION.md` for provenance. The earlier
-reconstructions are superseded. Simulator results below refer to the initial
-20-bit reconstruction; the published implementation is being rebuilt.
+reconstructions are superseded. Validation below uses the published implementation, superseding results from
+the initial 20-bit reconstruction.
 
-No branch has been pushed. See the local comparison-results report for build
-and TestRIG outcomes before publishing. Binary ISA fixtures can be supplied
+The library and matching Toooba pin have been verified on GitHub. See the local
+comparison-results report for exact tested revisions and outcomes. Binary ISA fixtures can be supplied
 externally when using make isa_tests; TestRIG generates its own instruction tests.
 
 ## Differential testing
@@ -41,10 +41,12 @@ sequences. The TestRIG wrapper rejects dead-simulator results (some engine
 versions otherwise print SUCCESS after an IO exception) and has a wall limit.
 Use --include/--exclude to isolate a group; excluded groups do not count as passes.
 
-The corrected reconstructed-library API test passes. The prior 20-bit
-RVFI-DII Bluesim build passed; the corrected 21-bit simulator is being rebuilt. Diagnostic
-runs pass 100 tests per group for arith, mem, control, arith64, mem64, muldiv,
-muldiv64, compressed, capinspect and cloadtags. caparith, capmisc, capcontrol,
-capdecode and caprandom show mismatches against the local Sail model. Capability
-atomics and capability-cache groups were excluded in this isolated diagnostic run;
-the ordinary atomic/floating-point groups were not tested on Picasso.
+The published-library API test and RVFI-DII Bluesim build pass. Tests run on
+2026-11-16 with library ee3710bb pass 100 cases each for arith, mem, control,
+arith64, mem64, muldiv, muldiv64, compressed and cloadtags. capinspect, caparith,
+capmisc, capcontrol, capdecode and caprandom show mismatches against stock Sail.
+The first capinspect mismatch is CGetPerm returning 0x78fff in Sail and 0x18fff
+in Picasso, consistent with Picasso retaining only two software-permission bits.
+Capability atomics and capability-cache groups were excluded from this isolated
+run; ordinary atomic/floating-point groups were not tested on Picasso. These
+observations do not establish that each mismatch is an RTL defect.
