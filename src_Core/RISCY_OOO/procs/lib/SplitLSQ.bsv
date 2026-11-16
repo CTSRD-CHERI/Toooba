@@ -62,6 +62,7 @@ import StoreBuffer::*;
 import Exec::*;
 import FP_Utils::*;
 import CacheUtils::*; // For CLoadTags alignment
+import ObjIdLoadQueue::*;
 import RegFile::*; // Just for the interface
 import ISA_Decls_CHERI::*;
 
@@ -71,6 +72,7 @@ export StQMemFunc(..);
 export LdQDeqEntry(..);
 export StQDeqEntry(..);
 export LSQObjIdSearchResult(..);
+export LSQObjIdIssueInfo(..);
 export LSQUpdateAddrResult(..);
 export LSQForwardResult(..);
 export LdStalledBy(..);
@@ -311,6 +313,7 @@ typedef struct {
     ByteOrTagEn shiftedBE;
     Maybe#(Addr) objIdPAddr;
     Bit#(7) objIdOffset;
+    Bool objIdLookup;
     Bit#(16) pcHash;
     Bit#(3) alloc_policy;
     InlineId inlineId;
@@ -412,11 +415,18 @@ interface SplitLSQ;
         Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(8) mte, Bit#(3) alloc_policy,
         Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset, InlineId inlineId
     );
-    method Bool skipLdIdFill(LdQTag tag);
-    method Bool skipStIdFill(StQTag tag);
-    // update objSeal. Called when ld resp is received for objId bitmap read
-    method Action updateLdObjIdSeal(LdQTag tag, MemTaggedData d);
-    method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc)))  updateStObjIdSeal(StQTag t, MemTaggedData d);
+    method Maybe#(ObjIdQTag) objIdChild(LdStQTag parent);
+    method Action startObjIdCheck(LdStQTag parent);
+    method Action cancelObjIdCheck(LdStQTag parent);
+    method LSQObjIdIssueInfo getIssueObjId;
+    method Action issueObjId;
+    method Action retryObjId;
+    method Bool skipObjIdFill(ObjIdQTag child);
+    method Bool objIdForStore(ObjIdQTag child);
+    method Addr objIdPAddr(ObjIdQTag child);
+    method Addr objIdVAddr(ObjIdQTag child);
+    method Action setObjIdVAddr(ObjIdQTag child, Addr addr);
+    method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc))) completeObjId(ObjIdQTag child, MemTaggedData d);
     // Issue a load, and remove dependence on this load issue.
     method LSQObjIdSearchResult searchObjIDSt(
                                 StQTag requester,
@@ -430,7 +440,7 @@ interface SplitLSQ;
                                 Bit#(7) objIDoffset) ;
 
     method ActionValue#(LSQIssueLdResult) issueLd(
-        LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, ByteOrTagEn shiftedBE, SBSearchRes sbRes, InlineId inlineId
+        LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, Bool objIdLookup, ByteOrTagEn shiftedBE, SBSearchRes sbRes, InlineId inlineId
     );
     // Get the load to issue
     method LSQIssueLdInfo getIssueLd;
@@ -521,6 +531,7 @@ interface SplitLSQ;
     // for security: we cannot flush D$ until all wrong-path loads have
     // returned from D$
     method Bool noWrongPathLoads;
+    method Bool objIdQueueEmpty;
 endinterface
 
 // --- auxiliary types and functions ---
@@ -733,6 +744,8 @@ module mkSplitLSQ(SplitLSQ);
     // LQ
     // entry valid bits
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_valid           <- replicateM(mkEhr(False));
+    ObjIdLoadQueue objIds <- mkObjIdLoadQueue;
+    Vector#(LdQSize, Ehr#(2, Maybe#(ObjIdQTag))) ld_objIdChild <- replicateM(mkEhr(Invalid));
     // entry contents
     Vector#(LdQSize, Reg#(InstTag))                 ld_instTag         <- replicateM(mkConfigRegU);
     Vector#(LdQSize, Reg#(LdQMemFunc))              ld_memFunc         <- replicateM(mkConfigRegU);
@@ -752,9 +765,6 @@ module mkSplitLSQ(SplitLSQ);
     let ld_inlineId_findIss = getVEhrPort(ld_inlineId, 0);
     let ld_inlineId_deqLd = getVEhrPort(ld_inlineId, 0);
     let ld_inlineId_resp = getVEhrPort(ld_inlineId, 1);
-    Vector#(LdQSize, Ehr#(3, Maybe#(Addr)))         ld_objIdPAddr      <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(2, Bit#(7)))              ld_objIdOffset     <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(2, Bit#(8)))              ld_mte     <- replicateM(mkEhr(?));
 
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_isMMIO          <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
@@ -790,7 +800,6 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Ehr#(TAdd#(1, SupSize), Bool)) ld_atCommit        <- replicateM(mkEhr(?));
     // wrong-path load filter (must init to all False)
     Vector#(LdQSize, Ehr#(1, Bool))                 ld_waitWPRespLd      <- replicateM(mkEhr(False));
-    Vector#(LdQSize, Ehr#(2, Bool))                 ld_waitWPRespObjId   <- replicateM(mkEhr(False));
     // enq/deq ptr
     Reg#(LdQTag)    ld_enqP <- mkReg(0);
     Ehr#(2, LdQTag) ld_deqP <- mkEhr(0);
@@ -819,22 +828,8 @@ module mkSplitLSQ(SplitLSQ);
     let ld_paddr_enqIss  = getVEhrPort(ld_paddr, 1); // assert
     let ld_paddr_resp    = getVEhrPort(ld_paddr, 1);
 
-    let ld_objIdPAddr_findIss       = getVEhrPort(ld_objIdPAddr, 0);
-    let ld_objIdPAddr_deqLd         = getVEhrPort(ld_objIdPAddr, 0);
-    let ld_objIdPAddr_evict         = getVEhrPort(ld_objIdPAddr, 0);
-    let ld_objIdPAddr_wrongSpec     = getVEhrPort(ld_objIdPAddr, 0);
-    let ld_objIdPAddr_updAddr       = getVEhrPort(ld_objIdPAddr, 0); // write
-    let ld_objIdPAddr_updObjIdSeal  = getVEhrPort(ld_objIdPAddr, 1); // assert
-    let ld_objIdPAddr_issue         = getVEhrPort(ld_objIdPAddr, 1);
-    let ld_objIdPAddr_enq           = getVEhrPort(ld_objIdPAddr, 2); // after fast-forward completion
 
-    let ld_objIdOffset_findIss      = getVEhrPort(ld_objIdOffset, 0);
-    let ld_objIdOffset_deqLd        = getVEhrPort(ld_objIdOffset, 0);
-    let ld_objIdOffset_updAddr      = getVEhrPort(ld_objIdOffset, 0); // write
-    let ld_objIdOffset_updObjIdSeal = getVEhrPort(ld_objIdOffset, 1);
 
-    let ld_mte_updAddr      = getVEhrPort(ld_mte, 0); // write
-    let ld_mte_updObjIdSeal = getVEhrPort(ld_mte, 1);
 
     let ld_isMMIO_findIss = getVEhrPort(ld_isMMIO, 0);
     let ld_isMMIO_evict   = getVEhrPort(ld_isMMIO, 0); // assert
@@ -967,20 +962,12 @@ module mkSplitLSQ(SplitLSQ);
     let ld_waitWPRespLd_resp      = getVEhrPort(ld_waitWPRespLd, 0); // write
     let ld_waitWPRespLd_wrongSpec = getVEhrPort(ld_waitWPRespLd, 0); // write
 
-    let ld_waitWPRespObjId_resp      = getVEhrPort(ld_waitWPRespObjId, 1);
-    let ld_waitWPRespObjId_hit       = getVEhrPort(ld_waitWPRespObjId, 0);
-    let ld_waitWPRespObjId_findIss   = getVEhrPort(ld_waitWPRespObjId, 0);
-    let ld_waitWPRespObjId_deqLd     = getVEhrPort(ld_waitWPRespObjId, 0);
-    let ld_waitWPRespObjId_updAddr   = getVEhrPort(ld_waitWPRespObjId, 0);
-    let ld_waitWPRespObjId_noWP      = getVEhrPort(ld_waitWPRespObjId, 0);
-    let ld_waitWPRespObjId_issue     = getVEhrPort(ld_waitWPRespObjId, 0); // assert
-    let ld_waitWPRespObjId_enqIss    = getVEhrPort(ld_waitWPRespObjId, 0); // assert
-    let ld_waitWPRespObjId_updObjIdSeal = getVEhrPort(ld_waitWPRespObjId, 0); // write
-    let ld_waitWPRespObjId_wrongSpec = getVEhrPort(ld_waitWPRespObjId, 0); // write
 
     Reg#(LdQTag) ld_deqP_deqLd  = ld_deqP[0]; // write
     Reg#(LdQTag) ld_deqP_verify = ld_deqP[0]; // in TSO, C with deqLd
     Reg#(LdQTag) ld_deqP_deqSt  = ld_deqP[1];
+
+    Vector#(StQSize, Ehr#(2, Maybe#(ObjIdQTag))) st_objIdChild <- replicateM(mkEhr(Invalid));
 
     // SQ
     // entry valid bits
@@ -1001,9 +988,6 @@ module mkSplitLSQ(SplitLSQ);
     let st_inlineId_updAddr = getVEhrPort(st_inlineId, 0);
     let st_inlineId_issue = getVEhrPort(st_inlineId, 1);
     let st_inlineId_deqSt = getVEhrPort(st_inlineId, 1);
-    Vector#(StQSize, Ehr#(2, Maybe#(Addr)))         st_objIdPAddr    <- replicateM(mkEhr(?));
-    Vector#(StQSize, Ehr#(2, Bit#(7)))              st_objIdOffset   <- replicateM(mkEhr(?));
-    Vector#(StQSize, Ehr#(2, Bit#(8)))              st_mte       <- replicateM(mkEhr(?));
 
     Vector#(StQSize, Ehr#(2, Bool))                 st_isMMIO    <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, MemDataByteEn))        st_shiftedBE <- replicateM(mkEhr(?));
@@ -1017,7 +1001,6 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Ehr#(2, Bool))                 st_verified  <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, SpecBits))             st_specBits  <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(TAdd#(1, SupSize), Bool)) st_atCommit  <- replicateM(mkEhr(?));
-    Vector#(StQSize, Ehr#(2, Bool))                 st_waitWPRespObjId   <- replicateM(mkEhr(False));
     // enq/deq ptr
     Reg#(StQTag) st_enqP <- mkReg(0);
     Reg#(StQTag) st_deqP <- mkReg(0);
@@ -1038,22 +1021,9 @@ module mkSplitLSQ(SplitLSQ);
     let st_paddr_issue   = getVEhrPort(st_paddr, 1);
     let st_paddr_deqSt   = getVEhrPort(st_paddr, 1);
 
-    let st_objIdPAddr_wrongSpec     = getVEhrPort(st_objIdPAddr, 0);
-    let st_objIdPAddr_updAddr       = getVEhrPort(st_objIdPAddr, 0); // write
-    // let st_objIdPAddr_issue         = getVEhrPort(st_objIdPAddr, 1);
-    let st_objIdPAddr_deqSt         = getVEhrPort(st_objIdPAddr, 1);
-    let st_objIdPAddr_updObjIdSeal  = getVEhrPort(st_objIdPAddr, 1); // assert
-    let st_objIdPAddr_enq           = getVEhrPort(st_objIdPAddr, 1); // write
 
-    let st_objIdOffset_updAddr      = getVEhrPort(st_objIdOffset, 0); // write
-    let st_objIdOffset_updObjIdSeal = getVEhrPort(st_objIdOffset, 1);
 
-    let st_mte_updAddr              = getVEhrPort(st_mte, 0); // write
-    let st_mte_updObjIdSeal     = getVEhrPort(st_mte, 1); // write
 
-    let st_waitWPRespObjId_wrongSpec    = getVEhrPort(st_waitWPRespObjId, 0); // write
-    let st_waitWPRespObjId_updObjIdSeal = getVEhrPort(st_waitWPRespObjId, 0); // write, C with wrongSpec
-    let st_waitWPRespObjId_enq          = getVEhrPort(st_waitWPRespObjId, 1); // C with wrongSpec
 
     let st_isMMIO_verify  = getVEhrPort(st_isMMIO, 0);
     let st_isMMIO_updAddr = getVEhrPort(st_isMMIO, 0); // write
@@ -1153,6 +1123,42 @@ module mkSplitLSQ(SplitLSQ);
     // - valid entry i --> i < enqP ? i + QSize : i
     // XXX This mapping is only for comparing valid entries (e.g., it may not
     // work properly for enqP), so we must check entry valid before using
+    function Bool isStoreParent(LdStQTag parent);
+        return case (parent) matches
+            tagged St .tag: True;
+            default: False;
+        endcase;
+    endfunction
+    function Bool isLrParent(LdStQTag parent);
+        return case (parent) matches
+            tagged Ld .tag: ld_memFunc[tag] == Lr;
+            default: False;
+        endcase;
+    endfunction
+    function Maybe#(ObjIdQTag) getObjIdChild(LdStQTag parent);
+        Maybe#(ObjIdQTag) result = Invalid;
+        case (parent) matches
+            tagged Ld .tag: begin
+                Bool unresolved = !ld_computed[tag][0] && !isValid(ld_fault[tag][0]);
+                Bool pending = !isValid(ld_objIdSealOk[tag][0]) && !ld_inlineId[tag][0].inLine;
+                if (unresolved || pending) result = ld_objIdChild[tag][0];
+            end
+            tagged St .tag: begin
+                Bool unresolved = !st_computed[tag][0] && !isValid(st_fault[tag][0]);
+                Bool pending = !isValid(st_objIdSealOk[tag][0]);
+                if (st_memFunc[tag] != Fence && (unresolved || pending)) result = st_objIdChild[tag][0];
+            end
+        endcase
+        return result;
+    endfunction
+    function Bool hasObjIdLookup(LdQTag tag);
+        return !isValid(ld_objIdSealOk[tag][0]) && !ld_inlineId[tag][0].inLine;
+    endfunction
+    function Maybe#(Addr) inlineObjIdAddr(LdQTag tag);
+        let desc = ld_inlineId[tag][0];
+        return desc.inLine && desc.expected != 0
+            ? Valid((ld_paddr[tag][0] & ~fromInteger(valueOf(CLineDataNumBytes)-1)) | zeroExtend(desc.offset)) : Invalid;
+    endfunction
     // virtual tags or do special calculation.
     function LdQVirTag getLdVirTag(LdQTag i);
         return i < ld_enqP ? zeroExtend(i) + fromInteger(valueof(LdQSize))
@@ -1292,7 +1298,7 @@ module mkSplitLSQ(SplitLSQ);
                 !isValid(ld_depSBDeq_findIss[i]) &&
 `endif
                 !isValid(ld_depStQDeq_findIss[i]) && // (5) no dependency
-                !ld_waitWPRespLd_findIss[i] && !ld_waitWPRespObjId_findIss[i] && // (6) not wating wrong path resp
+                !ld_waitWPRespLd_findIss[i] && // (6) not wating wrong path resp
                 !ld_isMMIO_findIss[i] //&& // (7) not MMIO
                 // ld_objIdAddrComputed_findIss[i] && // (8) TODO: make sure objId PAddr is available
                 // ld_objIdSealOk_findIss[i] // (9) check that object
@@ -1308,8 +1314,9 @@ module mkSplitLSQ(SplitLSQ);
                 tag: tag,
                 paddr: ld_paddr_findIss[tag],
                 shiftedBE: ld_shiftedBE_findIss[tag],
-                objIdPAddr: ld_objIdPAddr_findIss[tag],
-                objIdOffset: ld_objIdOffset_findIss[tag],
+                objIdPAddr: inlineObjIdAddr(tag),
+                objIdLookup: hasObjIdLookup(tag),
+                objIdOffset: zeroExtend(ld_inlineId[tag][0].offset[3:0]),
                 inlineId: ld_inlineId_findIss[tag],
                 pcHash: ld_pcHash[tag],
                 alloc_policy: ld_alloc_policy[tag]
@@ -1490,7 +1497,7 @@ module mkSplitLSQ(SplitLSQ);
     (* fire_when_enabled, no_implicit_conditions *)
     rule setForEnq;
         ld_can_enq_wire <= !ld_valid[ld_enqP][0];
-        st_can_enq_wire <= !st_valid[st_enqP][0] && !st_waitWPRespObjId[st_enqP][0];
+        st_can_enq_wire <= !st_valid[st_enqP][0];
     endrule
 
     // deqLd guard (see comments at the method declaration)
@@ -1515,13 +1522,14 @@ module mkSplitLSQ(SplitLSQ);
                     // normal non-MMIO Ld: done, older St (if exists) verified
                     return ld_done_deqLd[deqP] && !sourcePending &&
                            (no_older_st || ld_olderStVerified_deqLd[deqP]) &&
-                           (!isValid(ld_objIdPAddr_deqLd[deqP]) || isValid(ld_objIdSealOk_deqLd[deqP]));
+                           isValid(ld_objIdSealOk_deqLd[deqP]);
                 end
                 else begin
 
                         // MMIO: done, at commit, no older st, do NOT wait for seal
                         return ld_computed_deqLd[deqP] &&
                                ld_atCommit_deqLd[deqP] &&
+                               (ld_memFunc[deqP] != Lr || isValid(ld_objIdSealOk_deqLd[deqP])) &&
                                no_older_st;
 
                 end
@@ -1543,7 +1551,7 @@ module mkSplitLSQ(SplitLSQ);
                 // computed or fence, and at commit
                 return (st_computed_deqSt[deqP] ||
                         st_memFunc[deqP] == Fence) &&
-                       (!isValid(st_objIdPAddr_deqSt[deqP]) || isValid(st_objIdSealOk_deqSt[deqP])) &&
+                       isValid(st_objIdSealOk_deqSt[deqP]) &&
                        st_atCommit_deqSt[deqP];
             end
         end
@@ -1557,10 +1565,14 @@ module mkSplitLSQ(SplitLSQ);
                 case(lsqTag) matches
                     tagged Ld .tag: begin
                         ld_atCommit_setCom[i][tag] <= True;
+                        if (getObjIdChild(tagged Ld tag) matches tagged Valid .child)
+                            objIds.setAtCommit[i].put(tuple2(child, ld_instTag[tag]));
                         doAssert(ld_valid_setCom[tag], "must be valid");
                     end
                     tagged St .tag: begin
                         st_atCommit_setCom[i][tag] <= True;
+                        if (getObjIdChild(tagged St tag) matches tagged Valid .child)
+                            objIds.setAtCommit[i].put(tuple2(child, st_instTag[tag]));
                         doAssert(st_valid_setCom[tag], "must be valid");
                     end
                     default: doAssert(False, "unknown lsq tag");
@@ -1598,7 +1610,7 @@ module mkSplitLSQ(SplitLSQ);
     method ActionValue#(LSQHitInfo) getHit(LdStQTag t) if (!wrongSpec_conflict);
         return (case(t) matches
             tagged Ld .tag: (LSQHitInfo {
-                waitWPResp: ld_waitWPRespLd_hit[tag] || ld_waitWPRespObjId_hit[tag],
+                waitWPResp: ld_waitWPRespLd_hit[tag],
                 dst: ld_dst[tag]
             });
             tagged St .tag: (LSQHitInfo {
@@ -1610,17 +1622,18 @@ module mkSplitLSQ(SplitLSQ);
     endmethod
 
     method Maybe#(LdStQTag) enqLdTag;
-        return ld_can_enq_wire ? Valid (Ld (ld_enqP)) : Invalid;
+        return ld_can_enq_wire && isValid(objIds.enqTag) ? Valid (Ld (ld_enqP)) : Invalid;
     endmethod
     method Maybe#(LdStQTag) enqStTag;
-        return st_can_enq_wire ? Valid (St (st_enqP)) : Invalid;
+        return st_can_enq_wire && isValid(objIds.enqTag) ? Valid (St (st_enqP)) : Invalid;
     endmethod
+
 
     method Action enqLd(InstTag inst_tag,
                         MemInst mem_inst,
                         Maybe#(PhyDst) dst,
                         SpecBits spec_bits,
-                        Bit#(16) pcHash) if(ld_can_enq_wire && !wrongSpec_conflict);
+                        Bit#(16) pcHash) if(ld_can_enq_wire && isValid(objIds.enqTag) && !wrongSpec_conflict);
         if(verbose) begin
             $display("[LSQ - enqLd] enqP ", fshow(ld_enqP),
                      "; ", fshow(inst_tag),
@@ -1635,6 +1648,8 @@ module mkSplitLSQ(SplitLSQ);
         // set entry valid and move ptr
         ld_valid_enq[ld_enqP] <= True;
         ld_enqP <= getNextLdPtr(ld_enqP);
+        ld_objIdChild[ld_enqP][1] <= objIds.enqTag;
+        objIds.reserve(ObjIdOwner { parent:tagged Ld ld_enqP, instTag:inst_tag }, spec_bits, False);
         // set up most of the entry
         ld_instTag[ld_enqP] <= inst_tag;
         ld_memFunc[ld_enqP] <= getLdQMemFunc(mem_inst.mem_func);
@@ -1656,7 +1671,6 @@ module mkSplitLSQ(SplitLSQ);
         ld_readFrom_enq[ld_enqP] <= Invalid;
         ld_depLdQDeq_enq[ld_enqP] <= Invalid;
         ld_depStQDeq_enq[ld_enqP] <= Invalid;
-        ld_objIdPAddr_enq[ld_enqP] <= Invalid;
 `ifndef TSO_MM
         ld_sourceSB[ld_enqP][3] <= Invalid;
         ld_sourceCanceled[ld_enqP][2] <= False;
@@ -1684,7 +1698,7 @@ module mkSplitLSQ(SplitLSQ);
                         MemInst mem_inst,
                         Maybe#(PhyDst) dst,
                         SpecBits spec_bits,
-                        Bit#(16) pcHash) if(st_can_enq_wire && !wrongSpec_conflict);
+                        Bit#(16) pcHash) if(st_can_enq_wire && isValid(objIds.enqTag) && !wrongSpec_conflict);
         if(verbose) begin
             $display("[LSQ - enqSt] enqP ", fshow(st_enqP),
                      "; ", fshow(inst_tag),
@@ -1699,6 +1713,8 @@ module mkSplitLSQ(SplitLSQ);
         // set entry valid and move ptr
         st_valid_enq[st_enqP] <= True;
         st_enqP <= getNextStPtr(st_enqP);
+        st_objIdChild[st_enqP][1] <= objIds.enqTag;
+        objIds.reserve(ObjIdOwner { parent:tagged St st_enqP, instTag:inst_tag }, spec_bits, mem_inst.mem_func == Fence);
         // set up the entry
         st_instTag[st_enqP] <= inst_tag;
         st_memFunc[st_enqP] <= getStQMemFunc(mem_inst.mem_func);
@@ -1715,9 +1731,8 @@ module mkSplitLSQ(SplitLSQ);
         st_verified_enq[st_enqP] <= False;
         st_specBits_enq[st_enqP] <= spec_bits;
         st_atCommit_enq[st_enqP] <= False;
-        st_objIdSealOk_enq[st_enqP] <= Invalid;
-        st_waitWPRespObjId_enq[st_enqP] <= False;
-        st_objIdPAddr_enq[st_enqP] <= Invalid;
+        // Fences never enter address translation and have no ObjID check.
+        st_objIdSealOk_enq[st_enqP] <= mem_inst.mem_func == Fence ? Valid(True) : Invalid;
     endmethod
 
     method Action updateData(StQTag t, MemTaggedData d);
@@ -1774,12 +1789,9 @@ module mkSplitLSQ(SplitLSQ);
             ld_fault_updAddr[tag] <= fault;
             ld_computed_updAddr[tag] <= !isValid(fault);
             ld_paddr_updAddr[tag] <= pa;
-            ld_objIdPAddr_updAddr[tag] <= objIdPAddr;
-            ld_objIdOffset_updAddr[tag] <= objIdOffset;
             ld_inlineId_updAddr[tag] <= inlineId;
             ld_allowCap[tag] <= allowCap;
             ld_isMMIO_updAddr[tag] <= mmio;
-            ld_mte_updAddr[tag] <= mte;
             ld_shiftedBE_updAddr[tag] <= shift_be;
             ld_alloc_policy[tag] <= alloc_policy;
             delayIssue = isValid(ld_olderSt_updAddr[tag]) && ld_waitForOlderSt[tag];
@@ -1810,10 +1822,7 @@ module mkSplitLSQ(SplitLSQ);
             st_allowCapAmoLd_updAddr[tag] <= allowCap;
             st_computed_updAddr[tag] <= !isValid(fault);
             st_paddr_updAddr[tag] <= pa;
-            st_objIdPAddr_updAddr[tag] <= objIdPAddr;
-            st_objIdOffset_updAddr[tag] <= objIdOffset;
             st_inlineId_updAddr[tag] <= inlineId;
-            st_mte_updAddr[tag] <= mte;
             st_isMMIO_updAddr[tag] <= mmio;
             st_shiftedBE_updAddr[tag] <= shift_be.DataMemAccess;
             st_alloc_policy_updAddr[tag] <= alloc_policy;
@@ -1846,6 +1855,23 @@ module mkSplitLSQ(SplitLSQ);
                      "; ", fshow(curSt), "; ", fshow(objIdPAddr));
         end
 
+        if (getObjIdChild(lsqTag) matches tagged Valid .child) begin
+            Bool active = !isValid(fault) && !mmio && isValid(objIdPAddr) && !inlineId.inLine;
+            objIds.prepare(child, active, active && (isStoreParent(lsqTag) || isLrParent(lsqTag)), ObjIdCheck {
+                paddr:fromMaybe(?, objIdPAddr), mte:mte, offset:objIdOffset,
+                expected:inlineId.expected
+            });
+        end
+        Maybe#(Bool) verdict = !isValid(fault) && !mmio &&
+            (isValid(objIdPAddr) || inlineId.expected != 0) ? Invalid : Valid(True);
+        case (lsqTag) matches
+            tagged Ld .tag: ld_objIdSealOk_updObjIdSeal[tag] <= verdict;
+            tagged St .tag: st_objIdSealOk_updObjIdSeal[tag] <=
+                !isValid(fault) && !mmio && isValid(objIdPAddr) ? Invalid : Valid(True);
+        endcase
+        // Only same-line checks remain an obligation of the payload access.
+        objIdPAddr = inlineId.inLine ? objIdPAddr : Invalid;
+
         // kill younger loads
         if(doKill) begin
             // Kill the youngested load which satisifies all the following
@@ -1862,10 +1888,10 @@ module mkSplitLSQ(SplitLSQ);
                 Bool overlap = overlapAddr(pa, shift_be,
                                            ld_paddr_updAddr[i],
                                            ld_shiftedBE_updAddr[i]) ||
-                               (isValid(ld_objIdPAddr_updAddr[i]) ?
+                               (isValid(inlineObjIdAddr(i)) ?
                                     overlapAddr(
                                             pa, shift_be,
-                                            fromMaybe(?, ld_objIdPAddr_updAddr[i]),
+                                            fromMaybe(?, inlineObjIdAddr(i)),
                                             DataMemAccess(replicate(True))) :
                                     False) ||
                                (isValid(objIdPAddr) ?
@@ -1874,10 +1900,10 @@ module mkSplitLSQ(SplitLSQ);
                                             ld_paddr_updAddr[i],
                                             ld_shiftedBE_updAddr[i]) :
                                     False) ||
-                               ((isValid(ld_objIdPAddr_updAddr[i]) && isValid(objIdPAddr)) ?
+                               ((isValid(inlineObjIdAddr(i)) && isValid(objIdPAddr)) ?
                                     overlapAddr(
                                             fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
-                                            fromMaybe(?, ld_objIdPAddr_updAddr[i]),
+                                            fromMaybe(?, inlineObjIdAddr(i)),
                                             DataMemAccess(replicate(True))) :
                                     False);
                 // figure out if the load reads a stale value. Note that
@@ -1929,95 +1955,51 @@ module mkSplitLSQ(SplitLSQ);
         // can be issued
         return LSQUpdateAddrResult {
             waitWPResp: (case(lsqTag) matches
-                tagged Ld .tag: (ld_waitWPRespLd_updAddr[tag] || ld_waitWPRespObjId_updAddr[tag]);
+                tagged Ld .tag: ld_waitWPRespLd_updAddr[tag];
                 default: False;
             endcase),
             delayIssue: delayIssue
         };
     endmethod
 
-    method Bool skipLdIdFill(LdQTag tag) =
-        ld_inlineId_resp[tag].expected != 0 || ld_waitWPRespObjId_updObjIdSeal[tag];
-    method Bool skipStIdFill(StQTag tag) =
-        st_inlineId_issue[tag].expected != 0 || st_waitWPRespObjId_updObjIdSeal[tag];
-
-
-
-    method Action updateLdObjIdSeal(LdQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
-        if(!ld_waitWPRespObjId_updObjIdSeal[tag]) begin
-            if(verbose) $display("[LSQ - updateLdObjIdSeal] 1 objIdResp:", fshow(tag), ", MemTaggedData:", fshow(d));
-            doAssert(isValid(ld_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
-
-            // get objId seal bit using offset
-            Vector#(MemDataBytes, Bit#(8)) idBytes = unpack(pack(d.data));
-            Bit#(4) idIndex = truncate(ld_objIdOffset_updObjIdSeal[tag]);
-            Bool isSealed = ld_inlineId_resp[tag].expected != 0
-                ? idBytes[idIndex] != ld_inlineId_resp[tag].expected
-                : mteMismatch(d, ld_mte_updObjIdSeal[tag], ld_objIdOffset_updObjIdSeal[tag]);
-            //Bool isSealed = (ld_mte[tag] != memMTE);//extractObjIdSeal(d, ld_objIdOffset_updObjIdSeal[tag]);
-            $display("ld mte check", fshow(isSealed), fshow(ld_mte_updObjIdSeal[tag]) );
-            Maybe#(Trap) fault = isSealed ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcColorViolation})) :
-                                            Invalid;
-
-            Bit#(7) offset=ld_objIdOffset_updObjIdSeal[tag];
-            if(verbose) $display("[LSQ - updateLdObjIdSeal] isSealed:", fshow(isSealed), ", fault:", fshow(fault), ", offset:", fshow(offset));
-            // ld_fault_updObjIdSeal[tag] <= fault;
-            ld_objIdSealOk_updObjIdSeal[tag] <= Valid(!isSealed);
-        end
-        else begin
-            if(verbose) $display("[LSQ - updateLdObjIdSeal] objIdResp for WP ", fshow(tag));
-            ld_waitWPRespObjId_updObjIdSeal[tag] <= False;
-        end
+    method Maybe#(ObjIdQTag) objIdChild(LdStQTag parent) = getObjIdChild(parent);
+    method Action setObjIdVAddr(ObjIdQTag child, Addr addr) if (!wrongSpec_conflict);
+        objIds.setVAddr(child, addr);
     endmethod
-
-    method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc))) updateStObjIdSeal(StQTag tag, MemTaggedData d) if (!wrongSpec_conflict);
-        if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp:", fshow(tag), ", MemTaggedData:", fshow(d),
-                             ", d[0]:", fshow(d.data[0]), ", d[1]:", fshow(d.data[1]));
-        if(!st_waitWPRespObjId_updObjIdSeal[tag]) begin
-            doAssert(isValid(st_objIdPAddr_updObjIdSeal[tag]), "objIdPAddr must be valid");
-            doAssert(st_valid_updObjIdSeal[tag], "entry must be valid");
-
-            // Compute seal state and corresponding fault.
-            Vector#(MemDataBytes, Bit#(8)) idBytes = unpack(pack(d.data));
-            Bit#(4) idIndex = truncate(st_objIdOffset_updObjIdSeal[tag]);
-            Bool isSealed = st_inlineId_issue[tag].expected != 0
-                ? idBytes[idIndex] != st_inlineId_issue[tag].expected
-                : mteMismatch(d, st_mte_updObjIdSeal[tag], st_objIdOffset_updObjIdSeal[tag]);
-            $display("store mte check", fshow(st_mte_updObjIdSeal[tag]),fshow(isSealed), fshow(st_objIdOffset_updObjIdSeal[tag]));
-            //Bool isSealed =  (st_mte_deqSt[tag] != memMTE); //extractObjIdSeal(d, st_objIdOffset_updObjIdSeal[tag]);
-             Maybe#(Trap) fault = isSealed
-                 ? Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}))
-                : Invalid;
-
-
-            Bit#(7) offset = st_objIdOffset_updObjIdSeal[tag];
-            if(verbose) $display("[LSQ - updateStObjIdSeal] isSealed:", fshow(isSealed), ", offset:", fshow(offset));
-
-            // Record results into the store entry.
-            st_fault_updObjIdSeal[tag]       <= fault;
-            st_objIdSealOk_updObjIdSeal[tag] <= Valid(!isSealed);
-
-            // If this is a non-MMIO *store* and the seal check passed (no
-            // fault), we can now mark it "done" at the ROB by returning its
-            // InstTag. Atomics share the store queue but should not pulse
-            // non-mmio-st-done here.
-            let isNonMMIO  = !st_isMMIO_deqSt[tag];
-            doAssert(isNonMMIO, "must be nonMMIO");
-            let isStore    = (st_memFunc[tag] == St);
-            let becameDone = isStore && isNonMMIO && !isSealed;
-            if (becameDone) begin
-                return Valid(tuple2(st_instTag[tag], st_memFunc[tag]));
-            end
-            else begin
-                return Invalid;
-            end
+    method Action startObjIdCheck(LdStQTag parent) if (!wrongSpec_conflict);
+        if (getObjIdChild(parent) matches tagged Valid .child) objIds.start(child);
+    endmethod
+    method Action cancelObjIdCheck(LdStQTag parent) if (!wrongSpec_conflict);
+        if (getObjIdChild(parent) matches tagged Valid .child) objIds.cancel(child);
+    endmethod
+    method LSQObjIdIssueInfo getIssueObjId if (!wrongSpec_conflict) = objIds.firstReady;
+    method Action issueObjId if (!wrongSpec_conflict) = objIds.issue;
+    method Action retryObjId if (!wrongSpec_conflict) = objIds.retry;
+    method Bool skipObjIdFill(ObjIdQTag child) = objIds.skipFill(child);
+    method Bool objIdForStore(ObjIdQTag child) = objIds.forStore(child);
+    method Addr objIdPAddr(ObjIdQTag child) = objIds.paddr(child);
+    method Addr objIdVAddr(ObjIdQTag child) = objIds.vaddr(child);
+    method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc))) completeObjId(ObjIdQTag child, MemTaggedData data) if (!wrongSpec_conflict);
+        Maybe#(Tuple2#(InstTag, StQMemFunc)) result = Invalid;
+        let response <- objIds.complete(child, data);
+        if (response matches tagged Valid .verdict) begin
+            case (verdict.owner.parent) matches
+                tagged Ld .parent: begin
+                    doAssert(ld_valid_resp[parent] && ld_objIdChild[parent][0] == Valid(child), "lookup belongs to current load");
+                    doAssert(ld_instTag[parent] == verdict.owner.instTag, "lookup instruction mismatch");
+                    ld_objIdSealOk_updObjIdSeal[parent] <= Valid(verdict.ok);
+                end
+                tagged St .parent: begin
+                    doAssert(st_valid_updObjIdSeal[parent] && st_objIdChild[parent][0] == Valid(child), "lookup belongs to current store");
+                    doAssert(st_instTag[parent] == verdict.owner.instTag, "lookup instruction mismatch");
+                    st_objIdSealOk_updObjIdSeal[parent] <= Valid(verdict.ok);
+                    st_fault_updObjIdSeal[parent] <= verdict.ok ? Invalid :
+                        Valid(CapException(CSR_XCapCause { cheri_exc_reg:0, cheri_exc_code:cheriExcSealViolation }));
+                    if (verdict.ok && st_memFunc[parent] == St) result = Valid(tuple2(verdict.owner.instTag, St));
+                end
+            endcase
         end
-        else begin
-            if(verbose) $display("[LSQ - updateStObjIdSeal] objIdResp for WP ", fshow(tag));
-            st_waitWPRespObjId_updObjIdSeal[tag] <= False;
-            doAssert(!st_valid_updObjIdSeal[tag], "entry must be invalid");
-            return Invalid;
-        end
+        return result;
     endmethod
 
     method LSQObjIdSearchResult searchObjIDSt(
@@ -2134,6 +2116,7 @@ module mkSplitLSQ(SplitLSQ);
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,
                                                   Addr pa,
                                                   Maybe#(Addr) objIdPAddr,
+                                                  Bool objIdLookup,
                                                   ByteOrTagEn shift_be,
                                                   SBSearchRes sbRes, InlineId inlineId) if (!wrongSpec_conflict);
         if(verbose) begin
@@ -2160,8 +2143,6 @@ module mkSplitLSQ(SplitLSQ);
             "issuing entry should not have dependence"
         );
         doAssert(!ld_waitWPRespLd_issue[tag], "issuing Ld cannot wait for WP resp");
-        doAssert(!ld_waitWPRespObjId_issue[tag], "issuing Ld cannot wait for WP objId resp");
-        doAssert(!isValid(ld_objIdSealOk_issue[tag]), "issuing Ld cannot already have received objId");
 
         // issue result
         LSQIssueLdResult issRes = Stall (StQ);
@@ -2318,9 +2299,9 @@ module mkSplitLSQ(SplitLSQ);
             Bool overlap = overlapAddr(pa, shift_be,
                                        ld_paddr_issue[i],
                                        ld_shiftedBE_issue[i]) ||
-                           (isValid(ld_objIdPAddr_issue[i]) ?
+                           (isValid(inlineObjIdAddr(i)) ?
                                 overlapAddr(pa, shift_be,
-                                       fromMaybe(?, ld_objIdPAddr_issue[i]),
+                                       fromMaybe(?, inlineObjIdAddr(i)),
                                        DataMemAccess(replicate(True))) :
                                 False) ||
                            (isValid(objIdPAddr) ?
@@ -2328,9 +2309,9 @@ module mkSplitLSQ(SplitLSQ);
                                        ld_paddr_issue[i],
                                        ld_shiftedBE_issue[i]) :
                                 False) ||
-                           ((isValid(ld_objIdPAddr_issue[i]) && isValid(objIdPAddr)) ?
+                           ((isValid(inlineObjIdAddr(i)) && isValid(objIdPAddr)) ?
                                 overlapAddr(fromMaybe(?, objIdPAddr), DataMemAccess(replicate(True)),
-                                       fromMaybe(?, ld_objIdPAddr_issue[i]),
+                                       fromMaybe(?, inlineObjIdAddr(i)),
                                        DataMemAccess(replicate(True))) :
                                 False);
             return valid && older &&
@@ -2413,7 +2394,7 @@ module mkSplitLSQ(SplitLSQ);
                                             truncate(sourceId.offset >> 4) &&
                                         st_shiftedBE_issue[stTag][sourceId.offset[3:0]];
                         Bool shareId = !inlineId.forwardUnchecked && sourceId.inLine && sourceId.expected != 0 && !writesId &&
-                            ((!isValid(objIdPAddr) && inlineId.expected == 0) ||
+                            ((!objIdLookup && !isValid(objIdPAddr) && inlineId.expected == 0) ||
                              (inlineId.inLine && inlineId.expected == sourceId.expected &&
                               inlineId.offset == sourceId.offset));
                         if(overlapAddr(pa, shift_be, st_paddr_issue[stTag], DataMemAccess(st_shiftedBE_issue[stTag])) &&
@@ -2500,7 +2481,6 @@ module mkSplitLSQ(SplitLSQ);
             // it for an outstanding metadata response. A replayed cache load
             // receives its original metadata address again through updateAddr.
             ld_objIdSealOk_issue[tag] <= Valid(True);
-            ld_objIdPAddr_issue[tag] <= Invalid;
         end
         return issRes;
     endmethod
@@ -2522,7 +2502,6 @@ module mkSplitLSQ(SplitLSQ);
         };
         if(ld_waitWPRespLd_resp[t]) begin
             ld_waitWPRespLd_resp[t] <= False;
-            if (idChecked) ld_waitWPRespObjId_resp[t] <= False;
             res.wrongPath = True;
             res.dst = Invalid; // drop wrong path resp
         end
@@ -2595,8 +2574,8 @@ module mkSplitLSQ(SplitLSQ);
             fault: fault, //ld_fault_deqLd[deqP],
             allowCap: ld_allowCap[deqP],
             killed: killed,
-            objIdPAddr: ld_objIdPAddr_deqLd[deqP],
-            objIdOffset: ld_objIdOffset_deqLd[deqP],
+            objIdPAddr: inlineObjIdAddr(deqP),
+            objIdOffset: zeroExtend(ld_inlineId[deqP][0].offset[3:0]),
             inlineId: ld_inlineId_deqLd[deqP]
         };
     endmethod
@@ -2621,7 +2600,7 @@ module mkSplitLSQ(SplitLSQ);
             doAssert(!isValid(ld_fault_deqLd[deqP]), "cannot have fault");
             doAssert(ld_executing_deqLd[deqP] && ld_done_deqLd[deqP],
                      "must be done");
-            doAssert(!ld_waitWPRespLd_deqLd[deqP] && !ld_waitWPRespObjId_deqLd[deqP],
+            doAssert(!ld_waitWPRespLd_deqLd[deqP],
                      "cannot wait for wrong path resp");
         end
         Bool waited = ld_waitForOlderSt[deqP]; // Don't negative train if we waited for older stores.
@@ -2655,8 +2634,6 @@ module mkSplitLSQ(SplitLSQ);
         Bool objIdSealOk = False;
         if (st_objIdSealOk_deqSt[deqP] matches tagged Valid .o) begin
             objIdSealOk = o;
-        end else if (!isValid(st_objIdPAddr_deqSt[deqP])) begin
-            objIdSealOk = True;
         end
         return StQDeqEntry {
             inlineId: st_inlineId_deqSt[deqP],
@@ -2762,9 +2739,9 @@ module mkSplitLSQ(SplitLSQ);
             Bool read_mem = True;//!isValid(ld_readFrom_evict[i]);
             Bool overlapLd = (getLineAddr(ld_paddr_evict[i]) == lineAddr);
             // Coherence for ObjIds is relaxed.
-            //Bool overlapObjIdLd = (isValid(ld_objIdPAddr_evict[i]) ? (getLineAddr(fromMaybe(?, ld_objIdPAddr_evict[i])) == lineAddr) :
+            //Bool overlapObjIdLd = (isValid(inlineObjIdAddr(i)) ? (getLineAddr(fromMaybe(?, inlineObjIdAddr(i))) == lineAddr) :
             //                                                         False);
-            return valid && read_mem && executing && (/*overlapObjIdLd ||*/overlapLd);
+            return valid && read_mem && executing && overlapLd;
         endfunction
 
         // kill the oldest load
@@ -2800,7 +2777,7 @@ module mkSplitLSQ(SplitLSQ);
             if(ld_storeIdCheck[i][1] && ld_sourceSB[i][1] == Valid(sbIdx)) begin
                 Bool sourceOk = idOk[ld_sourceWord[i][1]];
                 if(ld_inlineId_resp[i].expected == 0) begin
-                    doAssert(!isValid(ld_objIdPAddr_wrongSpec[i]),
+                    doAssert(!isValid(inlineObjIdAddr(i)),
                              "shared source with ID0 consumer must have no independent metadata check");
                     // This load has no ID fault of its own. If its source was
                     // canceled, use the existing killed-load ROB replay path.
@@ -2842,6 +2819,7 @@ module mkSplitLSQ(SplitLSQ);
 
     interface SpeculationUpdate specUpdate;
         method Action correctSpeculation(SpecBits mask);
+            objIds.specUpdate.correctSpeculation(mask);
             if(verbose && mask != maxBound) begin
                 $display("[LSQ - correctSpec] ", fshow(mask));
             end
@@ -2867,6 +2845,7 @@ module mkSplitLSQ(SplitLSQ);
         endmethod
 
         method Action incorrectSpeculation(Bool killAll, SpecTag specTag);
+            objIds.specUpdate.incorrectSpeculation(killAll, specTag);
             if(verbose) begin
                 $display("[LSQ - incorrectSpec] ", fshow(specTag), "; ", fshow(killAll));
             end
@@ -2906,11 +2885,7 @@ module mkSplitLSQ(SplitLSQ);
                             doAssert(ld_memFunc[i] == Ld,
                                  "only load resp can be wrong path");
                         end
-                        if (isValid(ld_objIdPAddr_wrongSpec[i]) && !isValid(ld_objIdSealOk_wrongSpec[i]) &&
-                            !ld_storeIdCheck[i][0]) begin
-                            if (verbose) $display("[LSQ - killLdQ] set objId wrong path ", fshow(i));
-                            ld_waitWPRespObjId_wrongSpec[i] <= True;
-                        end
+
                     end
                     doAssert(!ld_atCommit_wrongSpec[i], "cannot be at commit");
                 end
@@ -2931,12 +2906,6 @@ module mkSplitLSQ(SplitLSQ);
                 if(stNeedKill[i]) begin
                     st_valid_wrongSpec[i] <= False;
                     if (verbose) $display("[LSQ - killStQ] ", fshow(i));
-                    if (st_valid_wrongSpec[i] &&
-                        st_computed_wrongSpec[i] &&
-                        isValid(st_objIdPAddr_wrongSpec[i]) && !isValid(st_objIdSealOk_wrongSpec[i])) begin
-                        st_waitWPRespObjId_wrongSpec[i] <= True;
-                        if(verbose) $display("[LSQ - killStQ] set wrong path ", fshow(i));
-                    end
                     doAssert(!st_atCommit_wrongSpec[i], "cannot be at commit");
                 end
             endaction
@@ -3006,14 +2975,16 @@ module mkSplitLSQ(SplitLSQ);
     endinterface
 
     method Bool stqFull_ehrPort0;
-        return st_enqP == st_deqP && (st_valid[st_enqP][0] || st_waitWPRespObjId[st_enqP][0]);
+        return !st_can_enq_wire || !isValid(objIds.enqTag);
     endmethod
 
     method Bool ldqFull_ehrPort0;
-        return ld_enqP == ld_deqP[0] && ld_valid[ld_enqP][0];
+        return !ld_can_enq_wire || !isValid(objIds.enqTag);
     endmethod
 
     method Bool noWrongPathLoads;
-        return all( \== (False) , readVReg(ld_waitWPRespLd_noWP) ) && all( \== (False) , readVReg(ld_waitWPRespObjId_noWP) );
+        return all( \== (False) , readVReg(ld_waitWPRespLd_noWP) ) && objIds.noWrongPath;
     endmethod
+
+    method Bool objIdQueueEmpty = objIds.empty;
 endmodule

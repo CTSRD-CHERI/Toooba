@@ -1,26 +1,22 @@
 #!/usr/bin/env python3
-"""Exercise real LSQ squash bookkeeping with stalled registered L1 queues.
+"""Squash/reuse real child LQ tags with the production registered send rules.
 
-TOOOBA_METADATA_FIRST=1 tests metadata-before-data replies; TOOOBA_KILL_ALL=1
-uses a full squash. TOOOBA_SPEC_TEST_DIR optionally retains the compiler cache.
+TOOOBA_METADATA_FIRST=1 reverses reply order; TOOOBA_KILL_ALL=1 tests full squash.
+TOOOBA_SPEC_TEST_DIR retains the compiler cache for repeated configurations.
 """
 from pathlib import Path
-import re
-import shlex
-import subprocess
-import tempfile
-
+import contextlib, os, re, shlex, subprocess, tempfile
 root = Path(__file__).resolve().parents[1]
-source = (root / 'src_Core/RISCY_OOO/procs/RV64G_OOO/MemExePipeline.bsv').read_text()
-queues = []
-for name in ('reqLdQ', 'checkedObjIdLdQ', 'checkedObjIdStQ'):
-    queues.append(next(line for line in source.splitlines() if ' ' + name + ' <-' in line))
+source = (root/'src_Core/RISCY_OOO/procs/RV64G_OOO/MemExePipeline.bsv').read_text()
+queues = [next(line for line in source.splitlines() if ' '+name+' <-' in line)
+          for name in ('reqLdQ', 'checkedObjIdLdQ')]
 rules = []
-for name in ('sendLdObjSealRdToMem', 'sendLdToMem', 'sendStObjSealRdToMem'):
-    match = re.search(r'    rule ' + name + r'\b.*?    endrule', source, re.S)
+for name in ('sendLdObjSealRdToMem', 'sendLdToMem'):
+    match = re.search(r'    rule '+name+r'\b.*?    endrule', source, re.S)
     assert match, name
     rules.append(match.group())
-code = '''package Test;
+code = r'''
+package Test;
 import FIFOF::*;
 import GetPut::*;
 import StmtFSM::*;
@@ -31,8 +27,8 @@ import CacheUtils::*;
 import CCTypes::*;
 import L1CoCache::*;
 import SplitLSQ::*;
-import HasSpecBits::*;
 import StoreBuffer::*;
+import HasSpecBits::*;
 interface TestPort;
     method Action req(ProcRq#(DProcReqId) request);
 endinterface
@@ -49,162 +45,119 @@ module mkTest(Empty);
     Bool verbose = False;
     Reg#(Bool) cacheReady <- mkReg(False);
     Reg#(UInt#(8)) count <- mkReg(0);
-    Reg#(Addr) lastAddr <- mkReg(0);
     Reg#(UInt#(16)) cycles <- mkReg(0);
-    rule timeout;
+    rule watchdog;
         cycles <= cycles + 1;
         if (cycles == 2000) begin $display("FAIL: timeout"); $finish(1); end
     endrule
     TestMem dMem = interface TestMem;
         interface TestPort procReq;
-            method Action req(ProcRq#(DProcReqId) request) if (cacheReady);
+            method Action req(ProcRq#(DProcReqId) request) if(cacheReady);
                 accepted.enq(request);
                 count <= count + 1;
-                lastAddr <= request.addr;
             endmethod
         endinterface
     endinterface;
-''' + '\n'.join(queues) + '''
-    (* descending_urgency = "sendLdObjSealRdToMem, sendLdToMem, sendStObjSealRdToMem" *)
-''' + '\n'.join(rules) + '''
+__QUEUES__
+    (* descending_urgency = "sendLdObjSealRdToMem, sendLdToMem" *)
+__RULES__
     function Action check(Bool ok, String message) = action
         if (!ok) begin $display("FAIL: %s", message); $finish(1); end
     endaction;
     function MemInst instruction(Bool store);
-        MemInst m = unpack(0);
-        m.mem_func = store ? St : Ld;
-        m.byteOrTagEn = DataMemAccess(unpack('1));
-        m.unsignedLd = True;
-        return m;
+        MemInst x = unpack(0);
+        x.mem_func = store ? St : Ld;
+        x.byteOrTagEn = DataMemAccess(unpack('1));
+        return x;
     endfunction
-    function ProcRq#(DProcReqId) metadata(Addr addr, DProcReqId tag, Bool store) = ProcRq {
-        id: tag, addr: addr, toState: S, op: Ld, byteEn: ?, data: ?, amoInst: ?,
-        loadTags: False, objSealRdType: store ? St : Ld, inlineId: unpack(0), pcHash: 0
-    };
-    function Action address(LdStQTag tag, Addr addr, Maybe#(Addr) meta, Bool waiting) = action
-        let r <- lsq.updateAddr(tag, Invalid, True, addr, False, DataMemAccess(unpack('1)),
-                               0, 0, meta, 0, unpack(0));
-        check(r.waitWPResp == waiting, "unexpected old-response barrier during address update");
+    function Action address(LdStQTag tag, Addr data, Maybe#(Addr) metadata) = action
+        let result <- lsq.updateAddr(tag, Invalid, True, data, False, DataMemAccess(unpack('1)), 1, 0, metadata, 0, unpack(0));
     endaction;
-    function Action issue(LdQTag tag, Addr addr, Maybe#(Addr) meta) = action
-        let r <- lsq.issueLd(tag, addr, meta, DataMemAccess(unpack('1)),
-                            SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid}, unpack(0));
-        check(r == ToCache, "load did not issue to cache");
+    function Action issue(LdQTag tag, Addr addr, Bool checkId) = action
+        let result <- lsq.issueLd(tag, addr, Invalid, checkId, DataMemAccess(unpack('1)),
+            SBSearchRes { matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid }, unpack(0));
+        check(result == ToCache, "payload did not issue");
         reqLdQ.enq(tuple5(tag, addr, False, 0, unpack(0)));
+        if (checkId) lsq.startObjIdCheck(tagged Ld tag);
+    endaction;
+    function Action issueChild(ObjIdQTag child, Addr addr) = action
+        let info = lsq.getIssueObjId;
+        check(info.tag == child && info.paddr == addr, "wrong child selected");
+        lsq.issueObjId;
+        checkedObjIdLdQ.enq(ProcRq { id: zeroExtend(child), addr: addr,
+            toState: S, op: Ld, byteEn: ?, data: ?, amoInst: ?,
+            loadTags: False, objSealRdType: Ld, inlineId: unpack(0), pcHash: 0 });
     endaction;
     Stmt test = seq
         delay(4);
-        // Speculative requests become LSQ response obligations before entering FIFOs.
         lsq.enqLd(unpack(1), instruction(False), Invalid, 1, 0);
-        address(tagged Ld 0, 'h1000, Invalid, False);
-        issue(0, 'h1000, Invalid);
+        address(tagged Ld 0, 'h1000, Invalid);
+        issue(0, 'h1000, False);
         lsq.enqLd(unpack(2), instruction(False), Invalid, 1, 0);
-        address(tagged Ld 1, 'h2000, Valid('h8000), False);
-        action
-            let r <- lsq.issueLd(1, 'h2000, Valid('h8000), DataMemAccess(unpack('1)),
-                                SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid}, unpack(0));
-            check(r == ToCache, "metadata load did not issue");
-            reqLdQ.enq(tuple5(1, 'h2000, False, 0, unpack(0)));
-            checkedObjIdLdQ.enq(metadata('h8000, 1, False));
-        endaction
+        address(tagged Ld 1, 'h2000, Valid('h8000));
+        issue(1, 'h2000, True);
+        issueChild(1, 'h8000);
         lsq.enqSt(unpack(3), instruction(True), Invalid, 1, 0);
         lsq.updateData(0, unpack(0));
-        address(tagged St 0, 'h3000, Valid('h9000), False);
-        checkedObjIdStQ.enq(metadata('h9000, 0, True));
+        address(tagged St 0, 'h3000, Valid('h9000));
+        issueChild(2, 'h9000);
         delay(3);
-        check(count == 0, "cache accepted a stalled request");
+        check(count == 0, "cache accepted stalled requests");
         lsq.specUpdate.incorrectSpeculation(__KILL_ALL__, 0);
-        action
-            let r0 <- lsq.getHit(tagged Ld 0);
-            check(r0.waitWPResp, "squashed data request not tracked");
-            check(lsq.skipLdIdFill(1), "squashed load metadata could train ObjID buffer");
-            check(lsq.skipStIdFill(0), "squashed store metadata could train ObjID buffer");
-            check(!isValid(lsq.enqStTag), "store slot reused with metadata outstanding");
-        endaction
-        // Loads may reallocate tags, but cannot issue past old response barriers.
+        check(lsq.skipObjIdFill(1), "wrong-path load metadata could fill buffer");
+        check(lsq.skipObjIdFill(2), "wrong-path store metadata could fill buffer");
+        check(isValid(lsq.enqStTag), "store tag held by old child reply");
         lsq.enqLd(unpack(11), instruction(False), Invalid, 0, 0);
-        address(tagged Ld 0, 'h4000, Invalid, True);
+        address(tagged Ld 0, 'h4000, Invalid);
         lsq.enqLd(unpack(12), instruction(False), Invalid, 0, 0);
-        address(tagged Ld 1, 'h5000, Invalid, True);
-        delay(3);
+        address(tagged Ld 1, 'h5000, Invalid);
+        lsq.enqSt(unpack(13), instruction(True), Invalid, 0, 0);
+        lsq.updateData(0, unpack(0));
+        address(tagged St 0, 'h6000, Valid('ha000));
         cacheReady <= True;
         await(count == 4);
         cacheReady <= False;
-        // Check that all pre-squash requests drained exactly once with original tags/addresses.
-        action check(accepted.first.addr == 'h8000 && accepted.first.id == 1, "old metadata-load request changed"); accepted.deq; endaction
-        action check(accepted.first.addr == 'h1000 && accepted.first.id == 0, "old data-load request changed"); accepted.deq; endaction
-        action check(accepted.first.addr == 'h2000 && accepted.first.id == 1, "second old data request changed"); accepted.deq; endaction
-        action check(accepted.first.addr == 'h9000 && accepted.first.id == 0, "old metadata-store request changed"); accepted.deq; endaction
+        action check(accepted.first.addr == 'h8000 && accepted.first.id == 1, "old load-child request changed"); accepted.deq; endaction
+        action check(accepted.first.addr == 'h9000 && accepted.first.id == 2, "old store-child request changed"); accepted.deq; endaction
+        action check(accepted.first.addr == 'h1000 && accepted.first.id == 0, "old payload 0 changed"); accepted.deq; endaction
+        action check(accepted.first.addr == 'h2000 && accepted.first.id == 1, "old payload 2 changed"); accepted.deq; endaction
         if (metadataFirst) seq
-            action
-                check(lsq.skipLdIdFill(1), "stale metadata may fill on metadata-first response");
-                lsq.updateLdObjIdSeal(1, unpack(129'hbad));
-            endaction
-            action
-                let r <- lsq.getHit(tagged Ld 1);
-                check(r.waitWPResp, "metadata response cleared data barrier");
-            endaction
-            action
-                let r <- lsq.respLd(1, unpack(129'hdead), False, False);
-                check(r.wrongPath && !isValid(r.dst), "metadata-first old data updated reused load");
-            endaction
-            action
-                let r <- lsq.getHit(tagged Ld 1);
-                check(!r.waitWPResp, "metadata-first responses failed to release barrier");
-            endaction
+            action let done <- lsq.completeObjId(1, unpack(1)); check(!isValid(done), "stale load child notified ROB"); endaction
+            action let hit <- lsq.getHit(tagged Ld 1); check(hit.waitWPResp, "metadata reply cleared payload barrier"); endaction
+            action let reply <- lsq.respLd(1, unpack(129'hdead), False, False); check(reply.wrongPath, "old payload reached new parent"); endaction
         endseq else seq
-        // Return data before metadata for reused load tag 1.
-        action
-            let r <- lsq.respLd(1, unpack(129'hdead), False, False);
-            check(r.wrongPath && !isValid(r.dst), "old data updated reused load");
-        endaction
-        action
-            let r <- lsq.getHit(tagged Ld 1);
-            check(r.waitWPResp, "metadata barrier cleared by data response");
-            check(lsq.skipLdIdFill(1), "metadata fill enabled before stale response drained");
-        endaction
-        lsq.updateLdObjIdSeal(1, unpack(129'hbad));
-        action
-            let r <- lsq.getHit(tagged Ld 1);
-            check(!r.waitWPResp, "load metadata response failed to release barrier");
-        endaction
+            action let reply <- lsq.respLd(1, unpack(129'hdead), False, False); check(reply.wrongPath, "old payload reached new parent"); endaction
+            action let hit <- lsq.getHit(tagged Ld 1); check(!hit.waitWPResp && lsq.skipObjIdFill(1), "payload/child barriers not independent"); endaction
+            action let done <- lsq.completeObjId(1, unpack(1)); check(!isValid(done), "stale load child notified ROB"); endaction
         endseq
+        action let reply <- lsq.respLd(0, unpack(129'hdead), False, False); check(reply.wrongPath, "old payload 0 reached new parent"); endaction
         action
-            let r <- lsq.respLd(0, unpack(129'hdead), False, False);
-            check(r.wrongPath && !isValid(r.dst), "old normal response updated reused load");
+            let done <- lsq.completeObjId(2, unpack(0));
+            check(!isValid(done), "old child completed new store at same SQ tag");
         endaction
-        action
-            let r <- lsq.updateStObjIdSeal(0, unpack(129'hbad));
-            check(!isValid(r), "wrong-path store metadata completed an instruction");
-        endaction
-        check(isValid(lsq.enqStTag), "store slot remained blocked after stale metadata drained");
-        lsq.enqSt(unpack(13), instruction(True), Invalid, 0, 0);
-        // New owners can now issue and accept their own data normally.
-        issue(0, 'h4000, Invalid);
-        issue(1, 'h5000, Invalid);
+        issueChild(5, 'ha000);
+        issue(0, 'h4000, False);
+        issue(1, 'h5000, False);
         cacheReady <= True;
-        await(count == 6);
-        action check(accepted.first.addr == 'h4000 && accepted.first.id == 0, "new load 0 issue"); accepted.deq; endaction
-        action check(accepted.first.addr == 'h5000 && accepted.first.id == 1, "new load 1 issue"); accepted.deq; endaction
+        await(count == 7);
+        action check(accepted.first.addr == 'ha000 && accepted.first.id == 5, "new store-child request changed"); accepted.deq; endaction
+        action check(accepted.first.addr == 'h4000 && accepted.first.id == 0, "new payload 0 issue"); accepted.deq; endaction
+        action check(accepted.first.addr == 'h5000 && accepted.first.id == 1, "new payload 2 issue"); accepted.deq; endaction
+        action let reply <- lsq.respLd(0, unpack(129'h1234), False, False); check(!reply.wrongPath, "new payload 0 discarded"); endaction
+        action let reply <- lsq.respLd(1, unpack(129'h5678), False, False); check(!reply.wrongPath, "new payload 2 discarded"); endaction
         action
-            let r <- lsq.respLd(0, unpack(129'h1234), False, False);
-            check(!r.wrongPath && pack(r.data) == 129'h1234, "new load 0 did not accept own response");
+            let done <- lsq.completeObjId(5, unpack(1));
+            check(done == Valid(tuple2(unpack(13), St)), "new child did not identify new instruction");
         endaction
-        action
-            let r <- lsq.respLd(1, unpack(129'h5678), False, False);
-            check(!r.wrongPath && pack(r.data) == 129'h5678, "new load 1 did not accept own response");
-        endaction
-        delay(3);
-        check(count == 6, "queued request duplicated");
-        $display("PASS: squash stalled data/metadata queues, load-tag reuse, store reuse barrier, delayed responses");
+        check(lsq.noWrongPathLoads, "response barriers did not drain");
+        $display("PASS: registered child requests, backpressure, squash, independent barriers, reused store/load tags");
         $finish(0);
     endseq;
     mkAutoFSM(test);
 endmodule
 endpackage
 '''
-import contextlib
-import os
+code = code.replace('__QUEUES__', '\n'.join(queues)).replace('__RULES__', '\n'.join(rules))
 workspace = os.environ.get('TOOOBA_SPEC_TEST_DIR')
 with (contextlib.nullcontext(workspace) if workspace else tempfile.TemporaryDirectory(prefix='toooba-squash-')) as temp:
     base = Path(temp)

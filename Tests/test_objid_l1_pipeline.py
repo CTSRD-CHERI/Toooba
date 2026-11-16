@@ -9,10 +9,10 @@ import tempfile
 root = Path(__file__).resolve().parents[1]
 source = (root / 'src_Core/RISCY_OOO/procs/RV64G_OOO/MemExePipeline.bsv').read_text()
 queues = []
-for name in ('reqLdQ', 'checkedObjIdLdQ', 'checkedObjIdStQ'):
+for name in ('reqLdQ', 'checkedObjIdLdQ'):
     queues.append(next(line for line in source.splitlines() if ' ' + name + ' <-' in line))
 rules = []
-for name in ('sendLdObjSealRdToMem', 'sendLdToMem', 'sendStObjSealRdToMem'):
+for name in ('sendLdObjSealRdToMem', 'sendLdToMem'):
     match = re.search(r'    rule ' + name + r'\b.*?    endrule', source, re.S)
     assert match, name
     rules.append(match.group())
@@ -54,7 +54,7 @@ module mkTest(Empty);
         endinterface
     endinterface;
 ''' + '\n'.join(queues) + '''
-    (* descending_urgency = "sendLdObjSealRdToMem, sendLdToMem, sendStObjSealRdToMem" *)
+    (* descending_urgency = "sendLdObjSealRdToMem, sendLdToMem" *)
 ''' + '\n'.join(rules) + '''
     function Action check(Bool ok, String message) = action
         if (!ok) begin $display("FAIL: %s", message); $finish(1); end
@@ -71,7 +71,6 @@ module mkTest(Empty);
         // Independent queues accept normal and metadata traffic while stalled.
         action
             checkedObjIdLdQ.enq(metadata('h2000));
-            checkedObjIdStQ.enq(metadata('h4000));
             reqLdQ.enq(tuple5(0, 'h3000, False, 0, unpack(0)));
         endaction
         checkedObjIdLdQ.enq(metadata('h2040));
@@ -86,7 +85,12 @@ module mkTest(Empty);
         check(count == 2 && lastAddr == 'h2000, "first metadata load order");
         check(count == 3 && lastAddr == 'h2040, "second metadata load order");
         check(count == 4 && lastAddr == 'h3000, "normal load arbitration");
-        action check(count == 5 && lastAddr == 'h4000, "metadata store arbitration"); cacheReady <= False; endaction
+        action check(count == 4 && lastAddr == 'h3000, "payload drained"); cacheReady <= False; endaction
+        checkedObjIdLdQ.enq(metadata('h4000));
+        delay(2);
+        action check(count == 4, "shared store-metadata FIFO ignored backpressure"); cacheReady <= True; endaction
+        check(count == 4, "metadata FIFO bypassed register boundary");
+        action check(count == 5 && lastAddr == 'h4000, "shared store metadata request"); cacheReady <= False; endaction
         delay(2);
         check(count == 5, "request duplicated");
         // Normal loads must also cross a register boundary.

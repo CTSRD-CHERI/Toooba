@@ -1,4 +1,4 @@
-# CHERID evaluation: Reloaded
+# CHERID evaluation: Reloaded (separate ObjID queue experiment)
 
 Source: https://github.com/CTSRD-CHERI/Toooba_IPMT, branch `jdw57-coherent`, original revision `b8cd650`.
 
@@ -13,7 +13,9 @@ Reloaded includes the pre-existing uncommitted Map.bsv simplification and the th
 
 The missing root .gitmodules entry for the already-pinned capability library has been restored. Other libraries are vendored source, matching the original repository.
 
-No branch has been pushed. See the local comparison-results report for build
+This experimental branch has not been pushed. See `comparison/LSOQ.md` for
+its design and validation; the historical results below describe the imported
+Reloaded baseline. See the local comparison-results report for build
 and TestRIG outcomes before publishing. Binary ISA fixtures can be supplied
 externally when using make isa_tests; TestRIG generates its own instruction tests.
 

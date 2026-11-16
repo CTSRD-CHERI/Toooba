@@ -59,7 +59,6 @@ import ClientServer::*;
 import Cntrs::*;
 import Fifos::*;
 import FIFOF::*;
-import ObjIdReqBuffer::*;
 import Ehr::*;
 import Map::*;
 import Types::*;
@@ -406,9 +405,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // No bypass: a request checked this cycle can issue no earlier than next cycle.
     FIFOF#(Tuple5#(LdQTag, Addr, Bool, Bit#(16), InlineId)) reqLdQ <- mkSizedFIFOF(2);
     FIFOF#(ProcRq#(DProcReqId)) checkedObjIdLdQ <- mkSizedFIFOF(2);
-    FIFOF#(ProcRq#(DProcReqId)) checkedObjIdStQ <- mkSizedFIFOF(2);
-    ObjIdReqBuffer#(LdQSize) reqObjIdSealLdQ <- mkLdObjIdReqBuffer;
-    ObjIdReqBuffer#(StQSize) reqObjIdSealStQ <- mkStObjIdReqBuffer;
     Fifo#(1, ProcRq#(DProcReqId)) reqLrScAmoQ <- mkBypassFifo;
 `ifdef TSO_MM
     Fifo#(1, Tuple2#(Addr, Bit#(16))) reqStQ <- mkBypassFifo;
@@ -426,14 +422,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
-    Fifo#(2, Tuple4#(StQTag, MemTaggedData, Addr, Bit#(7)))  memObjIdForwardQ <- mkCFFifo;
-    Fifo#(2, Tuple2#(LdQTag, MemTaggedData))  memObjIdLdForwardQ <- mkCFFifo;
+    Fifo#(2, Tuple2#(ObjIdQTag, MemTaggedData))  memObjIdLdForwardQ <- mkCFFifo;
 
     Fifo#(2, Tuple4#(LdQTag, MemResp, Bool, Bool)) memRespLdQ <- mkCFFifo;
-    Fifo#(2, Tuple4#(LdQTag, MemTaggedData, Addr, Addr)) memObjIdRespLdQ <- mkCFFifo;
-    Fifo#(2, Tuple4#(StQTag, MemTaggedData, Addr, Addr)) memObjIdRespStQ <- mkCFFifo;
-    Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdVAddrs <- replicateM(mkRegU);
-    Vector#(TExp#(SizeOf#(LdStQTag)), Reg#(Addr)) objIdPAddrs <- replicateM(mkRegU);
+    Fifo#(2, Tuple2#(ObjIdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
     Reg#(Bool) objIdBufMayContainMode3 <- mkReg(False);
 
 
@@ -495,52 +487,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         method Action respLd(DProcReqId id, ObjSealRdType objSealRdType, MemTaggedData d, Bool idChecked, Bool idMismatch);
             
             if(objSealRdType != None) begin
-                if(verbose) begin
-                    $display("%t : [Ld resp] objSealRd Resp ", $time, fshow(objSealRdType), fshow(id), "; ", fshow(d));
-                end
-                // TODO: figure out if obj ID seal is ok here
-                if (objSealRdType == Ld) begin
-                    LdQTag tag = truncate(id);
-
-                    // Save read in buffer.  Should do for both load and store responses, but I haven't figured out a store ID.
-                    LdStQTag ldstq_tag = tagged Ld tag;
-                    Addr vaddr =
-                        objIdVAddrs[pack(ldstq_tag)];
-
-                    Addr paddr =
-                        objIdPAddrs[pack(ldstq_tag)];
-                    memObjIdRespLdQ.enq(
-                        tuple4(
-                            tag,
-                            d,
-                            vaddr,
-                            paddr
-                        )
-                    );
-                    //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
-                end
-                else if (objSealRdType == St) begin
-                    StQTag tag = truncate(id);
-
-                    LdStQTag ldstq_tag = tagged St tag;
-                    Addr vaddr =
-                        objIdVAddrs[pack(ldstq_tag)];
-
-                    Addr paddr =
-                        objIdPAddrs[pack(ldstq_tag)];
-                    memObjIdRespStQ.enq(
-                        tuple4(
-                            tag,
-                            d,
-                            vaddr,
-                            paddr
-                        )
-                    );
-                    //objIdBuf.update(MapKeyIndex{key: addr, index: hash(addr)}, Valid(d));
-                end
-                else begin
-                    doAssert(False, "unknown objSealRdType");
-                end
+                ObjIdQTag child = truncate(id);
+                memObjIdRespLdQ.enq(tuple2(child, d));
             end
             else begin
                 LdQTag tag = truncate(id);
@@ -888,7 +836,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             (x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr ||
              x.mem_func == Sc || x.mem_func == Amo)) begin
             Addr idAddr = inlineIdAddress(getBase(x.rVal1), getTloc(x.rVal1));
-            objIdVAddrs[pack(x.ldstq_tag)] <= idAddr;
             inlineId = InlineId {
                 expected: getMTE(x.rVal1), offset: truncate(idAddr),
                 forwardUnchecked: getTmode(x.rVal1) == 0 &&
@@ -964,8 +911,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(getTmode(x.rVal1) == 'h3)
             objIdMode3Seen.send;
 
-        if (!inlineId.inLine && inlineId.expected == 0 &&& objIdVAddr matches tagged Valid .addr)
-            objIdVAddrs[pack(x.ldstq_tag)] <= addr;
+        if (objIdVAddr matches tagged Valid .addr)
+            lsq.setObjIdVAddr(fromMaybe(?, lsq.objIdChild(x.ldstq_tag)), addr);
         if (!inlineId.inLine && inlineId.expected == 0 && isValid(objIdVAddr)) begin
             Addr wordAddr = fromMaybe(?, objIdVAddr) & ~64'hF;
             objIdBuf.lookupStart(MapKeyIndex { key: wordAddr, index: hash(wordAddr) });
@@ -1282,23 +1229,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 tag: ldTag,
                 paddr: paddr,
                 shiftedBE: x.shiftedBE,
-                objIdPAddr: objIdPAddr,
+                objIdPAddr: x.inlineId.inLine ? objIdPAddr : Invalid,
+                objIdLookup: isValid(objIdPAddr) && !x.inlineId.inLine,
                 objIdOffset: x.objIdOffset,
                 inlineId: x.inlineId,
                 alloc_policy: x.alloc_policy,
                 pcHash: hash(getAddr(pc))
             });
-        end
-        else if ((x.mem_func == St || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO &&
-                 !isValid(cause) && isValid(x.objIdAddr)) begin
-            StQTag stTag = ?;
-            if(x.ldstq_tag matches tagged St .t) begin
-                stTag = t;
-            end
-            else begin
-                doAssert(False, "must be in StQ");
-            end
-            reqObjIdSealStQ.enq(tuple3(stTag, fromMaybe(?, objIdPAddr), x.objIdOffset));
         end
 
 `ifdef PERF_COUNT
@@ -1332,7 +1269,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // An empty inline descriptor also represents legacy modes 1-6.
         // Those consumers have an independent metadata obligation and cannot
         // substitute the mode-0 producer's verdict for their own check.
-        if(info.inlineId.expected == 0 && isValid(info.objIdPAddr) &&
+        if(info.inlineId.expected == 0 && (info.objIdLookup || isValid(info.objIdPAddr)) &&
            sbRes.sourceId.expected != 0) sbRes.forwardData = Invalid;
         if (isValid(sbId.matchIdx) &&
             !(info.inlineId.forwardUnchecked && isValid(sbRes.forwardData))) begin
@@ -1344,7 +1281,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (info.shiftedBE == DataMemAccess (unpack(~0))) events.evt_MEM_CAP_LOAD = 1;
 `endif
         // search LSQ
-        LSQIssueLdResult issRes <- lsq.issueLd(info.tag, info.paddr, info.objIdPAddr, info.shiftedBE, sbRes, info.inlineId);
+        LSQIssueLdResult issRes <- lsq.issueLd(info.tag, info.paddr, info.objIdPAddr, info.objIdLookup, info.shiftedBE, sbRes, info.inlineId);
         if(verbose) begin
             $display("%t : [doIssueLd] fromIssueQ: ", $time, fshow(fromIssueQ), " ; ",
                      fshow(info), " ; ", fshow(sbRes), " ; ", fshow(issRes));
@@ -1352,10 +1289,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // summarize
         if(issRes matches tagged Forward .forward) begin
             forwardQ.enq(tuple2(info.tag, forward.data));
-            if (!info.inlineId.forwardUnchecked && !forward.storeIdCheck &&&
-                info.objIdPAddr matches tagged Valid .a) begin
-                $display("Forward: Issuing objIdSeal ", fshow(info));
-                reqObjIdSealLdQ.enq(tuple3(zeroExtend(info.tag), a, info.objIdOffset));
+            if (info.objIdLookup) begin
+                if (!info.inlineId.forwardUnchecked && !forward.storeIdCheck)
+                    lsq.startObjIdCheck(tagged Ld info.tag);
+                else lsq.cancelObjIdCheck(tagged Ld info.tag);
             end
             // early wake up
             if(forward.dst matches tagged Valid .dst) begin
@@ -1370,10 +1307,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
         else if(issRes == ToCache) begin
             reqLdQ.enq(tuple5(zeroExtend(info.tag), info.paddr, info.shiftedBE == TagMemAccess, info.pcHash, info.inlineId));
-            if (!info.inlineId.inLine &&& info.objIdPAddr matches tagged Valid .a) begin
-                $display("ToCache: Issuing objIdSeal ", fshow(info));
-                reqObjIdSealLdQ.enq(tuple3(zeroExtend(info.tag), a,  info.objIdOffset));
-            end
+            if (info.objIdLookup) lsq.startObjIdCheck(tagged Ld info.tag);
             // perf: load mem latency
             ldMemLatTimer.start(info.tag);
         end
@@ -1494,84 +1428,40 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endaction
     endfunction
 
-    // (* descending_urgency = "doObjIdRespLdMem, doRespLdMem" *)
-
-    rule doObjIdRespLdMem (!objIdFlushPending);
-        let {
-            tag,
-            d,
-            vaddr,
-            paddr
-        } = memObjIdRespLdQ.first;
-
-        memObjIdRespLdQ.deq;
-
-        if (!lsq.skipLdIdFill(tag)) begin
-        updateObjIdBuf(
-            vaddr,
-            d
-        );
-
-        objIdPAddrFilterLdUpdate.wset(paddr);
-
-        end
-
-        lsq.updateLdObjIdSeal(
-            tag,
-            d
-        );
-        if (verbose) $display("[doObjIdRespLdMem] ", fshow(tag), "; ", fshow(d));
-    endrule
-
- 
-    rule doObjIdRespLdForward;
-        let {
-            requesterTag,
-            forwardedData
-        } = memObjIdLdForwardQ.first;
-
-        memObjIdLdForwardQ.deq;
-        
-        lsq.updateLdObjIdSeal(requesterTag,
-                forwardedData);
-
-    endrule 
-
-
-    
-    (* descending_urgency = "doObjIdRespStMem, doObjIdRespStForward" *) // prioritize mem resp
-
-    rule doObjIdRespStMem (!objIdFlushPending);
-        let {t, d, vaddr, paddr} = memObjIdRespStQ.first;
-        memObjIdRespStQ.deq;
-        if (!lsq.skipStIdFill(t)) begin
-        updateObjIdBuf(
-            vaddr,
-            d
-        );
-
-        objIdPAddrFilterStUpdate.wset(paddr);
-        end
-        let mInstInfo <- lsq.updateStObjIdSeal(t, d);
-        if (verbose) $display("[doObjIdRespStMem] ", fshow(t), "; ", fshow(d), "; instTagReady=", fshow(isValid(mInstInfo)));
-
-        // If this ObjID response made a non-MMIO store become “done”,
-        // tell the ROB now (non_mmio_st_done = True). Only pulse for real
-        // stores (not Sc/Amo) to avoid ROB assertions.
-        if (mInstInfo matches tagged Valid { .instTag, .memFunc } &&& memFunc == St) begin
-            inIfc.rob_setExecuted_doFinishMem(
-                instTag,
-                0, // vaddr not needed for this bookkeeping pulse
+    function Action finishObjId(ObjIdQTag child, MemTaggedData data);
+    action
+        let storeDone <- lsq.completeObjId(child, data);
+        if (storeDone matches tagged Valid { .instTag, .memFunc } &&& memFunc == St)
+            inIfc.rob_setExecuted_doFinishMem(instTag, 0,
 `ifdef INCLUDE_TANDEM_VERIF
-                0, 0, // store_data, store_data_BE (unused here)
+                0, 0,
 `endif
-                False, // access_at_commit
-                True   // non_mmio_st_done
+                False, True
 `ifdef RVFI
-                , unpack(0) // ExtraTraceBundle default
+                , unpack(0)
 `endif
             );
+    endaction
+    endfunction
+
+    rule doObjIdRespLdMem (!objIdFlushPending);
+        let {child, data} <- toGet(memObjIdRespLdQ).get;
+        Addr vaddr = lsq.objIdVAddr(child);
+        Addr paddr = lsq.objIdPAddr(child);
+        if (!lsq.skipObjIdFill(child)) begin
+            updateObjIdBuf(vaddr, data);
+            objIdPAddrFilterLdUpdate.wset(paddr);
         end
+        finishObjId(child, data);
+    endrule
+
+    rule doObjIdRespLdForward;
+        let {child, data} <- toGet(memObjIdLdForwardQ).get;
+        if (lsq.objIdForStore(child) && !lsq.skipObjIdFill(child)) begin
+            Addr word = lsq.objIdVAddr(child) & ~64'hF;
+            objIdBuf.updateMayInsert(MapKeyIndex { key: word, index: hash(word) }, Invalid, False);
+        end
+        finishObjId(child, data);
     endrule
 
     (* descending_urgency = "doObjIdFlush, doUpdateObjIdPAddrFilter" *)
@@ -1584,46 +1474,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (objIdPAddrFilterStUpdate.wget matches tagged Valid .paddr)
             nextFilter[objIdPAddrFilterIndex(paddr)] = 1;
         objIdPAddrFilter <= nextFilter;
-    endrule
-
-    // A forwarded store makes the cached ObjectID word suspect. This is
-    // rare: discard the whole word and let the next access reload it.
-    rule doObjIdRespStForward;
-        let {requesterTag, forwardedData, objIdVAddr, objIdOffset} = memObjIdForwardQ.first;
-        memObjIdForwardQ.deq;
-        Addr wordAddr = objIdVAddr & ~64'hF;
-        objIdBuf.updateMayInsert(
-            MapKeyIndex { key: wordAddr, index: hash(wordAddr) }, Invalid, False);
-
-        let mInstInfo <-
-            lsq.updateStObjIdSeal(
-                requesterTag,
-                forwardedData
-            );
-
-
-        if (
-            mInstInfo matches
-                tagged Valid {
-                    .instTag,
-                    .memFunc
-                }
-            &&& memFunc == St
-        ) begin
-            inIfc.rob_setExecuted_doFinishMem(
-                instTag,
-                0, // vaddr not needed for this bookkeeping pulse
-    `ifdef INCLUDE_TANDEM_VERIF
-                0,
-                0, // store_data and store_data_BE unused here
-    `endif
-                False, // access_at_commit
-                True   // non_mmio_st_done
-    `ifdef RVFI
-                , unpack(0) // ExtraTraceBundle default
-    `endif
-            );
-        end
     endrule
 
     (* descending_urgency = "doRespLdMem, doRespLdForward" *) // prioritize mem resp
@@ -1724,10 +1574,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             inlineId: lsqDeqLd.inlineId,
             pcHash: ?
         };
-        if (lsqDeqLd.objIdPAddr matches tagged Valid .a) begin
-            if(verbose) $display("%t : [doDeqLdQ_Lr_issue] Issuing objIdSeal for LR tag: %d", $time, lsqDeqLd.tag);
-            reqObjIdSealLdQ.enq(tuple3(zeroExtend(lsqDeqLd.tag), a, lsqDeqLd.objIdOffset));
-        end
         reqLrScAmoQ.enq(req);
         if(verbose) $display("[doDeqLdQ_Lr_issue] ", fshow(lsqDeqLd), "; ", fshow(req));
         // check
@@ -2325,70 +2171,38 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdFlushPending <= False;
     endrule
 
-    // send req to D$
-    let idLoadReq = reqObjIdSealLdQ.first;
-    let idLoadSearch = lsq.searchObjIdLd(tpl_1(idLoadReq), tpl_2(idLoadReq), tpl_3(idLoadReq));
-    Bool idLoadStalled = case (idLoadSearch) matches
-        tagged Stall .by: True;
-        default: False;
-    endcase;
+    // Both load and store checks are ordinary read transactions owned by a
+    // ObjID queue tag. A stalled check rotates so it cannot hide a ready older one.
+    rule checkObjId (!storeUrgent);
+        let info = lsq.getIssueObjId;
+        LSQObjIdSearchResult result = case (info.parent) matches
+            tagged Ld .parent: lsq.searchObjIdLd(parent, info.paddr, info.offset);
+            tagged St .parent: lsq.searchObjIDSt(parent, info.paddr, info.offset);
+        endcase;
 `ifndef TSO_MM
-    MemDataByteEn idLoadBE = replicate(False);
-    Bit#(4) idLoadByte = truncate(tpl_3(idLoadReq));
-    idLoadBE[idLoadByte] = True;
-    let sbIdLoad = stb.searchMetadata(tpl_2(idLoadReq), DataMemAccess(idLoadBE), unpack(0));
-    idLoadStalled = idLoadStalled || (idLoadSearch == ObjIdToCache &&
-                    isValid(sbIdLoad.matchIdx) && !isValid(sbIdLoad.forwardData));
+        MemDataByteEn mask = replicate(False);
+        Bit#(4) byteIndex = truncate(info.offset);
+        mask[byteIndex] = True;
+        let sbResult = case (info.parent) matches
+            tagged Ld .parent: stb.searchMetadata(info.paddr, DataMemAccess(mask), unpack(0));
+            tagged St .parent: stb.searchMetadataSt(info.paddr, DataMemAccess(mask), unpack(0));
+        endcase;
+        if (result == ObjIdToCache) begin
+            if (sbResult.forwardData matches tagged Valid .data) result = ObjIdForward(data);
+            else if (isValid(sbResult.matchIdx)) result = Stall(SB);
+        end
 `endif
-    let idStoreReq = reqObjIdSealStQ.first;
-    let idStoreSearch = lsq.searchObjIDSt(tpl_1(idStoreReq), tpl_2(idStoreReq), tpl_3(idStoreReq));
-    Bool idStoreStalled = case (idStoreSearch) matches
-        tagged Stall .by: True;
-        default: False;
-    endcase;
-`ifndef TSO_MM
-    MemDataByteEn idStoreBE = replicate(False);
-    Bit#(4) idStoreByte = truncate(tpl_3(idStoreReq));
-    idStoreBE[idStoreByte] = True;
-    let sbIdStore = stb.searchMetadataSt(tpl_2(idStoreReq), DataMemAccess(idStoreBE), unpack(0));
-    idStoreStalled = idStoreStalled || (idStoreSearch == ObjIdToCache &&
-                    isValid(sbIdStore.matchIdx) && !isValid(sbIdStore.forwardData));
-`endif
-    rule retryLdObjSealRd (idLoadStalled);
-        reqObjIdSealLdQ.retry;
-    endrule
-
-    rule checkLdObjSealRd (!idLoadStalled && !storeUrgent);
-        let req = reqObjIdSealLdQ.first;
-        let {lsqTag, addr, offset} = req;
-        DProcReqId dId = zeroExtend(lsqTag);
-
-        LSQObjIdSearchResult result = idLoadSearch;
-        LdQTag tag = truncate(dId);
-
-        LdStQTag ldstqTag =
-                tagged Ld lsqTag;
-        Addr objIdVAddr =
-            objIdVAddrs[pack(ldstqTag)];
-
-`ifndef TSO_MM
-        if (result == ObjIdToCache &&& sbIdLoad.forwardData matches tagged Valid .data)
-            result = ObjIdForward(data);
-`endif
-        if(result matches tagged ObjIdForward .forward) begin
-            memObjIdLdForwardQ.enq(tuple2(tag, forward));
-            reqObjIdSealLdQ.deq;
-        end else if (result == ObjIdToCache) begin
-            reqObjIdSealLdQ.deq;
-            objIdPAddrs[pack(ldstqTag)] <= addr;
-            checkedObjIdLdQ.enq(ProcRq {
-                id: dId, addr: addr, toState: S, op: Ld,
+        if (result matches tagged Stall .by) lsq.retryObjId;
+        else begin
+            lsq.issueObjId;
+            if (result matches tagged ObjIdForward .data)
+                memObjIdLdForwardQ.enq(tuple2(info.tag, data));
+            else checkedObjIdLdQ.enq(ProcRq {
+                id: zeroExtend(info.tag), addr: info.paddr, toState: S, op: Ld,
                 byteEn: ?, data: ?, amoInst: ?, loadTags: False,
                 objSealRdType: Ld, inlineId: unpack(0), pcHash: ?
             });
         end
-
-        if(verbose) $display("[checkLdObjSealRd] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
     endrule
 
     rule sendLdObjSealRdToMem (!storeUrgent);
@@ -2416,59 +2230,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(verbose) $display("[sendLdToMem] ", fshow(lsqTag), "; ", fshow(addr));
     endrule
 
-    rule retryStObjSealRd (idStoreStalled);
-        reqObjIdSealStQ.retry;
-    endrule
-
-    rule checkStObjSealRd (!idStoreStalled && !storeUrgent);
-        let {lsqTag, addr, offset} = idStoreReq;
-        reqObjIdSealStQ.deq;
-        LSQObjIdSearchResult result = idStoreSearch;
-        DProcReqId dId = zeroExtend(lsqTag);
-        StQTag tag = truncate(dId);
-
-        LdStQTag ldstqTag =
-                tagged St lsqTag;
-        Addr objIdVAddr =
-            objIdVAddrs[pack(ldstqTag)];
-
-`ifndef TSO_MM
-        if(result == ObjIdToCache &&& sbIdStore.forwardData matches tagged Valid .data)
-            result = ObjIdForward(data);
-`endif
-        if(result matches tagged ObjIdForward .forward) begin
-            memObjIdForwardQ.enq(tuple4(tag, forward, objIdVAddr, offset));
-        end else begin 
-            LdStQTag ldstq_tag =
-                tagged St lsqTag;
-
-            objIdPAddrs[
-                pack(ldstq_tag)
-            ] <= addr;
-
-            checkedObjIdStQ.enq(ProcRq {
-                id: dId,
-                addr: addr,
-                toState: S,
-                op: Ld,
-                byteEn: ?,
-                data: ?,
-                amoInst: ?,
-                loadTags: False,
-                objSealRdType: St,
-                inlineId: unpack(0),
-                pcHash: ?
-            });
-        end 
-        if(verbose) $display("[checkStObjSealRd] ", fshow(lsqTag), "; ", fshow(dId), "; ", fshow(addr));
-    endrule
-
-    rule sendStObjSealRdToMem (!storeUrgent);
-        dMem.procReq.req(checkedObjIdStQ.first);
-        checkedObjIdStQ.deq;
-    endrule
-
-    (* descending_urgency = "sendLdToMem, sendStObjSealRdToMem, sendStToMem" *) // prioritize Ld over St
+    (* descending_urgency = "sendLdToMem, sendStToMem" *)
     rule sendStToMem;
         sentStoreReq.send;
 `ifdef TSO_MM
