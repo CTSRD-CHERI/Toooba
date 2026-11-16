@@ -213,8 +213,12 @@ module mkMemRegToExeFifo(MemRegToExeFifo);
     return m;
 endmodule
 
-typedef SpecFifo_SB_deq_enq_C_deq_enq#(1, MemExeToFinish) DTlbReqFifo;
-(* synthesize *)
+// Every admitted potential metadata translation reserves one retry slot.
+// Keep the reservation pool and retry storage at the same depth.
+typedef 3 ObjIdTranslationSlots;
+typedef SpecFifo_SB_deq_enq_C_deq_enq#(ObjIdTranslationSlots, MemExeToFinish) DTlbReqFifo;
+// Inline the FIFO so its squash-hole canonicalization can be scheduled with
+// the DTLB response/retry rules when several reservations are outstanding.
 module mkDTlbReqFifo(DTlbReqFifo);
     // Do not make response acceptance depend on a same-cycle retry dequeue:
     // DTlb requires response dequeue to schedule before request enqueue.
@@ -377,7 +381,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // Reserve retry capacity before admitting an access that may need metadata.
     // Consume the data response into the retry FIFO before requesting metadata: a
     // full DTLB must never require procReq in order to dequeue procResp.
-    SpecFifo_SB_deq_enq_C_deq_enq#(1, Bool) objIdTranslation <-
+    SpecFifo_SB_deq_enq_C_deq_enq#(ObjIdTranslationSlots, Bool) objIdTranslation <-
         mkSpecFifo_SB_deq_enq_C_deq_enq(True);
     SpecFifo_SB_deq_enq_C_deq_enq#(2, DTlbResp#(MemExeToFinish)) finishTranslationQ <-
         mkSpecFifo_SB_deq_enq_C_deq_enq(True);

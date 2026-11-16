@@ -8,6 +8,8 @@ Coherence is enabled using a **256-bit single-hash Bloom filter**. A relevant D-
 eviction triggers a whole-ObjID-buffer flush on a tracked physical-line match.
 The original mode-3/1K and mode-4K gating and same-cycle fill checks are retained.
 
-The production hardware is identical to the original Reloaded baseline. Bloom collisions may cause extra flushes.
+The Bloom coherence hardware is unchanged from the original Reloaded baseline. Bloom collisions may cause extra flushes.
 
 The focused Bloom regression passes (`python3 Tests/test_objid_bloom.py`). Neither branch has been pushed by the agent.
+
+This variant also includes the shared three-entry metadata-translation reservation/retry capacity change, as documented in CHERID_COMPARISON.md.
