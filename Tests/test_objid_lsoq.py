@@ -328,7 +328,25 @@ module mkTest(Empty);
         lsq.specUpdate.incorrectSpeculation(False, 0);
         delay(creditDrainDelay);
         check(lsq.objIdQueueEmpty, "squashed pending translation leaked credit");
-        $display("PASS: independent ObjID credit exhaustion/wraparound, full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences, early data/late translation, fault draining, pending cancellation and squash");
+        // Rename may allocate while an older branch resolves correctly.
+        // Its cleared bit must not survive in the child and kill that child
+        // when the same branch tag is subsequently reused/mispredicted.
+        action
+            let parent = fromMaybe(?, lsq.enqLdTag);
+            if (parent matches tagged Ld .tag) earlyLd <= tag;
+            lsq.enqLd(unpack(25), instruction(False), Invalid, 1, 0);
+            lsq.specUpdate.correctSpeculation(~1);
+        endaction
+        lsq.specUpdate.incorrectSpeculation(False, 0);
+        address(tagged Ld earlyLd, 'h30000, Invalid, 0);
+        issueData(earlyLd, 'h30000, False);
+        action let response <- lsq.respLd(earlyLd, unpack(0), False, False); endaction
+        drain <= True;
+        await(retired == 3);
+        drain <= False;
+        delay(creditDrainDelay);
+        check(lsq.objIdQueueEmpty, "same-cycle correct-spec allocation leaked credit");
+        $display("PASS: independent ObjID credit exhaustion/wraparound, full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences, early data/late translation, fault draining, pending cancellation, squash and same-cycle correct-spec allocation");
         $finish(0);
     endseq;
     mkAutoFSM(test);

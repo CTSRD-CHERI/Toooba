@@ -110,3 +110,13 @@ draining, pending cancellation, stores and squash. The translation regression
 passes consecutive-cycle hit-stream admission, all three credits, saturation,
 draining, correct-speculation masks and cancellation/reuse. The existing L1
 request cancellation regression also passes.
+
+## Allocation and correct speculation
+
+The full benchmark run exposed a pre-existing ordering error in the independent
+queue: reservation masks were written after correct-speculation masking. A child
+allocated in the same cycle as branch resolution could retain a bit already
+cleared from its parent, then be canceled by a later reuse of that branch tag.
+Reservation now writes the mask before correct speculation, matching the parent
+LSQ ordering. The regression allocates and resolves a branch together, reuses
+that branch tag for a squash, and verifies the surviving child remains usable.

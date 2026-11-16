@@ -136,7 +136,9 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
         issued[tail][2] <= False;
         done[tail][2] <= unused;
         canceled[tail][2] <= False;
-        masks[tail][2] <= specBits;
+        // Correct speculation must also clear bits on a reservation allocated
+        // in this cycle, before the branch tag can be reused.
+        masks[tail][0] <= specBits;
         atCommit[tail][valueOf(SupSize)] <= False;
         tail <= next(tail);
     endmethod
