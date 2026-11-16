@@ -225,6 +225,69 @@ module mkDTlbReqFifo(DTlbReqFifo);
     return m;
 endmodule
 
+// Data admission now produces metadata retries. Keep this handoff FIFO's
+// enqueue and dequeue independent: deq-before-enq would impose the cycle
+// DTLB request < data admission < DTLB response on the shared DTLB.
+typedef SpecFifo_SB_deq_enq_C_deq_enq#(2, DTlbResp#(MemExeToFinish)) FinishTranslationFifo;
+module mkFinishTranslationFifo(FinishTranslationFifo);
+    Vector#(2, Reg#(DTlbResp#(MemExeToFinish))) rows <- replicateM(mkRegU);
+    Vector#(2, Reg#(SpecBits)) masks <- replicateM(mkRegU);
+    Vector#(2, Reg#(Bool)) valid <- replicateM(mkReg(False));
+    Reg#(Bit#(1)) head <- mkReg(0);
+    Reg#(Bit#(1)) tail <- mkReg(0);
+    Reg#(UInt#(2)) count <- mkReg(0);
+    RWire#(ToSpecFifo#(DTlbResp#(MemExeToFinish))) enqueue <- mkRWire;
+    PulseWire dequeue <- mkPulseWire;
+    RWire#(SpecBits) correct <- mkRWire;
+    RWire#(Tuple2#(Bool, SpecTag)) incorrect <- mkRWire;
+    PulseWire squashing <- mkPulseWire;
+
+    (* fire_when_enabled, no_implicit_conditions *)
+    rule update;
+        Bool removeHead = dequeue || (count != 0 && !valid[head]);
+        Bool insertTail = isValid(enqueue.wget);
+        for (Integer i = 0; i < 2; i = i + 1) begin
+            Bool live = valid[i];
+            SpecBits bits = masks[i];
+            if (removeHead && head == fromInteger(i)) live = False;
+            if (enqueue.wget matches tagged Valid .entry &&& tail == fromInteger(i)) begin
+                rows[i] <= entry.data;
+                bits = entry.spec_bits;
+                live = True;
+            end
+            if (correct.wget matches tagged Valid .mask) bits = bits & mask;
+            if (incorrect.wget matches tagged Valid {.killAll, .tag})
+                if (killAll || bits[tag] == 1) live = False;
+            masks[i] <= bits;
+            valid[i] <= live;
+        end
+        if (removeHead) head <= head + 1;
+        if (insertTail) tail <= tail + 1;
+        count <= count + (insertTail ? 1 : 0) - (removeHead ? 1 : 0);
+    endrule
+    method Action enq(ToSpecFifo#(DTlbResp#(MemExeToFinish)) entry) if (count < 2 && !squashing);
+        enqueue.wset(entry);
+    endmethod
+    method Bool notFull = count < 2;
+    method Action deq if (count != 0 && valid[head] && !squashing);
+        dequeue.send;
+    endmethod
+    method ToSpecFifo#(DTlbResp#(MemExeToFinish)) first if (count != 0 && valid[head] && !squashing);
+        return ToSpecFifo {data:rows[head], spec_bits:masks[head]};
+    endmethod
+    // Include squash holes until they drain; TLB maintenance must wait.
+    method Bool notEmpty = count != 0;
+    interface SpeculationUpdate specUpdate;
+        method Action correctSpeculation(SpecBits mask);
+            correct.wset(mask);
+        endmethod
+        method Action incorrectSpeculation(Bool killAll, SpecTag tag);
+            incorrect.wset(tuple2(killAll, tag));
+            squashing.send;
+        endmethod
+    endinterface
+endmodule
+
 typedef DTlb#(MemExeToFinish) DTlbSynth;
 (* synthesize *)
 module mkDTlbSynth(DTlbSynth);
@@ -382,8 +445,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // full DTLB must never require procReq in order to dequeue procResp.
     SpecFifo_SB_deq_enq_C_deq_enq#(ObjIdTranslationSlots, Bool) objIdTranslation <-
         mkSpecFifo_SB_deq_enq_C_deq_enq(True);
-    SpecFifo_SB_deq_enq_C_deq_enq#(2, DTlbResp#(MemExeToFinish)) finishTranslationQ <-
-        mkSpecFifo_SB_deq_enq_C_deq_enq(True);
+    FinishTranslationFifo finishTranslationQ <- mkFinishTranslationFifo;
 
     // store buffer only used in WEAK model
 `ifdef TSO_MM
@@ -987,7 +1049,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let r = dTlbReqQ.first;
         dTlbReqQ.deq;
         objIdTranslation.deq;
-        dTlb.procReq(DTlbReq { inst: r.data, specBits: r.spec_bits });
+        // A data-side fault/MMIO can cancel metadata after admission. Carry
+        // that release through this queue too, so doFinishMem never competes
+        // with the normal data-response rule for the reservation dequeue.
+        if (r.data.translateObjId)
+            dTlb.procReq(DTlbReq { inst: r.data, specBits: r.spec_bits });
     endrule
 
     rule saveObjIdLookup;
@@ -1019,15 +1085,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             if (reservedRetry && (!needsMetadata || dataFault))
                 objIdTranslation.deq;
         end
-        if (needsMetadata && !dataFault) begin
-            x.dataTranslation = r.resp;
-            x.translateObjId = True;
-            dTlbReqQ.enq(ToSpecFifo { data: x, spec_bits: r.specBits });
-        end
-        else begin
-            r.inst = x;
-            finishTranslationQ.enq(ToSpecFifo { data: r, spec_bits: r.specBits });
-        end
+        // Admit data independently; doFinishMem prepares the pending ObjID
+        // obligation before making its translation retry visible.
+        x.translateObjId = needsMetadata && !dataFault;
+        r.inst = x;
+        finishTranslationQ.enq(ToSpecFifo { data: r, spec_bits: r.specBits });
     endrule
 
     rule doObjIdTlb (dTlb.procResp.inst.translateObjId);
@@ -1048,14 +1110,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(verbose) $display("%t : [doObjIdTlb] ", $time, fshow(objIdTlbResp));
         if(isValid(cause) && verbose) $display("  [doObjIdTlb - objIdTlb response] PAGEFAULT!");
 
-        if(isValid(cause)) begin
-            // update LSQ with fault
-            doAssert(isValid(x.objIdAddr), "fault must have come from translation of valid objId VAddr");
-            inIfc.rob_setExecuted_doFinishMem(x.tag, fromMaybe(0, x.objIdAddr),
+        Bool isLrScAmo = x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo;
+        if (isValid(cause) || isLrScAmo) begin
+            inIfc.rob_setExecuted_doFinishMem(x.tag, isValid(cause) ? fromMaybe(0, x.objIdAddr) : getAddr(x.vaddr),
 `ifdef INCLUDE_TANDEM_VERIF
                                              x.store_data, x.store_data_BE,
 `endif
-                                             False, False
+                                             !isValid(cause) && isLrScAmo, False
 `ifdef RVFI
                                              , ExtraTraceBundle{
                                                  regWriteData: memData[pack(x.ldstq_tag)],
@@ -1063,23 +1124,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                                              }
 `endif
                                             );
-            LSQUpdateAddrResult updRes <- lsq.updateAddr(
-                x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, 0 /*paddr*/, False /*isMMIO*/, x.shiftedBE, x.mte, x.alloc_policy,
-                /*(((x.mem_func == Ld || x.mem_func == St) && !isMMIO) ? x.objIdAddr : Invalid)*/ Invalid, x.objIdOffset, unpack(0)
-        );
         end
-        else begin
-            x.objIdAddr = objIdPAddr;
-            finishTranslationQ.enq(ToSpecFifo {
-                data: DTlbResp { inst: x, resp: x.dataTranslation, specBits: objIdTlbResp.specBits },
-                spec_bits: objIdTlbResp.specBits
-            });
-        end
+        lsq.resolveObjIdTranslation(x.ldstq_tag, fromMaybe(0, objIdPAddr), cause);
     endrule
-    
 
     rule doFinishMem;
-        let dTlbResp = finishTranslationQ.first.data;
+        let completion = finishTranslationQ.first;
+        let dTlbResp = completion.data;
+        // Correct speculation may have cleared bits while this waited for LSQ
+        // admission. Forward the queue's current mask into the retry token.
+        dTlbResp.specBits = completion.spec_bits;
         finishTranslationQ.deq;
         let x = dTlbResp.inst;
         Addr paddr = 0;
@@ -1157,9 +1211,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 x.capException = Valid(CSR_XCapCause{cheri_exc_reg: check.authority_idx, cheri_exc_code: cheriExcLengthViolation});
         end
         if (x.capException matches tagged Valid .c) cause = Valid(CapException(c));
+        Bool metadataPending = x.translateObjId && !isValid(cause) && !isMMIO;
         let needsObjIdCheck = (x.mem_func == St || x.mem_func == Sc || x.mem_func == Amo) &&
                               !isMMIO && isValid(x.objIdAddr);
-        Bool access_at_commit = !isValid(cause) && (isMMIO || isLrScAmo);
+        // Keep atomics out of the at-commit/protected state until their
+        // metadata translation has also completed.
+        Bool access_at_commit = !isValid(cause) && (isMMIO || (isLrScAmo && !metadataPending));
         Bool non_mmio_st_done = !isValid(cause) && !isMMIO && (x.mem_func == St) && !needsObjIdCheck;
         inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
 `ifdef INCLUDE_TANDEM_VERIF
@@ -1211,9 +1268,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         end
         if (isMMIO) x.inlineId = unpack(0);
 
+        if (x.translateObjId) begin
+            let retry = x;
+            retry.translateObjId = metadataPending;
+            dTlbReqQ.enq(ToSpecFifo { data: retry, spec_bits: dTlbResp.specBits });
+        end
+
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy, 
-            (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset, x.inlineId
+            (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset, x.inlineId, metadataPending
         );
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 

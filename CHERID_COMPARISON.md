@@ -60,3 +60,6 @@ consecutive-cycle admission with forced ObjID-buffer hits and DTLB bare-mode
 a shared-DTLB deadlock, speculative cancellation, and reuse. The regression passes.
 
 The complete RVFI-DII Bluesim core BSV compilation also passes with these changes.
+
+The LSOQ branch additionally admits payloads before metadata translation finishes;
+see `comparison/LSOQ.md` for ownership, fault and cancellation details.

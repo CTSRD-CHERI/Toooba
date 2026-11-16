@@ -32,8 +32,7 @@ module mkTest(Empty);
     let dTlbReqQ <- mkDTlbReqFifo;
     SpecFifo_SB_deq_enq_C_deq_enq#(ObjIdTranslationSlots,Bool) objIdTranslation <-
         mkSpecFifo_SB_deq_enq_C_deq_enq(True);
-    SpecFifo_SB_deq_enq_C_deq_enq#(2,DTlbResp#(MemExeToFinish)) finishTranslationQ <-
-        mkSpecFifo_SB_deq_enq_C_deq_enq(True);
+    FinishTranslationFifo finishTranslationQ <- mkFinishTranslationFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)),Ehr#(2,Bool)) objIdLookupHits <- replicateM(mkEhr(True));
     Reg#(UInt#(16)) cycles <- mkReg(0);
     Reg#(UInt#(16)) admitted <- mkReg(0);
@@ -43,6 +42,9 @@ module mkTest(Empty);
     Reg#(UInt#(16)) lastAdmission <- mkReg(0);
     Reg#(Bool) havePrevious <- mkReg(False);
     Reg#(Bool) checkRate <- mkReg(False);
+    Reg#(UInt#(16)) completedTarget <- mkReg(0);
+    Reg#(Bool) lateCancel <- mkReg(False);
+    Reg#(Bool) allowFinish <- mkReg(False);
     Reg#(Bool) allowAdmit <- mkReg(False);
     Reg#(Bool) allowRetry <- mkReg(False);
     Reg#(SpecBits) activeMask <- mkReg(0);
@@ -76,8 +78,18 @@ module mkTest(Empty);
         admitted <= admitted+1;
     endrule
 """+response+'\n'+retry+r"""
-    rule finishData;
+    rule finishData (allowFinish);
+        let completion = finishTranslationQ.first;
+        let r = completion.data;
+        r.specBits = completion.spec_bits;
         finishTranslationQ.deq;
+        // Model doFinishMem's retry handoff after data admission. The LSQ
+        // regression separately checks the independent payload/ID obligations.
+        if (r.inst.translateObjId) begin
+            let retryInst = r.inst;
+            retryInst.translateObjId = !lateCancel;
+            dTlbReqQ.enq(ToSpecFifo {data:retryInst, spec_bits:r.specBits});
+        end
         completed <= completed+1;
     endrule
     rule finishMetadata (dTlb.procResp.inst.translateObjId);
@@ -85,6 +97,21 @@ module mkTest(Empty);
         metadataReplies <= metadataReplies+1;
     endrule
     Stmt test=seq
+        // Exercise completion-queue masks and interior squash holes directly.
+        finishTranslationQ.enq(ToSpecFifo {data:unpack(0), spec_bits:1});
+        finishTranslationQ.enq(ToSpecFifo {data:unpack(0), spec_bits:2});
+        finishTranslationQ.specUpdate.correctSpeculation(~1);
+        finishTranslationQ.specUpdate.incorrectSpeculation(False,0);
+        check(finishTranslationQ.notEmpty, "correct-spec completion was killed");
+        finishTranslationQ.deq;
+        finishTranslationQ.specUpdate.incorrectSpeculation(False,1);
+        delay(4);
+        check(!finishTranslationQ.notEmpty, "completion squash hole leaked");
+        finishTranslationQ.enq(ToSpecFifo {data:unpack(0), spec_bits:0});
+        finishTranslationQ.specUpdate.incorrectSpeculation(True,0);
+        delay(4);
+        check(!finishTranslationQ.notEmpty, "completion kill-all leaked");
+        allowFinish <= True;
         dTlb.updateVMInfo(unpack(0));
         delay(12);
         check(valueOf(ObjIdTranslationSlots)==3,"expected three reservations/retry slots");
@@ -133,12 +160,27 @@ module mkTest(Empty);
         havePrevious <= False;
         checkRate <= True;
         target <= admitted+16;
+        completedTarget <= completed+16;
         allowAdmit <= True;
-        await(completed==32);
+        await(completed==completedTarget);
         allowAdmit <= False;
         check(metadataReplies==fromInteger(valueOf(ObjIdTranslationSlots)),"squashed retries issued");
         check(!objIdTranslation.notEmpty && dTlb.noPendingReq,"post-squash hit stream leaked credit");
-        $display("PASS: consecutive-cycle ObjID-hit admission, three retry slots, full-queue backpressure, draining, squash and reuse");
+        // Data-side access checks can cancel a reserved metadata translation
+        // after the DTLB response. Drain those credits without issuing metadata.
+        checkRate <= False;
+        setHits(False);
+        lateCancel <= True;
+        target <= admitted+fromInteger(valueOf(ObjIdTranslationSlots));
+        allowAdmit <= True;
+        await(admitted==target);
+        allowAdmit <= False;
+        delay(8);
+        check(!dTlbReqQ.notFull, "late cancellations did not retain retry credit");
+        allowRetry <= True;
+        await(!objIdTranslation.notEmpty && !dTlbReqQ.notEmpty && dTlb.noPendingReq);
+        check(metadataReplies==fromInteger(valueOf(ObjIdTranslationSlots)), "late cancellation issued a metadata request");
+        $display("PASS: consecutive-cycle ObjID-hit admission, three retry slots, full-queue backpressure, draining, squash, reuse and late cancellation");
         $finish(0);
     endseq;
     mkAutoFSM(test);

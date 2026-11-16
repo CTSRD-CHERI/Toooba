@@ -413,9 +413,10 @@ interface SplitLSQ;
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
         Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(8) mte, Bit#(3) alloc_policy,
-        Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset, InlineId inlineId
+        Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset, InlineId inlineId, Bool objIdTranslationPending
     );
     method Maybe#(ObjIdQTag) objIdChild(LdStQTag parent);
+    method Action resolveObjIdTranslation(LdStQTag parent, Addr paddr, Maybe#(Trap) fault);
     method Action startObjIdCheck(LdStQTag parent);
     method Action cancelObjIdCheck(LdStQTag parent);
     method LSQObjIdIssueInfo getIssueObjId;
@@ -744,6 +745,8 @@ module mkSplitLSQ(SplitLSQ);
     // LQ
     // entry valid bits
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_valid           <- replicateM(mkEhr(False));
+    Vector#(LdQSize, Ehr#(3, Bool)) ld_translationPending <- replicateM(mkEhr(False));
+    Vector#(StQSize, Ehr#(3, Bool)) st_translationPending <- replicateM(mkEhr(False));
     ObjIdLoadQueue objIds <- mkObjIdLoadQueue;
     Vector#(LdQSize, Ehr#(2, Maybe#(ObjIdQTag))) ld_objIdChild <- replicateM(mkEhr(Invalid));
     // entry contents
@@ -1289,7 +1292,7 @@ module mkSplitLSQ(SplitLSQ);
         function Bool canIssue(LdQTag i);
             return (
                 ld_valid_findIss[i] && ld_memFunc[i] == Ld && // (1) valid load
-                ld_computed_findIss[i] && // (2) computed
+                ld_computed_findIss[i] && !isValid(ld_fault[i][0]) && // (2) computed, no late metadata fault
                 !ld_executing_findIss[i] && // (3) not executing (or done)
                 !isValid(ld_depLdQDeq_findIss[i]) &&
                 !(ld_waitForOlderSt[i] && isValid(ld_olderSt_findIss[i])) &&
@@ -1503,12 +1506,13 @@ module mkSplitLSQ(SplitLSQ);
     // deqLd guard (see comments at the method declaration)
     function Bool deqLdGuard;
         LdQTag deqP = ld_deqP_deqLd;
-        if(!ld_valid_deqLd[deqP]) begin
+        if(!ld_valid_deqLd[deqP] || ld_translationPending[deqP][0]) begin
             return False; // not valid
         end
         else begin
             if(isValid(ld_fault_deqLd[deqP])) begin
-                return True; // fault
+                // An early payload request must drain before its slot is reused.
+                return !ld_executing_deqLd[deqP] || ld_done_deqLd[deqP]; // fault
             end
             else begin
                 Bool no_older_st = !isValid(ld_olderSt_deqLd[deqP]);
@@ -1540,7 +1544,7 @@ module mkSplitLSQ(SplitLSQ);
     // deqSt guard (see comments at the method declaration)
     function Bool deqStGuard;
         StQTag deqP = st_deqP;
-        if(!st_valid_deqSt[deqP]) begin
+        if(!st_valid_deqSt[deqP] || st_translationPending[deqP][0]) begin
             return False;
         end
         else begin
@@ -1660,6 +1664,7 @@ module mkSplitLSQ(SplitLSQ);
         ld_rel[ld_enqP] <= mem_inst.rl;
         ld_dst[ld_enqP] <= dst;
         ld_fault_enq[ld_enqP] <= Invalid;
+        ld_translationPending[ld_enqP][2] <= False;
         ld_computed_enq[ld_enqP] <= False;
         ld_objIdSealOk_enq[ld_enqP] <= Invalid;
         ld_storeIdCheck[ld_enqP][3] <= False;
@@ -1725,6 +1730,7 @@ module mkSplitLSQ(SplitLSQ);
         st_rel[st_enqP] <= mem_inst.rl;
         st_dst[st_enqP] <= dst;
         st_fault_enq[st_enqP] <= Invalid;
+        st_translationPending[st_enqP][2] <= False;
         st_pcHash[st_enqP] <= pcHash;
         st_allowCapAmoLd_enq[st_enqP] <= False;
         st_computed_enq[st_enqP] <= False;
@@ -1747,7 +1753,7 @@ module mkSplitLSQ(SplitLSQ);
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bit#(8) mte, Bit#(3) alloc_policy,
-        Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset, InlineId inlineId
+        Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset, InlineId inlineId, Bool objIdTranslationPending
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1787,6 +1793,7 @@ module mkSplitLSQ(SplitLSQ);
             // write fault, computed paddr, shift be. NOTE computed is
             // true only when no fault.
             ld_fault_updAddr[tag] <= fault;
+            ld_translationPending[tag][1] <= objIdTranslationPending;
             ld_computed_updAddr[tag] <= !isValid(fault);
             ld_paddr_updAddr[tag] <= pa;
             ld_inlineId_updAddr[tag] <= inlineId;
@@ -1819,6 +1826,7 @@ module mkSplitLSQ(SplitLSQ);
             // write fault, computed paddr, shift be. NOTE computed is
             // true only when no fault.
             st_fault_updAddr[tag] <= fault;
+            st_translationPending[tag][1] <= objIdTranslationPending;
             st_allowCapAmoLd_updAddr[tag] <= allowCap;
             st_computed_updAddr[tag] <= !isValid(fault);
             st_paddr_updAddr[tag] <= pa;
@@ -1857,7 +1865,7 @@ module mkSplitLSQ(SplitLSQ);
 
         if (getObjIdChild(lsqTag) matches tagged Valid .child) begin
             Bool active = !isValid(fault) && !mmio && isValid(objIdPAddr) && !inlineId.inLine;
-            objIds.prepare(child, active, active && (isStoreParent(lsqTag) || isLrParent(lsqTag)), ObjIdCheck {
+            objIds.prepare(child, active, active && (isStoreParent(lsqTag) || isLrParent(lsqTag)), !objIdTranslationPending, ObjIdCheck {
                 paddr:fromMaybe(?, objIdPAddr), mte:mte, offset:objIdOffset,
                 expected:inlineId.expected
             });
@@ -1965,6 +1973,31 @@ module mkSplitLSQ(SplitLSQ);
     method Maybe#(ObjIdQTag) objIdChild(LdStQTag parent) = getObjIdChild(parent);
     method Action setObjIdVAddr(ObjIdQTag child, Addr addr) if (!wrongSpec_conflict);
         objIds.setVAddr(child, addr);
+    endmethod
+    method Action resolveObjIdTranslation(LdStQTag parent, Addr paddr, Maybe#(Trap) fault) if (!wrongSpec_conflict);
+        // A forwarding verdict may already have resolved the parent, but the
+        // child must still drain its translation before returning its credit.
+        Maybe#(ObjIdQTag) child = case (parent) matches
+            tagged Ld .tag: ld_objIdChild[tag][0];
+            tagged St .tag: st_objIdChild[tag][0];
+        endcase;
+        if (child matches tagged Valid .tag) objIds.translate(tag, paddr, isValid(fault));
+        case (parent) matches
+            tagged Ld .tag: ld_translationPending[tag][1] <= False;
+            tagged St .tag: st_translationPending[tag][1] <= False;
+        endcase
+        if (isValid(fault)) begin
+            case (parent) matches
+                tagged Ld .tag: begin
+                    ld_fault_updObjIdSeal[tag] <= fault;
+                    ld_objIdSealOk_updObjIdSeal[tag] <= Valid(True);
+                end
+                tagged St .tag: begin
+                    st_fault_updObjIdSeal[tag] <= fault;
+                    st_objIdSealOk_updObjIdSeal[tag] <= Valid(True);
+                end
+            endcase
+        end
     endmethod
     method Action startObjIdCheck(LdStQTag parent) if (!wrongSpec_conflict);
         if (getObjIdChild(parent) matches tagged Valid .child) objIds.start(child);
@@ -2485,7 +2518,7 @@ module mkSplitLSQ(SplitLSQ);
         return issRes;
     endmethod
 
-    method LSQIssueLdInfo getIssueLd if (issueLdInfo.wget matches tagged Valid .info &&& !wrongSpec_conflict);
+    method LSQIssueLdInfo getIssueLd if (issueLdInfo.wget matches tagged Valid .info &&& !wrongSpec_conflict &&& !isValid(ld_fault_issue[info.tag]));
         return info;
     endmethod
 

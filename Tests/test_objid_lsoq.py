@@ -18,6 +18,14 @@ import HasSpecBits::*;
 (* synthesize *)
 module mkTest(Empty);
     SplitLSQ lsq <- mkSplitLSQ;
+    Reg#(LdQTag) earlyLd <- mkReg(0);
+    Reg#(StQTag) earlySt <- mkReg(0);
+    Reg#(Bool) rejectMetadata <- mkReg(False);
+    Reg#(Bool) expectFault <- mkReg(False);
+    rule rejectEarlyMetadata(rejectMetadata);
+        let request = lsq.getIssueObjId;
+        $display("FAIL: untranslated metadata issued ", fshow(request)); $finish(1);
+    endrule
     Reg#(Bool) drain <- mkReg(False);
     Reg#(Bool) observeLr <- mkReg(False);
     Reg#(Bool) lrReady <- mkReg(False);
@@ -33,6 +41,7 @@ module mkTest(Empty);
     endrule
     rule retireLoads(drain);
         let entry = lsq.firstLd;
+        if (isValid(entry.fault) != expectFault) begin $display("FAIL: fault delivery"); $finish(1); end
         lsq.deqLd;
         retired <= retired + 1;
     endrule
@@ -53,7 +62,7 @@ module mkTest(Empty);
     endfunction
     function Action address(LdStQTag tag, Addr data, Maybe#(Addr) metadata, Bit#(8) generation) = action
         let result <- lsq.updateAddr(tag, Invalid, True, data, False, DataMemAccess(unpack('1)),
-                                    generation, 0, metadata, 0, unpack(0));
+                                    generation, 0, metadata, 0, unpack(0), False);
     endaction;
     function Action issueData(LdQTag tag, Addr data, Bool metadata) = action
         let result <- lsq.issueLd(tag, data, Invalid, metadata, DataMemAccess(unpack('1)),
@@ -127,7 +136,7 @@ module mkTest(Empty);
         // Exercise the production same-cycle translate-and-immediately-issue path.
         action
             let translated <- lsq.updateAddr(tagged Ld 1, Invalid, True, 'h2000, False,
-                DataMemAccess(unpack('1)), 1, 0, Valid('h8000), 0, unpack(0));
+                DataMemAccess(unpack('1)), 1, 0, Valid('h8000), 0, unpack(0), False);
             let issued <- lsq.issueLd(1, 'h2000, Invalid, True, DataMemAccess(unpack('1)),
                 SBSearchRes {matchIdx:Invalid, sourceId:unpack(0), forwardData:Invalid}, unpack(0));
             check(issued == ToCache, "same-cycle issue");
@@ -218,7 +227,108 @@ module mkTest(Empty);
             check(entry.objIdSealOk, "fence acquired metadata obligation");
             lsq.deqSt;
         endaction
-        $display("PASS: independent ObjID credit exhaustion/wraparound, full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences");
+        // Data can complete before metadata address translation, but neither
+        // payload nor metadata queue ownership can retire in that interval.
+        retired <= 0;
+        action
+            let parent = fromMaybe(?, lsq.enqLdTag);
+            if (parent matches tagged Ld .tag) earlyLd <= tag;
+            lsq.enqLd(unpack(20), instruction(False), Invalid, 1, 0);
+        endaction
+        action
+            lookup <= fromMaybe(?, lsq.objIdChild(tagged Ld earlyLd));
+            let result <- lsq.updateAddr(tagged Ld earlyLd, Invalid, True, 'h18000, False,
+                DataMemAccess(unpack('1)), 1, 0, Valid('h9000), 0, unpack(0), True);
+        endaction
+        rejectMetadata <= True;
+        issueData(earlyLd, 'h18000, True);
+        action let response <- lsq.respLd(earlyLd, unpack(0), False, False); endaction
+        drain <= True;
+        delay(5);
+        check(retired == 0 && !lsq.objIdQueueEmpty, "early data retired before translation");
+        rejectMetadata <= False;
+        lsq.resolveObjIdTranslation(tagged Ld earlyLd, 'h19000, Invalid);
+        issueLookup(lookup, tagged Ld earlyLd, 'h19000);
+        action let result <- lsq.completeObjId(lookup, unpack(1)); endaction
+        await(retired == 1);
+        drain <= False;
+
+        // A metadata translation fault waits for the early cache response;
+        // returning/reusing its payload slot first would alias the response.
+        action
+            let parent = fromMaybe(?, lsq.enqLdTag);
+            if (parent matches tagged Ld .tag) earlyLd <= tag;
+            lsq.enqLd(unpack(21), instruction(False), Invalid, 1, 0);
+        endaction
+        action
+            let result <- lsq.updateAddr(tagged Ld earlyLd, Invalid, True, 'h20000, False,
+                DataMemAccess(unpack('1)), 1, 0, Valid('h21000), 0, unpack(0), True);
+        endaction
+        issueData(earlyLd, 'h20000, True);
+        lsq.resolveObjIdTranslation(tagged Ld earlyLd, 0, Valid(Exception(excLoadPageFault)));
+        expectFault <= True;
+        drain <= True;
+        delay(4);
+        check(retired == 1, "fault reused outstanding payload slot");
+        action let response <- lsq.respLd(earlyLd, unpack(0), False, False); endaction
+        await(retired == 2);
+        drain <= False;
+        expectFault <= False;
+
+        // Canceling a forwarded check must still hold its translation credit.
+        action
+            let parent = fromMaybe(?, lsq.enqLdTag);
+            if (parent matches tagged Ld .tag) earlyLd <= tag;
+            lsq.enqLd(unpack(22), instruction(False), Invalid, 1, 0);
+        endaction
+        action
+            let result <- lsq.updateAddr(tagged Ld earlyLd, Invalid, True, 'h22000, False,
+                DataMemAccess(unpack('1)), 1, 0, Valid('h23000), 0, unpack(0), True);
+        endaction
+        lsq.cancelObjIdCheck(tagged Ld earlyLd);
+        delay(4);
+        check(!lsq.objIdQueueEmpty, "canceled pending translation credit reused");
+        lsq.resolveObjIdTranslation(tagged Ld earlyLd, 'h24000, Invalid);
+        lsq.specUpdate.incorrectSpeculation(False, 0);
+        delay(creditDrainDelay);
+        check(lsq.objIdQueueEmpty, "translation cancellation leaked credit");
+
+        // Stores may enter LSQ early; metadata remains unissuable until its
+        // physical address arrives, and the store still awaits its verdict.
+        action
+            let parent = fromMaybe(?, lsq.enqStTag);
+            if (parent matches tagged St .tag) earlySt <= tag;
+            lsq.enqSt(unpack(23), instruction(True), Invalid, 1, 0);
+        endaction
+        action
+            lookup <= fromMaybe(?, lsq.objIdChild(tagged St earlySt));
+            let result <- lsq.updateAddr(tagged St earlySt, Invalid, True, 'h25000, False,
+                DataMemAccess(unpack('1)), 1, 0, Valid('h26000), 0, unpack(0), True);
+        endaction
+        rejectMetadata <= True;
+        delay(4);
+        rejectMetadata <= False;
+        lsq.resolveObjIdTranslation(tagged St earlySt, 'h27000, Invalid);
+        issueLookup(lookup, tagged St earlySt, 'h27000);
+        action let result <- lsq.completeObjId(lookup, unpack(1)); check(isValid(result), "store completion missing"); endaction
+        lsq.specUpdate.incorrectSpeculation(False, 0);
+        delay(creditDrainDelay);
+        check(lsq.objIdQueueEmpty, "early store leaked credit");
+
+        // Squash an untranslated request without ever receiving a translation.
+        action
+            let parent = fromMaybe(?, lsq.enqLdTag);
+            if (parent matches tagged Ld .tag) earlyLd <= tag;
+            lsq.enqLd(unpack(24), instruction(False), Invalid, 1, 0);
+        endaction
+        action
+            let result <- lsq.updateAddr(tagged Ld earlyLd, Invalid, True, 'h28000, False,
+                DataMemAccess(unpack('1)), 1, 0, Valid('h29000), 0, unpack(0), True);
+        endaction
+        lsq.specUpdate.incorrectSpeculation(False, 0);
+        delay(creditDrainDelay);
+        check(lsq.objIdQueueEmpty, "squashed pending translation leaked credit");
+        $display("PASS: independent ObjID credit exhaustion/wraparound, full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences, early data/late translation, fault draining, pending cancellation and squash");
         $finish(0);
     endseq;
     mkAutoFSM(test);

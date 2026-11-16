@@ -75,3 +75,38 @@ smoke groups, not full ISA-suite certification. Logs are kept
 outside tracked history in the parent checkout's `comparison-results` directory,
 with the `Reloaded-lsoq-` prefix. No FPGA area or timing improvement is claimed
 until this experimental branch is synthesized and routed.
+
+## Early data admission
+
+Data address translation and the BRAM ObjID-buffer lookup still start together.
+After a buffer miss, the payload enters the LSQ as soon as its data translation
+and ordinary access checks finish. The ObjID-address translation is queued in
+parallel; it no longer holds the data translation in the DTLB completion path.
+This change does not compact the DTLB token type.
+
+The ObjID queue descriptor has a translated bit. It can remember payload issue
+or forwarding cancellation before the physical metadata address arrives, but
+cannot issue a metadata cache request until translation completes. Each parent
+also keeps a pending bit so a completed/forwarded payload cannot retire and reuse
+its tag before the translation callback. Canceled descriptors retain their credit
+until that callback; a squash cancels both the speculative translation and the
+reservation. A late metadata fault retains the original metadata trap address
+and drains an outstanding payload response before reusing its slot. A faulted
+stalled load is excluded from issue. Stores still await the ObjID verdict, and
+atomics become commit-protected only after metadata translation completes.
+
+A two-entry speculative completion FIFO updates its state through an internal
+rule so enqueue and dequeue are independent. This avoids a scheduling cycle
+between shared-DTLB response dequeue, data LSQ admission, and metadata retry
+issue. Late data-side faults/MMIO release their reserved translation credit
+through the same retry queue, with the translation bit cleared, so the common
+data-response and admission rules do not share a reservation-dequeue port.
+It retains branch masks and cancels entries on squash; squash holes drain
+before TLB maintenance can report no pending work.
+
+Validation: the full normal Bluesim core compiles. The LSQ regression passes
+with early payload completion, delayed metadata translation, late-fault response
+draining, pending cancellation, stores and squash. The translation regression
+passes consecutive-cycle hit-stream admission, all three credits, saturation,
+draining, correct-speculation masks and cancellation/reuse. The existing L1
+request cancellation regression also passes.

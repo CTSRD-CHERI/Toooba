@@ -71,7 +71,7 @@ __RULES__
         return x;
     endfunction
     function Action address(LdStQTag tag, Addr data, Maybe#(Addr) metadata) = action
-        let result <- lsq.updateAddr(tag, Invalid, True, data, False, DataMemAccess(unpack('1)), 1, 0, metadata, 0, unpack(0));
+        let result <- lsq.updateAddr(tag, Invalid, True, data, False, DataMemAccess(unpack('1)), 1, 0, metadata, 0, unpack(0), False);
     endaction;
     function Action issue(LdQTag tag, Addr addr, Bool checkId) = action
         let result <- lsq.issueLd(tag, addr, Invalid, checkId, DataMemAccess(unpack('1)),
