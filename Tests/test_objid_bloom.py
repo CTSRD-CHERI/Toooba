@@ -8,6 +8,9 @@ from pathlib import Path
 import re, shlex, subprocess, tempfile
 root=Path(__file__).resolve().parents[1]
 s=(root/'src_Core/RISCY_OOO/procs/RV64G_OOO/MemExePipeline.bsv').read_text()
+if 'import ObjIdReverseMap::*;' in s:
+ print('SKIP: reverse-map branch; run Tests/test_objid_reversemap.py for coherence validation')
+ raise SystemExit(0)
 def rule(n):
  m=re.search(r'    rule '+n+r'\b.*?    endrule',s,re.S); assert m,n; return m.group()
 a=s.index('    PulseWire objIdMode3Seen');b=s.index('    // Key with full address',a)

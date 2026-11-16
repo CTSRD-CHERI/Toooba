@@ -62,6 +62,7 @@ import FIFOF::*;
 import ObjIdReqBuffer::*;
 import Ehr::*;
 import Map::*;
+import ObjIdReverseMap::*;
 import Types::*;
 import ProcTypes::*;
 import MemoryTypes::*;
@@ -441,22 +442,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdEvictQ <- mkCFFifo;
 
 
-    // Bloom tracking and eviction-triggered ObjID-buffer flushes.
-    Bool objIdBloomEnabled = True;
+    // Exact physical-line presence tracking, with conservative saturation.
+    Bool objIdCoherenceEnabled = True;
     PulseWire objIdMode3Seen <- mkPulseWire;
-    // Single-hash Bloom filter: bits are only removed on a whole-buffer flush.
-    // Collisions cause extra flushes, never missed invalidations.
-    Reg#(Bit#(256)) objIdPAddrFilter <- mkReg(0);
+    ObjIdReverseMap objIdPAddrBuf <- mkObjIdReverseMap;
     RWire#(Addr) objIdPAddrFilterLdUpdate <- mkRWire;
     RWire#(Addr) objIdPAddrFilterStUpdate <- mkRWire;
     Reg#(Bool) objIdFlushPending <- mkReg(False);
-
-    function Bit#(8) objIdPAddrFilterIndex(Addr paddr);
-        // Hash line addresses using the configured cache-line geometry.
-        Addr line = zeroExtend(getLineAddr(paddr));
-        return line[7:0] ^ line[15:8] ^ line[23:16] ^ line[31:24]
-             ^ line[39:32] ^ line[47:40] ^ line[55:48] ^ line[63:56];
-    endfunction
 
     // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
     // 4-bit index == 16 entries per set.
@@ -470,12 +462,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     
     function Action updateObjIdBuf(
         Addr objIDVAddr,
+        Addr objIDPAddr,
         MemTaggedData idData
     );
     action
 
         Addr vWordAddr =
             objIDVAddr & ~64'hF;
+        objIdPAddrBuf.insert(getLineAddr(objIDPAddr));
 
         objIdBuf.update(
             MapKeyIndex {
@@ -655,7 +649,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Bool flushObjIDbuf4k
         );
 
-            if (objIdBloomEnabled) objIdEvictQ.enq(ObjIdEvictReq {
+            if (objIdCoherenceEnabled) objIdEvictQ.enq(ObjIdEvictReq {
                 line: lineAddr,
                 flush1k: flushObjIDbuf1k,
                 flush4k: flushObjIDbuf4k
@@ -1509,6 +1503,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (!lsq.skipLdIdFill(tag)) begin
         updateObjIdBuf(
             vaddr,
+            paddr,
             d
         );
 
@@ -1547,6 +1542,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (!lsq.skipStIdFill(t)) begin
         updateObjIdBuf(
             vaddr,
+            paddr,
             d
         );
 
@@ -1572,18 +1568,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
             );
         end
-    endrule
-
-    (* descending_urgency = "doObjIdFlush, doUpdateObjIdPAddrFilter" *)
-    rule doUpdateObjIdPAddrFilter (objIdBloomEnabled &&
-                                  (isValid(objIdPAddrFilterLdUpdate.wget) ||
-                                   isValid(objIdPAddrFilterStUpdate.wget)));
-        Bit#(256) nextFilter = objIdPAddrFilter;
-        if (objIdPAddrFilterLdUpdate.wget matches tagged Valid .paddr)
-            nextFilter[objIdPAddrFilterIndex(paddr)] = 1;
-        if (objIdPAddrFilterStUpdate.wget matches tagged Valid .paddr)
-            nextFilter[objIdPAddrFilterIndex(paddr)] = 1;
-        objIdPAddrFilter <= nextFilter;
     endrule
 
     // A forwarded store makes the cached ObjectID word suspect. This is
@@ -2299,19 +2283,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdBufMayContainMode3 <= True;
     endrule
 
-    rule doObjIdFilterLookup (objIdBloomEnabled && !objIdFlushPending);
+    rule doObjIdReverseLookup (objIdCoherenceEnabled && !objIdFlushPending);
         let req = objIdEvictQ.first;
         objIdEvictQ.deq;
         Bool shouldCheck = req.flush4k ||
             ((objIdBufMayContainMode3 || objIdMode3Seen) && req.flush1k);
         Addr paddr = zeroExtend(req.line) << valueOf(LgLineSzBytes);
-        let idx = objIdPAddrFilterIndex(paddr);
-        Bool maybePresent = objIdPAddrFilter[idx] == 1;
+        Bool maybePresent = objIdPAddrBuf.contains(req.line);
         // Include fills accepted in this cycle, before their bits commit.
         if (objIdPAddrFilterLdUpdate.wget matches tagged Valid .a)
-            maybePresent = maybePresent || objIdPAddrFilterIndex(a) == idx;
+            maybePresent = maybePresent || getLineAddr(a) == req.line;
         if (objIdPAddrFilterStUpdate.wget matches tagged Valid .a)
-            maybePresent = maybePresent || objIdPAddrFilterIndex(a) == idx;
+            maybePresent = maybePresent || getLineAddr(a) == req.line;
         if (shouldCheck && maybePresent)
             objIdFlushPending <= True;
     endrule
@@ -2319,9 +2302,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // MapSplit.clear starts a multi-cycle BRAM clear. Its lookupRead returns
     // misses during clearing, and fills are discarded until clearDone.
     // Do not accept a fill in this cycle: it would outlive the filter reset.
-    rule doObjIdFlush (objIdBloomEnabled && objIdFlushPending && objIdBuf.clearDone);
+    rule doObjIdFlush (objIdCoherenceEnabled && objIdFlushPending && objIdBuf.clearDone);
         objIdBuf.clear;
-        objIdPAddrFilter <= 0;
+        objIdPAddrBuf.clear;
         objIdFlushPending <= False;
     endrule
 
