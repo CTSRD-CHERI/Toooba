@@ -18,6 +18,9 @@ import HasSpecBits::*;
 (* synthesize *)
 module mkTest(Empty);
     SplitLSQ lsq <- mkSplitLSQ;
+    SplitLSQ ordering <- mkSplitLSQ;
+    StoreBuffer sbWords <- mkStoreBufferEhr;
+    Reg#(SBIndex) sbIndex <- mkReg(0);
     Reg#(LdQTag) earlyLd <- mkReg(0);
     Reg#(StQTag) earlySt <- mkReg(0);
     Reg#(Bool) rejectMetadata <- mkReg(False);
@@ -346,7 +349,76 @@ module mkTest(Empty);
         drain <= False;
         delay(creditDrainDelay);
         check(lsq.objIdQueueEmpty, "same-cycle correct-spec allocation leaked credit");
-        $display("PASS: independent ObjID credit exhaustion/wraparound, full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences, early data/late translation, fault draining, pending cancellation, squash and same-cycle correct-spec allocation");
+        // Metadata reads never forward, even when only a different byte of
+        // the same 128-bit word is written. Unknown older addresses block too.
+        action
+            let byteStore = instruction(True);
+            byteStore.byteOrTagEn = DataMemAccess(unpack('h1));
+            ordering.enqSt(unpack(40), byteStore, Invalid, 0, 0);
+        endaction
+        ordering.enqLd(unpack(41), instruction(False), Invalid, 0, 0);
+        action
+            let byteStore = instruction(True);
+            byteStore.byteOrTagEn = DataMemAccess(unpack('h1));
+            ordering.enqSt(unpack(42), byteStore, Invalid, 0, 0);
+        endaction
+        action
+            check(ordering.searchObjIdLd(0, 'h7000) == Stall(StQ), "unresolved older store/load");
+            check(ordering.searchObjIDSt(1, 'h7000) == Stall(StQ), "unresolved older store/store");
+        endaction
+        ordering.updateData(0, unpack(0));
+        action
+            let result <- ordering.updateAddr(tagged St 0, Invalid, True, 'h7008, False,
+                DataMemAccess(unpack('h100)), 0, 0, Invalid, 0, unpack(0), False);
+        endaction
+        action
+            check(ordering.searchObjIdLd(0, 'h7000) == Stall(StQ), "different byte must wait/load");
+            check(ordering.searchObjIDSt(1, 'h7000) == Stall(StQ), "different byte must wait/store");
+        endaction
+        action
+            check(ordering.searchObjIdLd(0, 'h7010) == ObjIdToCache, "adjacent word or younger unknown store blocked load");
+            check(ordering.searchObjIDSt(1, 'h7010) == ObjIdToCache, "store blocked by itself");
+        endaction
+        action
+            let result <- ordering.updateAddr(tagged St 1, Invalid, True, 'h7010, False,
+                DataMemAccess(unpack('h1)), 0, 0, Invalid, 0, unpack(0), False);
+        endaction
+        action
+            check(ordering.searchObjIdLd(0, 'h7010) == ObjIdToCache, "younger matching store blocked load");
+            check(ordering.searchObjIDSt(1, 'h7010) == ObjIdToCache, "matching store blocked itself");
+        endaction
+        ordering.setAtCommit[0].put(tagged St 0);
+        check(ordering.searchObjIdLd(0, 'h7000) == Stall(StQ), "commit released store before cache completion");
+        ordering.deqSt;
+        action
+            check(ordering.searchObjIdLd(0, 'h7000) == ObjIdToCache, "completed store still blocks load");
+            check(ordering.searchObjIDSt(1, 'h7000) == ObjIdToCache, "completed store still blocks store");
+        endaction
+        // In WEAK mode SQ retirement transfers ownership to the SB. Only
+        // written words in a merged line block, through issue until callback.
+        action
+            let idx = sbWords.getEnqIndex('h8008, unpack('h100), unpack(0));
+            check(isValid(idx), "SB allocation");
+            sbIndex <= fromMaybe(?, idx);
+            sbWords.enq(fromMaybe(?, idx), 'h8008, unpack('h100), unpack(0), 0, unpack(0));
+        endaction
+        action
+            check(!sbWords.noMatchMetadataLdQ('h8000) && !sbWords.noMatchMetadataStQ('h8000), "SB same word must wait");
+        endaction
+        action
+            check(sbWords.noMatchMetadataLdQ('h8010) && sbWords.noMatchMetadataStQ('h8010), "SB adjacent word blocked");
+        endaction
+        check(sbWords.noMatchMetadataLdQ('h9000), "SB unrelated line blocked");
+        action
+            noAction;
+        endaction
+        action
+            let entry <- sbWords.issue;
+        endaction
+        check(!sbWords.noMatchMetadataLdQ('h8000), "SB issue released word before cache completion");
+        action let entry <- sbWords.deq(sbIndex); endaction
+        check(sbWords.noMatchMetadataLdQ('h8000) && sbWords.noMatchMetadataStQ('h8000), "SB cache completion did not release word");
+        $display("PASS: conservative 128-bit metadata/store ordering and SB drain; independent ObjID credit exhaustion/wraparound, full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences, early data/late translation, fault draining, pending cancellation, squash and same-cycle correct-spec allocation");
         $finish(0);
     endseq;
     mkAutoFSM(test);

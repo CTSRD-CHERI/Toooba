@@ -31,7 +31,6 @@ typedef struct {
     ObjIdQTag tag;
     LdStQTag parent;
     Addr paddr;
-    Bit#(7) offset;
 } LSQObjIdIssueInfo deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -51,7 +50,6 @@ interface ObjIdLoadQueue;
     method Action issue;
     method Action retry;
     method Bool skipFill(ObjIdQTag tag);
-    method Bool forStore(ObjIdQTag tag);
     method Addr paddr(ObjIdQTag tag);
     method Addr vaddr(ObjIdQTag tag);
     method ActionValue#(Maybe#(ObjIdResult)) complete(ObjIdQTag tag, MemTaggedData data);
@@ -65,7 +63,6 @@ endinterface
 module mkObjIdLoadQueue(ObjIdLoadQueue);
     // Wide, non-searchable fields have a single write port and indexed reads.
     // Only the small control/speculation state is inspected in parallel.
-    Vector#(ObjIdQSize, Reg#(Bool)) storeOwner <- replicateM(mkConfigRegU);
     RegFile#(ObjIdQTag, ObjIdOwner) owners <- mkRegFileFull;
     RegFile#(ObjIdQTag, InstTag) commitTags <- mkRegFileFull;
     RegFile#(ObjIdQTag, ObjIdCheck) checks <- mkRegFileFull;
@@ -125,10 +122,6 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
     method Action reserve(ObjIdOwner owner, SpecBits specBits, Bool unused) if (!used[tail][1] && !wrongSpec);
         owners.upd(tail, owner);
         commitTags.upd(tail, owner.instTag);
-        storeOwner[tail] <= case (owner.parent) matches
-            tagged St .parent: True;
-            default: False;
-        endcase;
         used[tail][1] <= True;
         enabled[tail][2] <= False;
         ready[tail][2] <= False;
@@ -174,7 +167,7 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
     method LSQObjIdIssueInfo firstReady if (pending != 0 && !wrongSpec);
         let tag = selected;
         let check = checks.sub(tag);
-        return LSQObjIdIssueInfo {tag:tag, parent:owners.sub(tag).parent, paddr:check.paddr, offset:check.offset};
+        return LSQObjIdIssueInfo {tag:tag, parent:owners.sub(tag).parent, paddr:check.paddr};
     endmethod
     method Action issue if (pending != 0 && !wrongSpec);
         issued[selected][1] <= True;
@@ -184,7 +177,6 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
         cursor <= next(selected);
     endmethod
     method Bool skipFill(ObjIdQTag tag) = !used[tag][0] || canceled[tag][0] || checks.sub(tag).expected != 0;
-    method Bool forStore(ObjIdQTag tag) = storeOwner[tag];
     method Addr paddr(ObjIdQTag tag) = checks.sub(tag).paddr;
     method Addr vaddr(ObjIdQTag tag) = virtualAddrs.sub(tag);
     method ActionValue#(Maybe#(ObjIdResult)) complete(ObjIdQTag tag, MemTaggedData data) if (!wrongSpec);

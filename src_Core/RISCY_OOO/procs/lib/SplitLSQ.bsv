@@ -377,7 +377,6 @@ typedef struct {
 
 typedef union tagged {
     void ObjIdToCache;
-    MemTaggedData ObjIdForward;
     LdStalledBy Stall;
 } LSQObjIdSearchResult deriving(Bits, Eq, FShow);
 
@@ -423,22 +422,19 @@ interface SplitLSQ;
     method Action issueObjId;
     method Action retryObjId;
     method Bool skipObjIdFill(ObjIdQTag child);
-    method Bool objIdForStore(ObjIdQTag child);
     method Addr objIdPAddr(ObjIdQTag child);
     method Addr objIdVAddr(ObjIdQTag child);
     method Action setObjIdVAddr(ObjIdQTag child, Addr addr);
     method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc))) completeObjId(ObjIdQTag child, MemTaggedData d);
-    // Issue a load, and remove dependence on this load issue.
+    // Wait for older stores to the same data word before reading metadata.
     method LSQObjIdSearchResult searchObjIDSt(
                                 StQTag requester,
-                                Addr objIdPAddr,
-                                Bit#(7) objIDoffset) ;
+                                Addr objIdPAddr);
     
 
     method LSQObjIdSearchResult searchObjIdLd(
                                 LdQTag requester,
-                                Addr objIdPAddr,
-                                Bit#(7) objIDoffset) ;
+                                Addr objIdPAddr);
 
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, Bool objIdLookup, ByteOrTagEn shiftedBE, SBSearchRes sbRes, InlineId inlineId
@@ -2009,7 +2005,6 @@ module mkSplitLSQ(SplitLSQ);
     method Action issueObjId if (!wrongSpec_conflict) = objIds.issue;
     method Action retryObjId if (!wrongSpec_conflict) = objIds.retry;
     method Bool skipObjIdFill(ObjIdQTag child) = objIds.skipFill(child);
-    method Bool objIdForStore(ObjIdQTag child) = objIds.forStore(child);
     method Addr objIdPAddr(ObjIdQTag child) = objIds.paddr(child);
     method Addr objIdVAddr(ObjIdQTag child) = objIds.vaddr(child);
     method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc))) completeObjId(ObjIdQTag child, MemTaggedData data) if (!wrongSpec_conflict);
@@ -2035,116 +2030,37 @@ module mkSplitLSQ(SplitLSQ);
         return result;
     endmethod
 
+    // Metadata never forwards: an older store with an unknown address, or
+    // any write to the same 128-bit data word, must reach the cache first.
+    // A Boolean reduction avoids youngest-store selection and data muxing.
     method LSQObjIdSearchResult searchObjIDSt(
                                 StQTag requester,
-                                Addr objIdPAddr,
-                                Bit#(7) objIDoffset) if (!wrongSpec_conflict);
-        LSQObjIdSearchResult result = tagged ObjIdToCache;
+                                Addr objIdPAddr) if (!wrongSpec_conflict);
         StQVirTag requesterVTag = stVirTags[requester];
-        function Bool isValidOlderSt(StQTag i);
-            Bool valid = st_valid_issue[i];
-
-            // Strictly older. This excludes requester itself.
-            Bool older = stVirTags[i] < requesterVTag;
-
-            return valid && older;
+        function Bool blocksMetadata(StQTag i);
+            // Strictly older: a store must not wait for itself.
+            return st_valid_issue[i] && stVirTags[i] < requesterVTag &&
+                (!st_computed_issue[i] ||
+                 sameDataAlignedAddr(objIdPAddr, st_paddr_issue[i]));
         endfunction
-
-        Vector#(StQSize, Bool) validOlderSts =
-                map(isValidOlderSt, genWith(fromInteger));
-        MemDataByteEn objIdByteBE = replicate(False);
-
-        Bit#(TLog#(MemDataBytes)) objIdByteIndex =
-            truncate(objIDoffset);
-
-        objIdByteBE[objIdByteIndex] = True;
-
-        function Bool isOverlapSt(StQTag i);
-            Bool valid_older = validOlderSts[i];
-            Bool computed = st_computed_issue[i];
-            Bool overlap = overlapAddr(objIdPAddr, DataMemAccess(objIdByteBE),
-                                      st_paddr_issue[i],
-                                      DataMemAccess(st_shiftedBE_issue[i])) ;
-            return valid_older && computed && overlap;
-        endfunction
-        Vector#(StQSize, Bool) overlapSts = map(isOverlapSt,
-                                                genWith(fromInteger));
-        function Bool isUnresolvedOlderSt(StQTag i);
-            return validOlderSts[i] && !st_computed_issue[i];
-        endfunction
-        Vector#(StQSize, Bool) unresolvedOlderSts =
-            map(isUnresolvedOlderSt, genWith(fromInteger));
-        // Stores have no younger-load replay to repair an early metadata
-        // verdict. Wait until all older addresses are known, and never use
-        // bytes from a producer which may still cancel at its L1 callback.
-        if(findYoungestSt(unresolvedOlderSts) matches tagged Valid .stTag) begin
-            result = tagged Stall StQ;
-        end
-        else if(findYoungestSt(overlapSts) matches tagged Valid .stTag) begin
-            case(st_memFunc[stTag])
-                St: result = st_inlineId_issue[stTag].expected == 0
-                    ? tagged ObjIdForward st_stData_issue[stTag]
-                    : tagged Stall StQ;
-                default: result = tagged Stall StQ;
-            endcase
-        end
-        return result;
-
-    endmethod 
-
+        Vector#(StQSize, StQTag) indices = genWith(fromInteger);
+        return any(blocksMetadata, indices) ? tagged Stall StQ : tagged ObjIdToCache;
+    endmethod
 
     method LSQObjIdSearchResult searchObjIdLd(
                                 LdQTag requester,
-                                Addr objIdPAddr,
-                                Bit#(7) objIDoffset) if (!wrongSpec_conflict);
-        LSQObjIdSearchResult result = tagged ObjIdToCache;
+                                Addr objIdPAddr) if (!wrongSpec_conflict);
         Maybe#(StQVirTag) precedingSt = olderStVirTags[requester];
-
-        function Bool isValidOlderSt(StQTag i);
+        function Bool blocksMetadata(StQTag i);
             Bool older = False;
-            if (precedingSt matches tagged Valid .st) begin
-                older = stVirTags[i] <= st;
-            end
-            return st_valid_issue[i] && older;
+            if (precedingSt matches tagged Valid .st) older = stVirTags[i] <= st;
+            return st_valid_issue[i] && older &&
+                (!st_computed_issue[i] ||
+                 sameDataAlignedAddr(objIdPAddr, st_paddr_issue[i]));
         endfunction
-
-        Vector#(StQSize, Bool) validOlderSts =
-                map(isValidOlderSt, genWith(fromInteger));
-        MemDataByteEn objIdByteBE = replicate(False);
-        Bit#(TLog#(MemDataBytes)) objIdByteIndex = truncate(objIDoffset);
-        objIdByteBE[objIdByteIndex] = True;
-
-        function Bool isUnresolvedOlderSt(StQTag i);
-            return validOlderSts[i] && !st_computed_issue[i];
-        endfunction
-        Vector#(StQSize, Bool) unresolvedOlderSts =
-                map(isUnresolvedOlderSt, genWith(fromInteger));
-
-        function Bool isObjIdOverlapSt(StQTag i);
-            return validOlderSts[i] && st_computed_issue[i] &&
-                overlapAddr(objIdPAddr, DataMemAccess(objIdByteBE),
-                            st_paddr_issue[i], DataMemAccess(st_shiftedBE_issue[i]));
-        endfunction
-        Vector#(StQSize, Bool) overlapSts =
-                map(isObjIdOverlapSt, genWith(fromInteger));
-
-        if (findYoungestSt(unresolvedOlderSts) matches tagged Valid .stTag) begin
-            result = tagged Stall StQ;
-        end
-        else if (findYoungestSt(overlapSts) matches tagged Valid .stTag) begin
-            case (st_memFunc[stTag])
-                St: begin
-                    // A checked store may still be canceled at L1. Its ID
-                    // write cannot be used to validate itself or a younger load.
-                    result = st_inlineId_issue[stTag].expected == 0
-                        ? tagged ObjIdForward st_stData_issue[stTag]
-                        : tagged Stall StQ;
-                end
-                default: result = tagged Stall StQ;
-            endcase
-        end
-        return result;
-    endmethod 
+        Vector#(StQSize, StQTag) indices = genWith(fromInteger);
+        return any(blocksMetadata, indices) ? tagged Stall StQ : tagged ObjIdToCache;
+    endmethod
 
     method ActionValue#(LSQIssueLdResult) issueLd(LdQTag tag,
                                                   Addr pa,

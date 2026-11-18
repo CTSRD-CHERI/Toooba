@@ -88,8 +88,8 @@ interface StoreBuffer;
     method ActionValue#(SBEntry) deq(SBIndex idx);
     method ActionValue#(Tuple2#(SBIndex, SBEntry)) issue;
     method SBSearchRes search(Addr paddr, ByteOrTagEn be, InlineId inlineId);
-    method SBSearchRes searchMetadata(Addr paddr, ByteOrTagEn be, InlineId inlineId);
-    method SBSearchRes searchMetadataSt(Addr paddr, ByteOrTagEn be, InlineId inlineId);
+    method Bool noMatchMetadataLdQ(Addr paddr);
+    method Bool noMatchMetadataStQ(Addr paddr);
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId); // load bypass/stall or atomic inst stall
     method Bool noMatchInlineLdQ(Addr paddr, InlineId inlineId);
     method Bool noMatchInlineStQ(Addr paddr, InlineId inlineId);
@@ -178,6 +178,18 @@ module mkStoreBufferEhr(StoreBuffer);
         // find match entry and determine return value
         Vector#(SBSize, Integer) idxVec = genVector;
         return !any(matchEntry, idxVec);
+    endfunction
+
+    function Bool noMetadataWordMatch(Addr paddr);
+        SBBlockMemDataSel sel = getSBBlockMemDataSel(paddr);
+        function Bool matchesWord(Integer i);
+            Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = unpack(pack(entry[i][searchPort].byteEn));
+            return valid[i][searchPort] &&
+                getSBBlockAddr(paddr) == entry[i][searchPort].addr &&
+                pack(byteEn[sel]) != 0;
+        endfunction
+        Vector#(SBSize, Integer) indices = genVector;
+        return !any(matchesWord, indices);
     endfunction
 
     function SBSearchRes searchEntry(Addr paddr, ByteOrTagEn be, InlineId inlineId);
@@ -378,21 +390,11 @@ module mkStoreBufferEhr(StoreBuffer);
         return searchEntry(paddr, be, inlineId);
     endmethod
 
-    method SBSearchRes searchMetadata(Addr paddr, ByteOrTagEn be, InlineId inlineId);
-        // Legacy metadata consumers do not subscribe to producer validation.
-        // Only unconditional stores can supply their bytes speculatively.
-        let res = searchEntry(paddr, be, inlineId);
-        if(res.sourceId.expected != 0) res.forwardData = Invalid;
-        return res;
-    endmethod
-
-    // Independent read port: load and store metadata request guards both
-    // need their SB dependencies without arbitrating a value-method port.
-    method SBSearchRes searchMetadataSt(Addr paddr, ByteOrTagEn be, InlineId inlineId);
-        let res = searchEntry(paddr, be, inlineId);
-        if(res.sourceId.expected != 0) res.forwardData = Invalid;
-        return res;
-    endmethod
+    // Metadata checks wait for the whole selected 128-bit word to drain.
+    // A merged SB line may contain writes to other words only; byte enables
+    // are used solely to establish word presence, not query-byte overlap.
+    method Bool noMatchMetadataLdQ(Addr paddr) = noMetadataWordMatch(paddr);
+    method Bool noMatchMetadataStQ(Addr paddr) = noMetadataWordMatch(paddr);
 
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId);
         return searchInlineEntry(paddr, inlineId);
@@ -428,12 +430,8 @@ module mkDummyStoreBuffer(StoreBuffer);
     method SBSearchRes search(Addr paddr, ByteOrTagEn be, InlineId inlineId);
         return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
     endmethod
-    method SBSearchRes searchMetadata(Addr paddr, ByteOrTagEn be, InlineId inlineId);
-        return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
-    endmethod
-    method SBSearchRes searchMetadataSt(Addr paddr, ByteOrTagEn be, InlineId inlineId);
-        return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
-    endmethod
+    method Bool noMatchMetadataLdQ(Addr paddr) = True;
+    method Bool noMatchMetadataStQ(Addr paddr) = True;
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId);
         return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
     endmethod

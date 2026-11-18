@@ -488,7 +488,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
     // fifo for load result
     Fifo#(2, Tuple2#(LdQTag, MemResp)) forwardQ <- mkCFFifo;
-    Fifo#(2, Tuple2#(ObjIdQTag, MemTaggedData))  memObjIdLdForwardQ <- mkCFFifo;
 
     Fifo#(2, Tuple4#(LdQTag, MemResp, Bool, Bool)) memRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(ObjIdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
@@ -1522,15 +1521,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         finishObjId(child, data);
     endrule
 
-    rule doObjIdRespLdForward;
-        let {child, data} <- toGet(memObjIdLdForwardQ).get;
-        if (lsq.objIdForStore(child) && !lsq.skipObjIdFill(child)) begin
-            Addr word = lsq.objIdVAddr(child) & ~64'hF;
-            objIdBuf.updateMayInsert(MapKeyIndex { key: word, index: hash(word) }, Invalid, False);
-        end
-        finishObjId(child, data);
-    endrule
-
     (* descending_urgency = "doObjIdFlush, doUpdateObjIdPAddrFilter" *)
     rule doUpdateObjIdPAddrFilter (objIdBloomEnabled &&
                                   (isValid(objIdPAddrFilterLdUpdate.wget) ||
@@ -2243,28 +2233,22 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule checkObjId (!storeUrgent);
         let info = lsq.getIssueObjId;
         LSQObjIdSearchResult result = case (info.parent) matches
-            tagged Ld .parent: lsq.searchObjIdLd(parent, info.paddr, info.offset);
-            tagged St .parent: lsq.searchObjIDSt(parent, info.paddr, info.offset);
+            tagged Ld .parent: lsq.searchObjIdLd(parent, info.paddr);
+            tagged St .parent: lsq.searchObjIDSt(parent, info.paddr);
         endcase;
 `ifndef TSO_MM
-        MemDataByteEn mask = replicate(False);
-        Bit#(4) byteIndex = truncate(info.offset);
-        mask[byteIndex] = True;
-        let sbResult = case (info.parent) matches
-            tagged Ld .parent: stb.searchMetadata(info.paddr, DataMemAccess(mask), unpack(0));
-            tagged St .parent: stb.searchMetadataSt(info.paddr, DataMemAccess(mask), unpack(0));
+        // Under WEAK, SQ retirement transfers the write to the store buffer.
+        // Keep waiting there until the cache callback removes the entry.
+        Bool sbClear = case (info.parent) matches
+            tagged Ld .parent: stb.noMatchMetadataLdQ(info.paddr);
+            tagged St .parent: stb.noMatchMetadataStQ(info.paddr);
         endcase;
-        if (result == ObjIdToCache) begin
-            if (sbResult.forwardData matches tagged Valid .data) result = ObjIdForward(data);
-            else if (isValid(sbResult.matchIdx)) result = Stall(SB);
-        end
+        if (result == ObjIdToCache && !sbClear) result = Stall(SB);
 `endif
         if (result matches tagged Stall .by) lsq.retryObjId;
         else begin
             lsq.issueObjId;
-            if (result matches tagged ObjIdForward .data)
-                memObjIdLdForwardQ.enq(tuple2(info.tag, data));
-            else checkedObjIdLdQ.enq(ProcRq {
+            checkedObjIdLdQ.enq(ProcRq {
                 id: zeroExtend(info.tag), addr: info.paddr, toState: S, op: Ld,
                 byteEn: ?, data: ?, amoInst: ?, loadTags: False,
                 objSealRdType: Ld, inlineId: unpack(0), pcHash: ?
