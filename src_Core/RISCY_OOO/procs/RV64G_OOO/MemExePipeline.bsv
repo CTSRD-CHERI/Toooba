@@ -229,14 +229,14 @@ endmodule
 // enqueue and dequeue independent: deq-before-enq would impose the cycle
 // DTLB request < data admission < DTLB response on the shared DTLB.
 typedef SpecFifo_SB_deq_enq_C_deq_enq#(2, DTlbResp#(MemExeToFinish)) FinishTranslationFifo;
-module mkFinishTranslationFifo(FinishTranslationFifo);
-    Vector#(2, Reg#(DTlbResp#(MemExeToFinish))) rows <- replicateM(mkRegU);
+module mkFinishTranslationFifo(SpecFifo_SB_deq_enq_C_deq_enq#(2, t)) provisos(Bits#(t, tSz));
+    Vector#(2, Reg#(t)) rows <- replicateM(mkRegU);
     Vector#(2, Reg#(SpecBits)) masks <- replicateM(mkRegU);
     Vector#(2, Reg#(Bool)) valid <- replicateM(mkReg(False));
     Reg#(Bit#(1)) head <- mkReg(0);
     Reg#(Bit#(1)) tail <- mkReg(0);
     Reg#(UInt#(2)) count <- mkReg(0);
-    RWire#(ToSpecFifo#(DTlbResp#(MemExeToFinish))) enqueue <- mkRWire;
+    RWire#(ToSpecFifo#(t)) enqueue <- mkRWire;
     PulseWire dequeue <- mkPulseWire;
     RWire#(SpecBits) correct <- mkRWire;
     RWire#(Tuple2#(Bool, SpecTag)) incorrect <- mkRWire;
@@ -265,14 +265,14 @@ module mkFinishTranslationFifo(FinishTranslationFifo);
         if (insertTail) tail <= tail + 1;
         count <= count + (insertTail ? 1 : 0) - (removeHead ? 1 : 0);
     endrule
-    method Action enq(ToSpecFifo#(DTlbResp#(MemExeToFinish)) entry) if (count < 2 && !squashing);
+    method Action enq(ToSpecFifo#(t) entry) if (count < 2 && !squashing);
         enqueue.wset(entry);
     endmethod
     method Bool notFull = count < 2;
     method Action deq if (count != 0 && valid[head] && !squashing);
         dequeue.send;
     endmethod
-    method ToSpecFifo#(DTlbResp#(MemExeToFinish)) first if (count != 0 && valid[head] && !squashing);
+    method ToSpecFifo#(t) first if (count != 0 && valid[head] && !squashing);
         return ToSpecFifo {data:rows[head], spec_bits:masks[head]};
     endmethod
     // Include squash holes until they drain; TLB maintenance must wait.
@@ -455,6 +455,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
     // LSQ
     SplitLSQ lsq <- mkSplitLSQ;
+    // Separate the TLB response from LSQ updates. Otherwise descriptor reads
+    // during ObjID issue order before translation writes, while same-cycle
+    // address updates make issue readiness depend on the TLB pipeline.
+    FinishTranslationFifo objIdTranslationResults <- mkFinishTranslationFifo;
     // wire to issue Ld which just finish addr tranlation
     RWire#(LSQIssueLdInfo) issueLd <- mkRWire;
 
@@ -481,7 +485,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // Responses remain independent, so backpressured cache requests can drain.
     Reg#(Bit#(5)) storeWaitAge <- mkReg(0);
     PulseWire sentStoreReq <- mkPulseWire;
-    Bool storeUrgent = reqStQ.notEmpty && storeWaitAge == '1;
+    // Use registered age only: reqStQ is bypassing, so its notEmpty
+    // depends on same-cycle SQ issue. Feeding that into ObjID issue creates
+    // an ordering cycle through translation and firstSt readiness. Urgency
+    // may persist one cycle after draining, which only delays load issue.
+    Bool storeUrgent = storeWaitAge == '1;
     rule ageStoreRequest;
         if(!reqStQ.notEmpty || sentStoreReq) storeWaitAge <= 0;
         else if(storeWaitAge != '1) storeWaitAge <= storeWaitAge + 1;
@@ -1092,8 +1100,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     rule doObjIdTlb (dTlb.procResp.inst.translateObjId);
+        objIdTranslationResults.enq(ToSpecFifo { data: dTlb.procResp, spec_bits: dTlb.procResp.specBits });
         dTlb.deqProcResp;
-        let objIdTlbResp = dTlb.procResp;
+    endrule
+
+    rule applyObjIdTranslation;
+        let objIdTlbResp = objIdTranslationResults.first.data;
+        objIdTranslationResults.deq;
         let x = objIdTlbResp.inst;
         Maybe#(Addr) objIdPAddr = Invalid;
         Bool allowCapPTE = False;
@@ -2318,7 +2331,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     interface recvBypass = map(getRecvBypassIfc, bypassWire);
     interface rsMemIfc = rsMem;
     interface dTlbIfc = dTlb;
-    method tlbNoPendingReq = dTlb.noPendingReq && !objIdTranslation.notEmpty && !dTlbReqQ.notEmpty && !finishTranslationQ.notEmpty && !objIdLookupQ.notEmpty;
+    method tlbNoPendingReq = dTlb.noPendingReq && !objIdTranslation.notEmpty && !dTlbReqQ.notEmpty && !finishTranslationQ.notEmpty && !objIdTranslationResults.notEmpty && !objIdLookupQ.notEmpty;
     interface lsqIfc = lsq;
     interface stbIfc = stb;
     interface dMemIfc = dMem;
@@ -2327,6 +2340,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         dispToRegQ.specUpdate,
         regToExeQ.specUpdate,
         finishTranslationQ.specUpdate,
+        objIdTranslationResults.specUpdate,
         dTlbReqQ.specUpdate,
         objIdTranslation.specUpdate,
         dTlb.specUpdate,
