@@ -523,12 +523,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
              ^ line[39:32] ^ line[47:40] ^ line[55:48] ^ line[63:56];
     endfunction
 
-    // Key with full address (could shave 4 bits from the bottom... and might be able to get away with starting with 39-bit address, but likely to leave weird loophole that might not be possible...
-    // 4-bit index == 16 entries per set.
-    // Each record is a Maybe#(MemTaggedData); essentially a 128-bit word with a validity bit.
-    // 4-way associative, so 64 entries total
-    // Default value of Invalid
-    MapSplit#(Addr, Bit#(4), Maybe#(MemTaggedData), 4) objIdBuf <- mkMapLossyBRAM;
+    // Preserve 1 KiB of ID payload: 64 sets x 4 ways x 4 bytes.
+    // Keys describe aligned 32-bit metadata words; tag storage grows with
+    // entry count. Memory requests still return a 128-bit data word.
+    MapSplit#(Addr, Bit#(6), Maybe#(Bit#(32)), 4) objIdBuf <- mkMapLossyBRAM;
     Fifo#(1, ObjIdLookupClient) objIdLookupQ <- mkPipelineFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)), Ehr#(2, Bool))
         objIdLookupHits <- replicateM(mkEhr(False));
@@ -540,14 +538,15 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     action
 
         Addr vWordAddr =
-            objIDVAddr & ~64'hF;
+            objIDVAddr & ~64'h3;
 
+        Vector#(4, Bit#(32)) words = unpack(pack(idData.data));
         objIdBuf.update(
             MapKeyIndex {
                 key: vWordAddr,
                 index: hash(vWordAddr)
             },
-            Valid(idData)
+            Valid(words[objIDVAddr[3:2]])
         );
 
     endaction
@@ -985,9 +984,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             objIdMode3Seen.send;
 
         if (objIdVAddr matches tagged Valid .addr)
-            lsq.setObjIdVAddr(fromMaybe(?, lsq.objIdChild(x.ldstq_tag)), addr);
+            lsq.setObjIdVAddr(fromMaybe(?, lsq.objIdChild(x.ldstq_tag)),
+                (addr & ~64'hF) | zeroExtend(objIdOffset[3:0]));
         if (!inlineId.inLine && inlineId.expected == 0 && isValid(objIdVAddr)) begin
-            Addr wordAddr = fromMaybe(?, objIdVAddr) & ~64'hF;
+            Addr byteAddr = (fromMaybe(?, objIdVAddr) & ~64'hF) | zeroExtend(objIdOffset[3:0]);
+            Addr wordAddr = byteAddr & ~64'h3;
             objIdBuf.lookupStart(MapKeyIndex { key: wordAddr, index: hash(wordAddr) });
             objIdLookupQ.enq(tuple3(x.ldstq_tag, getMTE(x.rVal1), objIdOffset));
         end
@@ -1069,7 +1070,24 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdLookupQ.deq;
         Bool hit = False;
         if (result matches tagged Valid (tagged Valid .data))
-            hit = !mteMismatch(data, mte, offset);
+        begin
+            Vector#(4, Bit#(8)) bytes = unpack(data);
+            Bit#(2) byteIndex = truncate(offset);
+            // Retain the existing legacy one-bit policy; width narrowing is
+            // independent of changing the architectural ID comparison.
+`ifdef OBJID_DEBUG
+            hit = True;
+`else
+            hit = mte[0] == bytes[byteIndex][0];
+`endif
+        end
+`ifdef BSIM
+        Bool traceLayout <- $test$plusargs("trace_objid_layout");
+        if (traceLayout) begin
+            if (hit) $display("OBJID_LAYOUT hit");
+            else $display("OBJID_LAYOUT miss");
+        end
+`endif
         objIdLookupHits[pack(tag)][0] <= hit;
     endrule
 
@@ -1529,6 +1547,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Addr paddr = lsq.objIdPAddr(child);
         if (!lsq.skipObjIdFill(child)) begin
             updateObjIdBuf(vaddr, data);
+`ifdef BSIM
+            Bool traceLayout <- $test$plusargs("trace_objid_layout");
+            if (traceLayout) $display("OBJID_LAYOUT fill");
+`endif
             objIdPAddrFilterLdUpdate.wset(paddr);
         end
         finishObjId(child, data);
