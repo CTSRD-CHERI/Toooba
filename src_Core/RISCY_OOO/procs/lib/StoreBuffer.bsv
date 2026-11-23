@@ -83,6 +83,7 @@ typedef struct {
 
 interface StoreBuffer;
     method Bool isEmpty;
+    method Bool noObjIdWrites(Bool include1k);
     method Maybe#(SBIndex) getEnqIndex(Addr paddr, MemDataByteEn be, InlineId inlineId);
     method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash, InlineId inlineId);
     method ActionValue#(SBEntry) deq(SBIndex idx);
@@ -226,7 +227,8 @@ module mkStoreBufferEhr(StoreBuffer);
             // Checked values may forward, but the load cannot retire until
             // the producer's L1 callback resolves its dependency. Mode 0
             // explicitly opts out of that temporal forwarding guarantee.
-            if(be != TagMemAccess && (getEntryBE(idx) & ldBE) == ldBE &&
+            if((!inlineId.inLine || inlineId.expected == 0 || inlineId.forwardUnchecked || shareId) &&
+               be != TagMemAccess && (getEntryBE(idx) & ldBE) == ldBE &&
                (inlineId.forwardUnchecked || sourceId.expected == 0 || shareId)) begin
                 // fully covered, forward data
                 CLine block = entry[idx][searchPort].line;
@@ -264,6 +266,16 @@ module mkStoreBufferEhr(StoreBuffer);
             ? searchEntry(idAddr, DataMemAccess(idBE), inlineId)
             : SBSearchRes { matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid };
     endfunction
+
+    method Bool noObjIdWrites(Bool include1k);
+        function Bool metadataWrite(Integer i);
+            Bit#(TSub#(10, LogCLineDataNumBytes)) in1k = truncate(entry[i][searchPort].addr);
+            Bit#(TSub#(12, LogCLineDataNumBytes)) in4k = truncate(entry[i][searchPort].addr);
+            return valid[i][searchPort] && (in4k == '1 || (include1k && in1k == '1));
+        endfunction
+        Vector#(SBSize, Integer) indices = genVector;
+        return !any(metadataWrite, indices);
+    endmethod
 
     method Bool isEmpty;
         function Bool entryEmpty(Integer i);
@@ -415,6 +427,7 @@ endmodule
 (* synthesize *)
 module mkDummyStoreBuffer(StoreBuffer);
     method Bool isEmpty = True;
+    method Bool noObjIdWrites(Bool include1k) = True;
     method Maybe#(SBIndex) getEnqIndex(Addr paddr, MemDataByteEn be, InlineId inlineId) = Invalid;
     method Action enq(SBIndex idx, Addr paddr, MemDataByteEn be, MemTaggedData data, Bit#(16) pcHash, InlineId inlineId);
         doAssert(False, "enq should never be called)");

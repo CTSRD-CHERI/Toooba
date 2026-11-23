@@ -15,31 +15,40 @@ specific to this suite.
 | 5 | 64 KiB top-relative layout |
 | 6 | 512 KiB top-relative layout |
 
-Each normal test starts with ID 1, performs an initial access and repeated reuse,
-updates the metadata byte to ID 2 using uncoloured authority, checks accesses
-with ID 2, and finally requires the old authority to be rejected: reads trap, while
-failed in-line stores must return normally with the payload unchanged. Separate
-`stale-first` tests apply the same rejection policy immediately after the ID write, before
-any new-ID lookup can refresh the buffer. Successful stores write distinct
-values and are checked through uncoloured authority. For trapping cases, fault handlers check
-`mcause == 28`, the test phase and unchanged payload. In-line store cases reject
-any trap and check that stale writes leave the payload unchanged. Modes 0/7
-wrap an otherwise cross-line or underflowed encoding within the data access
-line (64 bytes in this test configuration). A conflicting ID at the old
-cross-line address must be ignored. Additional cases access the second line
-of a capability. Modes 1–6 retain their separate metadata layouts and trapping
-expectations; no same-line assumption is made for those modes.
+Legacy modes 1–6 use **fence + establishing-access consistency**. Software
+writes the ID with uncoloured authority, executes `fence rw,rw`, and completes
+an access carrying the new nonzero ID before relying on rejection of the old ID. The
+establishing access follows the memory path if the cached ID differs. These
+tests fence after it as well, ordering the following checks after completion.
+An ID store and fence alone need not revoke a matching cached old ID.
 
-Repeated reuse allows an initial fill to be discarded by a concurrent invalidation.
-An instruction-only delay between accesses allows the next lookup to fill
-before reuse with the study's 50-cycle added DRAM latency. BSIM builds emit
-`OBJID_LAYOUT hit`, `miss` and `fill` with `+trace_objid_layout`. Check these
-markers to establish hit coverage; repeated accesses alone do not prove hits.
-Inline modes use their L1 checking path, not the separate ID buffer.
+Each normal test starts with ID 1, performs an initial access and repeated reuse,
+updates the metadata byte to ID 2, fences, establishes ID 2, and finally requires
+the old authority to be rejected. Legacy `stale-first` variants now establish
+with a read before checking rejection, including in store tests. Modes 0/7
+retain immediate L1 checking: their `stale-first` variants still require reads
+to trap or failed stores to return normally without changing payload, before
+any new-ID access. Successful stores write distinct values checked using
+uncoloured authority. Fault handlers check `mcause == 28`, phase, and payload.
+
+Modes 0/7 wrap invalid cross-line or underflowed locations within the current
+64-byte cache line. A conflicting ID at the old address must be ignored; extra
+cases access a capability's second line. Modes 1–6 retain their independent
+metadata layouts. Invalidation may discard a metadata fill, but completion of
+an establishing access must then invalidate its old cached value instead.
+The protocol applies per changed nonzero ID, virtual alias, and core; retaining L1
+coherence does not replace software synchronisation between cores.
+
+Normal cases include a 512-NOP spacing interval and trace `OBJID_LAYOUT hit`,
+`miss`, and `fill` with `+trace_objid_layout`. Twelve `fast` cases cover modes
+1/3/6 with establishing reads/stores and plain/AMO ID writes, removing that NOP
+gap to exercise the fence and refresh-completion ordering directly. Inline
+modes use L1 checking rather than the separate buffer. Check trace markers to
+verify actual hit coverage; repeated accesses alone do not prove hits.
 
 Locations cover both metadata-byte positions for inline/top-relative layouts,
 and each 32-bit quarter plus byte endpoints in the page-footer layouts. The
-suite builds 228 independent ELFs so an expected terminal trap needs no trap
+suite builds 240 independent ELFs so an expected terminal trap needs no trap
 resume machinery. A pass returns zero through tohost; fail codes have bit 30
 set, and the runner rejects timeouts and simulator assertion failures.
 

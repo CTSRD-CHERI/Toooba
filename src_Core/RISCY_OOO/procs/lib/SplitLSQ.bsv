@@ -422,6 +422,8 @@ interface SplitLSQ;
     method Action issueObjId;
     method Action retryObjId;
     method Bool skipObjIdFill(ObjIdQTag child);
+    method Action invalidateObjIdFills;
+    method Bool objIdFenceOrdered(LdStQTag parent);
     method Addr objIdPAddr(ObjIdQTag child);
     method Addr objIdVAddr(ObjIdQTag child);
     method Action setObjIdVAddr(ObjIdQTag child, Addr addr);
@@ -529,6 +531,7 @@ interface SplitLSQ;
     // returned from D$
     method Bool noWrongPathLoads;
     method Bool objIdQueueEmpty;
+    method Bool objIdRequestsDrained;
 endinterface
 
 // --- auxiliary types and functions ---
@@ -637,13 +640,9 @@ function Bool extractObjIdSeal(MemTaggedData d, Bit#(7) offset);
 endfunction
 
 function Bool mteMismatch(MemTaggedData d, Bit#(8) capMTE, Bit#(7) offset);
-`ifdef OBJID_DEBUG
-    return False;
-`else
     Vector#(16, Bit#(8)) bytes = unpack(pack(d.data));
-    return capMTE[0] != bytes[offset][0];
-    //return False;
-`endif
+    Bit#(4) byteIndex = truncate(offset);
+    return capMTE != bytes[byteIndex];
 endfunction
 
 // issueQ of LSQ tags for issue
@@ -1862,8 +1861,7 @@ module mkSplitLSQ(SplitLSQ);
         if (getObjIdChild(lsqTag) matches tagged Valid .child) begin
             Bool active = !isValid(fault) && !mmio && isValid(objIdPAddr) && !inlineId.inLine;
             objIds.prepare(child, active, active && (isStoreParent(lsqTag) || isLrParent(lsqTag)), !objIdTranslationPending, ObjIdCheck {
-                paddr:fromMaybe(?, objIdPAddr), mte:mte, offset:objIdOffset,
-                expected:inlineId.expected
+                paddr:fromMaybe(?, objIdPAddr), mte:mte, offset:objIdOffset
             });
         end
         Maybe#(Bool) verdict = !isValid(fault) && !mmio &&
@@ -2005,6 +2003,7 @@ module mkSplitLSQ(SplitLSQ);
     method Action issueObjId if (!wrongSpec_conflict) = objIds.issue;
     method Action retryObjId if (!wrongSpec_conflict) = objIds.retry;
     method Bool skipObjIdFill(ObjIdQTag child) = objIds.skipFill(child);
+    method Action invalidateObjIdFills = objIds.invalidateFills;
     method Addr objIdPAddr(ObjIdQTag child) = objIds.paddr(child);
     method Addr objIdVAddr(ObjIdQTag child) = objIds.vaddr(child);
     method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc))) completeObjId(ObjIdQTag child, MemTaggedData data) if (!wrongSpec_conflict);
@@ -2033,6 +2032,22 @@ module mkSplitLSQ(SplitLSQ);
     // Metadata never forwards: an older store with an unknown address, or
     // any write to the same 128-bit data word, must reach the cache first.
     // A Boolean reduction avoids youngest-store selection and data muxing.
+    // The buffer holds legacy footer IDs only. Ordinary payload stores do
+    // not invalidate those bytes. Read pre-update registered state: an older
+    // unresolved address remains conservatively blocking for one extra cycle.
+    method Bool objIdFenceOrdered(LdStQTag parent);
+        function Bool blocksHit(StQTag i);
+            Bool older = False;
+            case (parent) matches
+                tagged Ld .l: if (olderStVirTags[l] matches tagged Valid .s) older = stVirTags[i] <= s;
+                tagged St .s: older = stVirTags[i] < stVirTags[s];
+            endcase
+            return st_valid_issue[i] && older && st_memFunc[i] == Fence;
+        endfunction
+        Vector#(StQSize, StQTag) indices = genWith(fromInteger);
+        return !any(blocksHit, indices);
+    endmethod
+
     method LSQObjIdSearchResult searchObjIDSt(
                                 StQTag requester,
                                 Addr objIdPAddr) if (!wrongSpec_conflict);
@@ -2040,7 +2055,7 @@ module mkSplitLSQ(SplitLSQ);
         function Bool blocksMetadata(StQTag i);
             // Strictly older: a store must not wait for itself.
             return st_valid_issue[i] && stVirTags[i] < requesterVTag &&
-                (!st_computed_issue[i] ||
+                (st_memFunc[i] == Fence || !st_computed_issue[i] ||
                  sameDataAlignedAddr(objIdPAddr, st_paddr_issue[i]));
         endfunction
         Vector#(StQSize, StQTag) indices = genWith(fromInteger);
@@ -2055,7 +2070,7 @@ module mkSplitLSQ(SplitLSQ);
             Bool older = False;
             if (precedingSt matches tagged Valid .st) older = stVirTags[i] <= st;
             return st_valid_issue[i] && older &&
-                (!st_computed_issue[i] ||
+                (st_memFunc[i] == Fence || !st_computed_issue[i] ||
                  sameDataAlignedAddr(objIdPAddr, st_paddr_issue[i]));
         endfunction
         Vector#(StQSize, StQTag) indices = genWith(fromInteger);
@@ -2176,12 +2191,6 @@ module mkSplitLSQ(SplitLSQ);
                     ld_depStQDeq_issue[tag] <= Valid (stTag);
                 end
                 St: begin
-                    // check if forwarding is possible
-                    if(overlapAddr(pa, shift_be, st_paddr_issue[stTag], DataMemAccess(st_shiftedBE_issue[stTag])) &&
-                       be1CoverBe2(DataMemAccess(st_shiftedBE_issue[stTag]), shift_be) &&
-                       (inlineId.forwardUnchecked || st_inlineId_issue[stTag].expected == 0 ||
-                        (inlineId.expected == st_inlineId_issue[stTag].expected &&
-                         inlineId.offset == st_inlineId_issue[stTag].offset))) begin
                         // Share the source store's check only if the IDs and
                         // locations match and the store cannot change that ID.
                         Bool writesId = getLineMemDataOffset(st_paddr_issue[stTag]) ==
@@ -2191,6 +2200,13 @@ module mkSplitLSQ(SplitLSQ);
                                        st_inlineId_issue[stTag].inLine &&
                                        st_inlineId_issue[stTag].expected == inlineId.expected &&
                                        st_inlineId_issue[stTag].offset == inlineId.offset && !writesId;
+                    // check if forwarding is possible
+                    if((!inlineId.inLine || inlineId.expected == 0 || inlineId.forwardUnchecked || shareId) &&
+                       overlapAddr(pa, shift_be, st_paddr_issue[stTag], DataMemAccess(st_shiftedBE_issue[stTag])) &&
+                       be1CoverBe2(DataMemAccess(st_shiftedBE_issue[stTag]), shift_be) &&
+                       (inlineId.forwardUnchecked || st_inlineId_issue[stTag].expected == 0 ||
+                        (inlineId.expected == st_inlineId_issue[stTag].expected &&
+                         inlineId.offset == st_inlineId_issue[stTag].offset))) begin
                         ld_storeIdCheck[tag][0] <= shareId;
                         // Payload still forwards and wakes consumers immediately.
                         issRes = Forward (LSQForwardResult {
@@ -2346,7 +2362,8 @@ module mkSplitLSQ(SplitLSQ);
                             ((!objIdLookup && !isValid(objIdPAddr) && inlineId.expected == 0) ||
                              (inlineId.inLine && inlineId.expected == sourceId.expected &&
                               inlineId.offset == sourceId.offset));
-                        if(overlapAddr(pa, shift_be, st_paddr_issue[stTag], DataMemAccess(st_shiftedBE_issue[stTag])) &&
+                        if((!inlineId.inLine || inlineId.expected == 0 || inlineId.forwardUnchecked || shareId) &&
+                           overlapAddr(pa, shift_be, st_paddr_issue[stTag], DataMemAccess(st_shiftedBE_issue[stTag])) &&
                            be1CoverBe2(DataMemAccess(st_shiftedBE_issue[stTag]), shift_be) &&
                            (inlineId.forwardUnchecked || sourceId.expected == 0 || shareId)) begin
                             ld_storeIdCheck[tag][0] <= shareId;
@@ -2503,7 +2520,7 @@ module mkSplitLSQ(SplitLSQ);
         if(ld_sourceCanceled[deqP][0]) killed = Valid(St);
 `endif
         if (!isValid(fault) && !isValid(killed) &&& ld_objIdSealOk_deqLd[deqP] matches tagged Valid .o &&& !o) begin
-            // objId seal check failed, set fault
+            // A failed read always faults.
             fault = Valid(CapException(CSR_XCapCause{cheri_exc_reg: ld_inlineId_deqLd[deqP].authority, cheri_exc_code: cheriExcSealViolation}));
         end
 
@@ -2577,7 +2594,7 @@ module mkSplitLSQ(SplitLSQ);
         StQTag deqP = st_deqP;
         Maybe#(Trap) fault = st_fault_deqSt[deqP];
         if (!isValid(fault) &&& st_objIdSealOk_deqSt[deqP] matches tagged Valid .o &&& !o) begin
-            // objId seal check failed, set fault
+            // ObjID queue requests are legacy checks; inline stores validate at L1.
             fault = Valid(CapException(CSR_XCapCause{cheri_exc_reg: 0, cheri_exc_code: cheriExcSealViolation}));
         end
         Bool objIdSealOk = False;
@@ -2936,4 +2953,5 @@ module mkSplitLSQ(SplitLSQ);
     endmethod
 
     method Bool objIdQueueEmpty = objIds.empty;
+    method Bool objIdRequestsDrained = objIds.requestsDrained;
 endmodule

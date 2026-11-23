@@ -146,6 +146,9 @@ module mkTest(Empty);
             lsq.startObjIdCheck(tagged Ld 1);
         endaction
         issueLookup(lookup, tagged Ld 1, 'h8000);
+        check(!lsq.skipObjIdFill(lookup), "fresh lookup cannot fill");
+        lsq.invalidateObjIdFills;
+        check(lsq.skipObjIdFill(lookup), "invalidation allowed old response to refill");
         action let response <- lsq.respLd(1, unpack(0), False, False); endaction
         drain <= True;
         delay(3);
@@ -158,7 +161,9 @@ module mkTest(Empty);
         lookup <= fromMaybe(?, lsq.objIdChild(tagged St 0));
         lsq.updateData(0, unpack(0));
         address(tagged St 0, 'h3000, Valid('h9000), 1);
+        check(!lsq.skipObjIdFill(lookup), "new reservation retained old fill poison");
         issueLookup(lookup, tagged St 0, 'h9000);
+        check(!lsq.objIdRequestsDrained, "issued metadata request escaped fence drain");
         action
             let result <- lsq.completeObjId(lookup, unpack(1));
             check(result == Valid(tuple2(unpack(3), St)), "store instruction linkage");
@@ -363,9 +368,11 @@ module mkTest(Empty);
             ordering.enqSt(unpack(42), byteStore, Invalid, 0, 0);
         endaction
         action
+            check(ordering.objIdFenceOrdered(tagged Ld 0), "ordinary unresolved store blocked a cached hit");
             check(ordering.searchObjIdLd(0, 'h7000) == Stall(StQ), "unresolved older store/load");
             check(ordering.searchObjIDSt(1, 'h7000) == Stall(StQ), "unresolved older store/store");
         endaction
+        check(ordering.objIdFenceOrdered(tagged St 1), "ordinary unresolved store blocked a cached store hit");
         ordering.updateData(0, unpack(0));
         action
             let result <- ordering.updateAddr(tagged St 0, Invalid, True, 'h7008, False,
@@ -376,9 +383,12 @@ module mkTest(Empty);
             check(ordering.searchObjIDSt(1, 'h7000) == Stall(StQ), "different byte must wait/store");
         endaction
         action
+            check(ordering.objIdFenceOrdered(tagged Ld 0), "ordinary predecessor blocked load buffer hit");
             check(ordering.searchObjIdLd(0, 'h7010) == ObjIdToCache, "adjacent word or younger unknown store blocked load");
             check(ordering.searchObjIDSt(1, 'h7010) == ObjIdToCache, "store blocked by itself");
         endaction
+        check(ordering.objIdFenceOrdered(tagged St 1), "requester blocked its own buffer hit");
+        ordering.updateData(1, unpack(0));
         action
             let result <- ordering.updateAddr(tagged St 1, Invalid, True, 'h7010, False,
                 DataMemAccess(unpack('h1)), 0, 0, Invalid, 0, unpack(0), False);
@@ -394,6 +404,27 @@ module mkTest(Empty);
             check(ordering.searchObjIdLd(0, 'h7000) == ObjIdToCache, "completed store still blocks load");
             check(ordering.searchObjIDSt(1, 'h7000) == ObjIdToCache, "completed store still blocks store");
         endaction
+        // A known footer write blocks hits until cache completion; an
+        // ordinary older store and the requester's own store do not.
+        action
+            let byteStore = instruction(True);
+            byteStore.byteOrTagEn = DataMemAccess(unpack('h1));
+            ordering.enqSt(unpack(43), byteStore, Invalid, 0, 0);
+        endaction
+        ordering.enqLd(unpack(44), instruction(False), Invalid, 0, 0);
+        ordering.updateData(2, unpack(0));
+        action
+            let result <- ordering.updateAddr(tagged St 2, Invalid, True, 'h73ff, False,
+                DataMemAccess(unpack('h8000)), 0, 0, Invalid, 0, unpack(0), False);
+        endaction
+        check(ordering.objIdFenceOrdered(tagged Ld 1), "metadata write blocked hit before required establishing protocol");
+        check(ordering.objIdFenceOrdered(tagged Ld 1), "1 KiB-only footer blocked 4 KiB-only workload");
+        ordering.setAtCommit[0].put(tagged St 1);
+        ordering.deqSt;
+        check(ordering.objIdFenceOrdered(tagged Ld 1), "remaining ordinary metadata write blocked hit");
+        ordering.setAtCommit[0].put(tagged St 2);
+        ordering.deqSt;
+        check(ordering.objIdFenceOrdered(tagged Ld 1), "completed metadata store still blocked buffer hit");
         // In WEAK mode SQ retirement transfers ownership to the SB. Only
         // written words in a merged line block, through issue until callback.
         action
@@ -403,6 +434,7 @@ module mkTest(Empty);
             sbWords.enq(fromMaybe(?, idx), 'h8008, unpack('h100), unpack(0), 0, unpack(0));
         endaction
         action
+            check(sbWords.noObjIdWrites(True), "ordinary SB line blocked ID buffer hit");
             check(!sbWords.noMatchMetadataLdQ('h8000) && !sbWords.noMatchMetadataStQ('h8000), "SB same word must wait");
         endaction
         action
@@ -418,6 +450,40 @@ module mkTest(Empty);
         check(!sbWords.noMatchMetadataLdQ('h8000), "SB issue released word before cache completion");
         action let entry <- sbWords.deq(sbIndex); endaction
         check(sbWords.noMatchMetadataLdQ('h8000) && sbWords.noMatchMetadataStQ('h8000), "SB cache completion did not release word");
+        action
+            let idx = sbWords.getEnqIndex('h83ff, unpack('h8000), unpack(0));
+            check(isValid(idx), "metadata SB allocation");
+            sbIndex <= fromMaybe(?, idx);
+            sbWords.enq(fromMaybe(?, idx), 'h83ff, unpack('h8000), unpack(0), 0, unpack(0));
+        endaction
+        check(sbWords.noObjIdWrites(False), "1 KiB-only SB footer blocked 4 KiB-only workload");
+        check(!sbWords.noObjIdWrites(True), "metadata SB line allowed buffer hit");
+        action let entry <- sbWords.issue; endaction
+        check(!sbWords.noObjIdWrites(True), "issued metadata SB line allowed buffer hit");
+        action let entry <- sbWords.deq(sbIndex); endaction
+        check(sbWords.noObjIdWrites(True), "completed metadata SB line still blocked buffer hit");
+        action
+            let idx = sbWords.getEnqIndex('h8fff, unpack('h8000), unpack(0));
+            sbIndex <= fromMaybe(?, idx);
+            sbWords.enq(fromMaybe(?, idx), 'h8fff, unpack('h8000), unpack(0), 0, unpack(0));
+        endaction
+        check(!sbWords.noObjIdWrites(False), "4 KiB footer bypassed SB classification");
+        check(!sbWords.noObjIdWrites(True), "4 KiB footer bypassed mode-3 SB classification");
+        action
+            let f = instruction(True);
+            f.mem_func = Fence;
+            f.byteOrTagEn = DataMemAccess(unpack(0));
+            f.aq = True;
+            f.rl = True;
+            ordering.enqSt(unpack(45), f, Invalid, 0, 0);
+        endaction
+        ordering.enqLd(unpack(46), instruction(False), Invalid, 0, 0);
+        check(!ordering.objIdFenceOrdered(tagged Ld 2), "cached hit bypassed preceding fence");
+        check(ordering.objIdFenceOrdered(tagged Ld 1), "younger fence blocked older hit");
+        check(ordering.searchObjIdLd(2, 'h9000) == Stall(StQ), "metadata request bypassed preceding fence");
+        ordering.setAtCommit[0].put(tagged St 3);
+        ordering.deqSt;
+        check(ordering.objIdFenceOrdered(tagged Ld 2), "retired fence still blocked hit");
         $display("PASS: conservative 128-bit metadata/store ordering and SB drain; independent ObjID credit exhaustion/wraparound, full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences, early data/late translation, fault draining, pending cancellation, squash and same-cycle correct-spec allocation");
         $finish(0);
     endseq;

@@ -24,7 +24,6 @@ typedef struct {
     Addr paddr;
     Bit#(7) offset;
     Bit#(8) mte;
-    Bit#(8) expected;
 } ObjIdCheck deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -50,10 +49,12 @@ interface ObjIdLoadQueue;
     method Action issue;
     method Action retry;
     method Bool skipFill(ObjIdQTag tag);
+    method Action invalidateFills;
     method Addr paddr(ObjIdQTag tag);
     method Addr vaddr(ObjIdQTag tag);
     method ActionValue#(Maybe#(ObjIdResult)) complete(ObjIdQTag tag, MemTaggedData data);
     method Bool empty;
+    method Bool requestsDrained;
     method Bool noWrongPath;
     interface Vector#(SupSize, Put#(Tuple2#(ObjIdQTag, InstTag))) setAtCommit;
     interface SpeculationUpdate specUpdate;
@@ -63,6 +64,8 @@ endinterface
 module mkObjIdLoadQueue(ObjIdLoadQueue);
     // Wide, non-searchable fields have a single write port and indexed reads.
     // Only the small control/speculation state is inspected in parallel.
+    // Poison old responses across invalidations without generation wraparound.
+    Vector#(ObjIdQSize, Ehr#(2, Bool)) staleFill <- replicateM(mkEhr(False));
     RegFile#(ObjIdQTag, ObjIdOwner) owners <- mkRegFileFull;
     RegFile#(ObjIdQTag, InstTag) commitTags <- mkRegFileFull;
     RegFile#(ObjIdQTag, ObjIdCheck) checks <- mkRegFileFull;
@@ -120,6 +123,7 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
 
     method Maybe#(ObjIdQTag) enqTag = !used[tail][1] ? Valid(tail) : Invalid;
     method Action reserve(ObjIdOwner owner, SpecBits specBits, Bool unused) if (!used[tail][1] && !wrongSpec);
+        staleFill[tail][1] <= False;
         owners.upd(tail, owner);
         commitTags.upd(tail, owner.instTag);
         used[tail][1] <= True;
@@ -176,7 +180,10 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
     method Action retry if (pending != 0 && !wrongSpec);
         cursor <= next(selected);
     endmethod
-    method Bool skipFill(ObjIdQTag tag) = !used[tag][0] || canceled[tag][0] || checks.sub(tag).expected != 0;
+    method Bool skipFill(ObjIdQTag tag) = staleFill[tag][0] || !used[tag][0] || canceled[tag][0];
+    method Action invalidateFills;
+        for (Integer i=0; i<valueOf(ObjIdQSize); i=i+1) staleFill[i][0] <= True;
+    endmethod
     method Addr paddr(ObjIdQTag tag) = checks.sub(tag).paddr;
     method Addr vaddr(ObjIdQTag tag) = virtualAddrs.sub(tag);
     method ActionValue#(Maybe#(ObjIdResult)) complete(ObjIdQTag tag, MemTaggedData data) if (!wrongSpec);
@@ -186,14 +193,17 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
         let check = checks.sub(tag);
         Vector#(MemDataBytes, Bit#(8)) bytes = unpack(pack(data.data));
         Bit#(4) index = truncate(check.offset);
-        Bool mismatch = False;
-        if (check.expected != 0) mismatch = bytes[index] != check.expected;
-`ifndef OBJID_DEBUG
-        else mismatch = check.mte[0] != bytes[index][0];
-`endif
+        Bool mismatch = check.mte != bytes[index];
         return canceled[tag][0] ? Invalid : Valid(ObjIdResult {
             owner:owners.sub(tag), ok:!mismatch
         });
+    endmethod
+    // Reservations may belong to younger instructions, so fences wait only
+    // for issued requests (including queued responses and refresh completion).
+    method Bool requestsDrained;
+        function Bool requestIssued(Integer i) = issued[i][0];
+        Vector#(ObjIdQSize, Integer) indices = genVector;
+        return !any(requestIssued, indices);
     endmethod
     method Bool empty = !used[head][0];
     method Bool noWrongPath;

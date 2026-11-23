@@ -163,7 +163,11 @@ typedef struct {
 // Lookup ownership is independent of speculation: even a squashed request
 // must drain its BRAM response. Instruction results are captured after one
 // cycle, before a reused LSQ slot can receive its own data-TLB response.
-typedef Tuple3#(LdStQTag, Bit#(8), Bit#(7)) ObjIdLookupClient;
+// validVirtualAddress guarantees bits 63:40 repeat bit 39. Word alignment
+// makes bits 1:0 implicit, leaving 38 independent key bits.
+typedef Bit#(38) ObjIdBufKey;
+function ObjIdBufKey objIdBufKey(Addr addr) = addr[39:2];
+typedef Tuple4#(LdStQTag, Bit#(8), Bit#(7), Bool) ObjIdLookupClient;
 
 // bookkeeping when waiting for MMIO resp which may cause exception
 typedef struct {
@@ -190,6 +194,7 @@ typedef enum {
 } WaitReconcile deriving(Bits, Eq, FShow);
 
 typedef struct {
+    LineAddr line;
     LineMemDataOffset offset;
     MemDataByteEn shiftedBE;
     MemTaggedData shiftedData;
@@ -464,6 +469,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     // waiting bit for Lr/Sc/Amo/MMIO resp
     Reg#(WaitLrScAmoMMIOResp) waitLrScAmoMMIOResp <- mkReg(Invalid);
+    Reg#(LineAddr) atomicWriteLine <- mkRegU;
 `ifdef TSO_MM
     // TSO only: waiting for store resp; use **1-element** CF FIFO to make
     // store blocking and avoid conflict between pipelineResp_cRq and
@@ -499,8 +505,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
     Fifo#(2, Tuple4#(LdQTag, MemResp, Bool, Bool)) memRespLdQ <- mkCFFifo;
     Fifo#(2, Tuple2#(ObjIdQTag, MemTaggedData)) memObjIdRespLdQ <- mkCFFifo;
+    // Local metadata writes are ordered by software's fence + establishing
+    // access protocol. Only external/inclusive invalidations poison fills.
+    PulseWire objIdInvalidate <- mkPulseWire;
+    rule invalidateObjIdFills (objIdInvalidate);
+        lsq.invalidateObjIdFills;
+    endrule
     Reg#(Bool) objIdBufMayContainMode3 <- mkReg(False);
-
+    // A non-bypass queue delays completion until Map's pipelined tag/data
+    // update (or invalidation) has had a cycle to commit.
+    FIFOF#(Tuple2#(ObjIdQTag, MemTaggedData)) objIdRefreshDoneQ <- mkSizedFIFOF(2);
 
     Fifo#(2, ObjIdEvictReq)
         objIdEvictQ <- mkCFFifo;
@@ -526,7 +540,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // Preserve 1 KiB of ID payload: 64 sets x 4 ways x 4 bytes.
     // Keys describe aligned 32-bit metadata words; tag storage grows with
     // entry count. Memory requests still return a 128-bit data word.
-    MapSplit#(Addr, Bit#(6), Maybe#(Bit#(32)), 4) objIdBuf <- mkMapLossyBRAM;
+    MapSplit#(ObjIdBufKey, Bit#(6), Maybe#(Bit#(32)), 4) objIdBuf <- mkMapLossyBRAM;
     Fifo#(1, ObjIdLookupClient) objIdLookupQ <- mkPipelineFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)), Ehr#(2, Bool))
         objIdLookupHits <- replicateM(mkEhr(False));
@@ -543,7 +557,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         Vector#(4, Bit#(32)) words = unpack(pack(idData.data));
         objIdBuf.update(
             MapKeyIndex {
-                key: vWordAddr,
+                key: objIdBufKey(vWordAddr),
                 index: hash(vWordAddr)
             },
             Valid(words[objIDVAddr[3:2]])
@@ -675,6 +689,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             Bool flushObjIDbuf4k
         );
 
+            objIdInvalidate.send;
             if (objIdBloomEnabled) objIdEvictQ.enq(ObjIdEvictReq {
                 line: lineAddr,
                 flush1k: flushObjIDbuf1k,
@@ -778,7 +793,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             //vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[6:0]) + zeroExtend(getTloc(rVal1) * 4  -1))).value;
             if(getTmode(rVal1) == 'h0 || getTmode(rVal1) == 'h7) begin
                 //vaddr = setAddr(vaddr, (getAddr(vaddr) & ~'h3f) + zeroExtend(getTloc(rVal1) << 2) -1).value;
-                vaddr = setAddr(vaddr, inlineIdAddress(getBase(rVal1), tloc)).value;
+                // Only the encoded line offset matters. Invalid software layouts
+                // wrap within the data access line rather than issuing another lookup.
+                Bit#(LogCLineDataNumBytes) idOffset = truncate(inlineIdAddress(getBase(rVal1), tloc));
+                Addr dataLine = getAddr(vaddr) & ~fromInteger(valueOf(CLineDataNumBytes) - 1);
+                vaddr = setAddr(vaddr, dataLine | zeroExtend(idOffset)).value;
             end 
             else if(getTmode(rVal1) == 'h1)  begin 
                 vaddr = setAddr(vaddr, unpack(pack(getAddr(vaddr)) -  zeroExtend(getAddr(vaddr)[11:0]) + 4032 + zeroExtend(tloc ))).value;
@@ -907,21 +926,16 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             (getTmode(x.rVal1) == 0 || getTmode(x.rVal1) == 7) && x.alloc_policy == 0 &&
             (x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr ||
              x.mem_func == Sc || x.mem_func == Amo)) begin
-            Addr idAddr = inlineIdAddress(getBase(x.rVal1), getTloc(x.rVal1));
+            // Truncating the encoded offset implements same-line wrapping.
+            Bit#(LogCLineDataNumBytes) idOffset = truncate(inlineIdAddress(getBase(x.rVal1), getTloc(x.rVal1)));
             inlineId = InlineId {
-                expected: getMTE(x.rVal1), offset: truncate(idAddr),
-                forwardUnchecked: getTmode(x.rVal1) == 0 &&
-                    getLineAddr(idAddr) == getLineAddr(getAddr(x.vaddr)),
+                expected: getMTE(x.rVal1), offset: idOffset,
+                forwardUnchecked: False,
                 authority: x.cap_checks.check_authority_src == Ddc
                     ? {1'b1, pack(scrAddrDDC)} : x.cap_checks.rn1,
-                inLine: getLineAddr(idAddr) == getLineAddr(getAddr(x.vaddr))
+                inLine: True
             };
-            // Valid sub-line allocations take the same-line path. Preserve
-            // QEMU addressing for unusual locations which need another line.
-            if (!inlineId.inLine) begin
-                objIdVAddr = Valid(idAddr);
-                objIdOffset = zeroExtend(idAddr[3:0]);
-            end
+            objIdVAddr = Invalid;
         end
         if (isValidCap(x.rVal1) && getMTE(x.rVal1) != 'h0 &&
             getTmode(x.rVal1) > 0 && getTmode(x.rVal1) < 7 && x.alloc_policy == 'h0 ) begin
@@ -989,8 +1003,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if (!inlineId.inLine && inlineId.expected == 0 && isValid(objIdVAddr)) begin
             Addr byteAddr = (fromMaybe(?, objIdVAddr) & ~64'hF) | zeroExtend(objIdOffset[3:0]);
             Addr wordAddr = byteAddr & ~64'h3;
-            objIdBuf.lookupStart(MapKeyIndex { key: wordAddr, index: hash(wordAddr) });
-            objIdLookupQ.enq(tuple3(x.ldstq_tag, getMTE(x.rVal1), objIdOffset));
+            objIdBuf.lookupStart(MapKeyIndex { key: objIdBufKey(wordAddr), index: hash(wordAddr) });
+            objIdLookupQ.enq(tuple4(x.ldstq_tag, getMTE(x.rVal1), objIdOffset, validVirtualAddress(byteAddr) &&
+                lsq.objIdFenceOrdered(x.ldstq_tag) && !objIdRefreshDoneQ.notEmpty));
         end
         if (isValid(objIdVAddr) && getTmode(x.rVal1) != 1)
             objIdTranslation.enq(ToSpecFifo { data: True, spec_bits: regToExe.spec_bits });
@@ -1065,7 +1080,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     rule saveObjIdLookup;
-        let {tag, mte, offset} = objIdLookupQ.first;
+        let {tag, mte, offset, lookupEligible} = objIdLookupQ.first;
         let result = objIdBuf.lookupRead;
         objIdLookupQ.deq;
         Bool hit = False;
@@ -1073,14 +1088,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         begin
             Vector#(4, Bit#(8)) bytes = unpack(data);
             Bit#(2) byteIndex = truncate(offset);
-            // Retain the existing legacy one-bit policy; width narrowing is
-            // independent of changing the architectural ID comparison.
-`ifdef OBJID_DEBUG
-            hit = True;
-`else
-            hit = mte[0] == bytes[byteIndex][0];
-`endif
+            hit = mte == bytes[byteIndex];
         end
+        // Cached IDs may remain stale until a fenced establishing access.
+        // Only a preceding fence orders hits; ordinary older stores do not.
+        hit = hit && lookupEligible && !objIdRefreshDoneQ.notEmpty && !objIdFlushPending &&
+              !objIdEvictQ.notEmpty;
 `ifdef BSIM
         Bool traceLayout <- $test$plusargs("trace_objid_layout");
         if (traceLayout) begin
@@ -1541,11 +1554,17 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endaction
     endfunction
 
-    rule doObjIdRespLdMem (!objIdFlushPending);
+    // Completing a lookup is independent of buffer maintenance. Training
+    // during clearing is discarded by Map, so do not publish Bloom bits for it.
+    // Separate updates by a commit cycle so the mirrored key RAM sees the
+    // preceding write; otherwise consecutive refreshes could allocate duplicate
+    // copies of one key and leave an old ID reachable in another way.
+    rule doObjIdRespLdMem (!objIdRefreshDoneQ.notEmpty);
         let {child, data} <- toGet(memObjIdRespLdQ).get;
         Addr vaddr = lsq.objIdVAddr(child);
         Addr paddr = lsq.objIdPAddr(child);
-        if (!lsq.skipObjIdFill(child)) begin
+        if (validVirtualAddress(vaddr) && objIdBuf.clearDone && !objIdFlushPending &&
+            !lsq.skipObjIdFill(child) && !objIdInvalidate && !objIdEvictQ.notEmpty) begin
             updateObjIdBuf(vaddr, data);
 `ifdef BSIM
             Bool traceLayout <- $test$plusargs("trace_objid_layout");
@@ -1553,6 +1572,21 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 `endif
             objIdPAddrFilterLdUpdate.wset(paddr);
         end
+        else if (validVirtualAddress(vaddr)) begin
+            // A successful establishing access must not leave its stale cached
+            // value reusable when coherence/squash suppresses this fill. During
+            // a whole-buffer clear this update is discarded safely by Map.
+            Addr wordAddr = vaddr & ~64'h3;
+            objIdBuf.updateMayInsert(MapKeyIndex {
+                key: objIdBufKey(wordAddr), index: hash(wordAddr)
+            }, Invalid, False);
+        end
+        objIdRefreshDoneQ.enq(tuple2(child, data));
+    endrule
+
+    rule finishObjIdRefresh;
+        let {child, data} = objIdRefreshDoneQ.first;
+        objIdRefreshDoneQ.deq;
         finishObjId(child, data);
     endrule
 
@@ -1885,6 +1919,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         reqStQ.enq(tuple2(addr, lsqDeqSt.pcHash));
         // record waiting for store resp
         waitStRespQ.enq(WaitStResp {
+            line: getLineAddr(addr),
             offset: getLineMemDataOffset(addr),
             shiftedBE: lsqDeqSt.shiftedBE,
             shiftedData: lsqDeqSt.stData,
@@ -1902,7 +1937,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // WEAK: deq non-MMIO St when (1) no spec bit (2) can send to SB
     rule doDeqStQ_St_Mem(
         !isValid(lsqDeqSt.fault) &&&
-        lsqDeqSt.memFunc == St &&& !lsqDeqSt.isMMIO &&&
+        lsqDeqSt.memFunc == St &&& !lsqDeqSt.isMMIO &&& lsqDeqSt.objIdSealOk &&&
         stb.getEnqIndex(lsqDeqSt.paddr, lsqDeqSt.shiftedBE, lsqDeqSt.inlineId) matches tagged Valid .sbIdx //&&&
         // lsqDeqSt.objIdSealOk
     );
@@ -1942,6 +1977,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule doDeqStQ_Fence(
         !isValid(lsqDeqSt.fault)
         && lsqDeqSt.memFunc == Fence
+        && lsq.objIdRequestsDrained
 `ifndef TSO_MM
         && (!lsqDeqSt.rel || stb.isEmpty) // check SB in case of release
 `endif
@@ -1964,7 +2000,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             }
 `endif
         );
-        //objIdBuf.clear;
+        // No buffer clear: software establishes each changed ID after the fence.
         if(verbose) $display("[doDeqStQ_Fence] ", fshow(lsqDeqSt));
 `ifdef PERF_COUNT
         if(inIfc.doStats) begin
@@ -1996,6 +2032,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     );
         // set wait bit
         waitLrScAmoMMIOResp <= ScAmo;
+        atomicWriteLine <= getLineAddr(lsqDeqSt.paddr);
         // send to mem
         ProcRq#(DProcReqId) req = ProcRq {
             id: 0, // id does not matter
@@ -2237,11 +2274,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         objIdBufMayContainMode3 <= True;
     endrule
 
-    rule doObjIdFilterLookup (objIdBloomEnabled && !objIdFlushPending);
+    rule doObjIdFilterLookup (objIdBloomEnabled && !objIdFlushPending && objIdEvictQ.notEmpty);
         let req = objIdEvictQ.first;
         objIdEvictQ.deq;
         Bool shouldCheck = req.flush4k ||
-            ((objIdBufMayContainMode3 || objIdMode3Seen) && req.flush1k);
+            (objIdBufMayContainMode3 && req.flush1k);
         Addr paddr = zeroExtend(req.line) << valueOf(LgLineSzBytes);
         let idx = objIdPAddrFilterIndex(paddr);
         Bool maybePresent = objIdPAddrFilter[idx] == 1;

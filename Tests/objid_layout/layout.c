@@ -26,7 +26,9 @@ static __attribute__((always_inline)) inline void access(volatile unsigned long 
     sync_memory();
     // Leave enough execution distance for a 50-cycle backing-memory miss and
     // its metadata response to populate the lookup buffer before the next try.
+#ifndef FAST_ESTABLISH
     __asm__ volatile(".rept 512; nop; .endr" ::: "memory");
+#endif
 #ifdef STORE
 #ifdef SILENT_INLINE_STORE
     unsigned long expected = layout_phase == 3 ? layout_expected : value;
@@ -78,9 +80,9 @@ int main(void) {
     *id = NEW_ID;
 #endif
     sync_memory();
-#ifdef STALE_FIRST
+#if defined(STALE_FIRST) && (MODE == 0 || MODE == 7)
     layout_phase = 3;
-    access(p, 456);                  // Must reject immediately after the ID write.
+    access(p, 456);                  // Inline L1 checks retain immediate enforcement.
 #ifdef SILENT_INLINE_STORE
     return 0;                       // Stale store returned normally and changed no bytes.
 #else
@@ -91,10 +93,16 @@ int main(void) {
     *raw = 789;
     sync_memory();
     layout_phase = 2;
+#if defined(STALE_FIRST) && (MODE > 0 && MODE < 7)
+    // Legacy cached IDs have fence + establishing-access semantics. A read
+    // establishes the new ID even in this variant of the store test.
+    if (*p != 789) fail(14);
+    sync_memory();
+#endif
 #ifdef STORE
-    access(p, 987);                  // New ID must permit a distinct write.
+    access(p, 987);                  // A mismatching cached ID forces the establishing memory lookup.
 #else
-    access(p, 789);                  // New ID must work after updating memory.
+    access(p, 789);                  // Establish the new ID after the metadata-write fence.
 #endif
     *raw = 789;
     sync_memory();

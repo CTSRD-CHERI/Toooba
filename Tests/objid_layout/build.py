@@ -23,15 +23,21 @@ for mode in (0,1,3,6,7):
 for mode in (0,7):
  for store in (False,True):
   cases.append(dict(mode=mode,loc=1,store=store,stale_first=False,new_id=2,data_offset=64))
+for mode in (1,3,6):
+ for store in (False,True):
+  for amo in (False,True):
+   cases.append(dict(mode=mode,loc=0,store=store,stale_first=False,new_id=2,amo=amo,fast=True))
 for c in cases:
  name=f"mode{c['mode']}-loc{c['loc']}-{'store' if c['store'] else 'load'}"+('-stale-first' if c['stale_first'] else '')
  name += '' if c['new_id']==2 else '-id'+str(c['new_id'])
+ name += '-fast' if c.get('fast') else ''
  name += '-amo' if c.get('amo') else ''
  name += '-offset'+str(c['data_offset']) if c.get('data_offset') else ''
  binary=a.output/(name+'.bin');c['binary']=binary.name
  sysroot=a.sdk/'baremetal/baremetal-riscv64-purecap/riscv64-unknown-elf'
  cmd=[str(a.sdk/'bin/clang'),'--target=riscv64-unknown-elf','-march=rv64imafdcxcheri','-mabi=l64pc128d','-mcmodel=medium','-mno-relax','--sysroot='+str(sysroot),'-O2','-g','-ffreestanding','-fno-builtin','-nostdlib','-fuse-ld=lld','-Wl,-T,'+str(r/'test.ld'),'-I'+str(r),'-DMODE='+str(c['mode']),'-DLOC='+str(c['loc']),'-DNEW_ID='+str(c['new_id'])]
  if c.get('data_offset'):cmd+=['-DDATA_OFFSET='+str(c['data_offset'])]
+ if c.get('fast'):cmd+=['-DFAST_ESTABLISH']
  if c.get('amo'):cmd+=['-DUPDATE_AMO']
  if c['store']:cmd+=['-DSTORE']
  if c['stale_first']:cmd+=['-DSTALE_FIRST']
