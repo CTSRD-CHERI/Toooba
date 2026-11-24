@@ -2305,18 +2305,11 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule checkObjId (!storeUrgent);
         let info = lsq.getIssueObjId;
         LSQObjIdSearchResult result = case (info.parent) matches
-            tagged Ld .parent: lsq.searchObjIdLd(parent, info.paddr);
-            tagged St .parent: lsq.searchObjIDSt(parent, info.paddr);
+            tagged Ld .parent: lsq.searchObjIdLd(parent);
+            tagged St .parent: lsq.searchObjIDSt(parent);
         endcase;
-`ifndef TSO_MM
-        // Under WEAK, SQ retirement transfers the write to the store buffer.
-        // Keep waiting there until the cache callback removes the entry.
-        Bool sbClear = case (info.parent) matches
-            tagged Ld .parent: stb.noMatchMetadataLdQ(info.paddr);
-            tagged St .parent: stb.noMatchMetadataStQ(info.paddr);
-        endcase;
-        if (result == ObjIdToCache && !sbClear) result = Stall(SB);
-`endif
+        // Software fences metadata writes before establishment. Only older
+        // fences block these reads; ordinary SQ/SB addresses are not searched.
         if (result matches tagged Stall .by) lsq.retryObjId;
         else begin
             lsq.issueObjId;

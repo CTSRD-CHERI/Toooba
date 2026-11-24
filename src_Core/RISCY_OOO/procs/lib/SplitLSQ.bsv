@@ -428,15 +428,13 @@ interface SplitLSQ;
     method Addr objIdVAddr(ObjIdQTag child);
     method Action setObjIdVAddr(ObjIdQTag child, Addr addr);
     method ActionValue#(Maybe#(Tuple2#(InstTag, StQMemFunc))) completeObjId(ObjIdQTag child, MemTaggedData d);
-    // Wait for older stores to the same data word before reading metadata.
+    // Metadata reads wait only for older fences. Software must fence ID writes.
     method LSQObjIdSearchResult searchObjIDSt(
-                                StQTag requester,
-                                Addr objIdPAddr);
+                                StQTag requester);
     
 
     method LSQObjIdSearchResult searchObjIdLd(
-                                LdQTag requester,
-                                Addr objIdPAddr);
+                                LdQTag requester);
 
     method ActionValue#(LSQIssueLdResult) issueLd(
         LdQTag lsqTag, Addr paddr, Maybe#(Addr) objIdPAddr, Bool objIdLookup, ByteOrTagEn shiftedBE, SBSearchRes sbRes, InlineId inlineId
@@ -2049,29 +2047,25 @@ module mkSplitLSQ(SplitLSQ);
     endmethod
 
     method LSQObjIdSearchResult searchObjIDSt(
-                                StQTag requester,
-                                Addr objIdPAddr) if (!wrongSpec_conflict);
+                                StQTag requester) if (!wrongSpec_conflict);
         StQVirTag requesterVTag = stVirTags[requester];
         function Bool blocksMetadata(StQTag i);
             // Strictly older: a store must not wait for itself.
             return st_valid_issue[i] && stVirTags[i] < requesterVTag &&
-                (st_memFunc[i] == Fence || !st_computed_issue[i] ||
-                 sameDataAlignedAddr(objIdPAddr, st_paddr_issue[i]));
+                st_memFunc[i] == Fence;
         endfunction
         Vector#(StQSize, StQTag) indices = genWith(fromInteger);
         return any(blocksMetadata, indices) ? tagged Stall StQ : tagged ObjIdToCache;
     endmethod
 
     method LSQObjIdSearchResult searchObjIdLd(
-                                LdQTag requester,
-                                Addr objIdPAddr) if (!wrongSpec_conflict);
+                                LdQTag requester) if (!wrongSpec_conflict);
         Maybe#(StQVirTag) precedingSt = olderStVirTags[requester];
         function Bool blocksMetadata(StQTag i);
             Bool older = False;
             if (precedingSt matches tagged Valid .st) older = stVirTags[i] <= st;
             return st_valid_issue[i] && older &&
-                (st_memFunc[i] == Fence || !st_computed_issue[i] ||
-                 sameDataAlignedAddr(objIdPAddr, st_paddr_issue[i]));
+                st_memFunc[i] == Fence;
         endfunction
         Vector#(StQSize, StQTag) indices = genWith(fromInteger);
         return any(blocksMetadata, indices) ? tagged Stall StQ : tagged ObjIdToCache;

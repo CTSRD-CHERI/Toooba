@@ -89,8 +89,6 @@ interface StoreBuffer;
     method ActionValue#(SBEntry) deq(SBIndex idx);
     method ActionValue#(Tuple2#(SBIndex, SBEntry)) issue;
     method SBSearchRes search(Addr paddr, ByteOrTagEn be, InlineId inlineId);
-    method Bool noMatchMetadataLdQ(Addr paddr);
-    method Bool noMatchMetadataStQ(Addr paddr);
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId); // load bypass/stall or atomic inst stall
     method Bool noMatchInlineLdQ(Addr paddr, InlineId inlineId);
     method Bool noMatchInlineStQ(Addr paddr, InlineId inlineId);
@@ -179,18 +177,6 @@ module mkStoreBufferEhr(StoreBuffer);
         // find match entry and determine return value
         Vector#(SBSize, Integer) idxVec = genVector;
         return !any(matchEntry, idxVec);
-    endfunction
-
-    function Bool noMetadataWordMatch(Addr paddr);
-        SBBlockMemDataSel sel = getSBBlockMemDataSel(paddr);
-        function Bool matchesWord(Integer i);
-            Vector#(SBBlockNumMemData, MemDataByteEn) byteEn = unpack(pack(entry[i][searchPort].byteEn));
-            return valid[i][searchPort] &&
-                getSBBlockAddr(paddr) == entry[i][searchPort].addr &&
-                pack(byteEn[sel]) != 0;
-        endfunction
-        Vector#(SBSize, Integer) indices = genVector;
-        return !any(matchesWord, indices);
     endfunction
 
     function SBSearchRes searchEntry(Addr paddr, ByteOrTagEn be, InlineId inlineId);
@@ -402,12 +388,6 @@ module mkStoreBufferEhr(StoreBuffer);
         return searchEntry(paddr, be, inlineId);
     endmethod
 
-    // Metadata checks wait for the whole selected 128-bit word to drain.
-    // A merged SB line may contain writes to other words only; byte enables
-    // are used solely to establish word presence, not query-byte overlap.
-    method Bool noMatchMetadataLdQ(Addr paddr) = noMetadataWordMatch(paddr);
-    method Bool noMatchMetadataStQ(Addr paddr) = noMetadataWordMatch(paddr);
-
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId);
         return searchInlineEntry(paddr, inlineId);
     endmethod
@@ -443,8 +423,6 @@ module mkDummyStoreBuffer(StoreBuffer);
     method SBSearchRes search(Addr paddr, ByteOrTagEn be, InlineId inlineId);
         return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
     endmethod
-    method Bool noMatchMetadataLdQ(Addr paddr) = True;
-    method Bool noMatchMetadataStQ(Addr paddr) = True;
     method SBSearchRes searchInlineId(Addr paddr, InlineId inlineId);
         return SBSearchRes {matchIdx: Invalid, sourceId: unpack(0), forwardData: Invalid};
     endmethod

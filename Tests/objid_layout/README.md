@@ -22,6 +22,12 @@ establishing access follows the memory path if the cached ID differs. These
 tests fence after it as well, ordering the following checks after completion.
 An ID store and fence alone need not revoke a matching cached old ID.
 
+ObjID memory misses wait for older fences, but do not search ordinary store
+addresses or the store buffer. Unfenced lookups may therefore read an older ID
+from L1 even if a newer ID is waiting in SQ/SB; they neither forward from those
+stores nor wait for their addresses. The first full fence must drain the ID
+write before establishment. Normal payload load/store ordering is unchanged.
+
 Each normal test starts with ID 1, performs an initial access and repeated reuse,
 updates the metadata byte to ID 2, fences, establishes ID 2, and finally requires
 the old authority to be rejected. Legacy `stale-first` variants now establish

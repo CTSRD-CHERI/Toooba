@@ -354,8 +354,8 @@ module mkTest(Empty);
         drain <= False;
         delay(creditDrainDelay);
         check(lsq.objIdQueueEmpty, "same-cycle correct-spec allocation leaked credit");
-        // Metadata reads never forward, even when only a different byte of
-        // the same 128-bit word is written. Unknown older addresses block too.
+        // ObjID reads ignore ordinary store addresses, including unresolved
+        // addresses and overlapping words. Only preceding fences may block.
         action
             let byteStore = instruction(True);
             byteStore.byteOrTagEn = DataMemAccess(unpack('h1));
@@ -369,8 +369,8 @@ module mkTest(Empty);
         endaction
         action
             check(ordering.objIdFenceOrdered(tagged Ld 0), "ordinary unresolved store blocked a cached hit");
-            check(ordering.searchObjIdLd(0, 'h7000) == Stall(StQ), "unresolved older store/load");
-            check(ordering.searchObjIDSt(1, 'h7000) == Stall(StQ), "unresolved older store/store");
+            check(ordering.searchObjIdLd(0) == ObjIdToCache, "unresolved older store must not block metadata/load");
+            check(ordering.searchObjIDSt(1) == ObjIdToCache, "unresolved older store must not block metadata/store");
         endaction
         check(ordering.objIdFenceOrdered(tagged St 1), "ordinary unresolved store blocked a cached store hit");
         ordering.updateData(0, unpack(0));
@@ -379,13 +379,13 @@ module mkTest(Empty);
                 DataMemAccess(unpack('h100)), 0, 0, Invalid, 0, unpack(0), False);
         endaction
         action
-            check(ordering.searchObjIdLd(0, 'h7000) == Stall(StQ), "different byte must wait/load");
-            check(ordering.searchObjIDSt(1, 'h7000) == Stall(StQ), "different byte must wait/store");
+            check(ordering.searchObjIdLd(0) == ObjIdToCache, "overlapping word must not block metadata/load");
+            check(ordering.searchObjIDSt(1) == ObjIdToCache, "overlapping word must not block metadata/store");
         endaction
         action
             check(ordering.objIdFenceOrdered(tagged Ld 0), "ordinary predecessor blocked load buffer hit");
-            check(ordering.searchObjIdLd(0, 'h7010) == ObjIdToCache, "adjacent word or younger unknown store blocked load");
-            check(ordering.searchObjIDSt(1, 'h7010) == ObjIdToCache, "store blocked by itself");
+            check(ordering.searchObjIdLd(0) == ObjIdToCache, "adjacent word or younger unknown store blocked load");
+            check(ordering.searchObjIDSt(1) == ObjIdToCache, "store blocked by itself");
         endaction
         check(ordering.objIdFenceOrdered(tagged St 1), "requester blocked its own buffer hit");
         ordering.updateData(1, unpack(0));
@@ -394,15 +394,15 @@ module mkTest(Empty);
                 DataMemAccess(unpack('h1)), 0, 0, Invalid, 0, unpack(0), False);
         endaction
         action
-            check(ordering.searchObjIdLd(0, 'h7010) == ObjIdToCache, "younger matching store blocked load");
-            check(ordering.searchObjIDSt(1, 'h7010) == ObjIdToCache, "matching store blocked itself");
+            check(ordering.searchObjIdLd(0) == ObjIdToCache, "younger matching store blocked load");
+            check(ordering.searchObjIDSt(1) == ObjIdToCache, "matching store blocked itself");
         endaction
         ordering.setAtCommit[0].put(tagged St 0);
-        check(ordering.searchObjIdLd(0, 'h7000) == Stall(StQ), "commit released store before cache completion");
+        check(ordering.searchObjIdLd(0) == ObjIdToCache, "ordinary store at commit blocked metadata");
         ordering.deqSt;
         action
-            check(ordering.searchObjIdLd(0, 'h7000) == ObjIdToCache, "completed store still blocks load");
-            check(ordering.searchObjIDSt(1, 'h7000) == ObjIdToCache, "completed store still blocks store");
+            check(ordering.searchObjIdLd(0) == ObjIdToCache, "completed store still blocks load");
+            check(ordering.searchObjIDSt(1) == ObjIdToCache, "completed store still blocks store");
         endaction
         // A known footer write blocks hits until cache completion; an
         // ordinary older store and the requester's own store do not.
@@ -425,8 +425,8 @@ module mkTest(Empty);
         ordering.setAtCommit[0].put(tagged St 2);
         ordering.deqSt;
         check(ordering.objIdFenceOrdered(tagged Ld 1), "completed metadata store still blocked buffer hit");
-        // In WEAK mode SQ retirement transfers ownership to the SB. Only
-        // written words in a merged line block, through issue until callback.
+        // Normal SB forwarding retains writes through callback. Metadata
+        // misses no longer have a separate SB address-search interface.
         action
             let idx = sbWords.getEnqIndex('h8008, unpack('h100), unpack(0));
             check(isValid(idx), "SB allocation");
@@ -434,22 +434,19 @@ module mkTest(Empty);
             sbWords.enq(fromMaybe(?, idx), 'h8008, unpack('h100), unpack(0), 0, unpack(0));
         endaction
         action
-            check(sbWords.noObjIdWrites(True), "ordinary SB line blocked ID buffer hit");
-            check(!sbWords.noMatchMetadataLdQ('h8000) && !sbWords.noMatchMetadataStQ('h8000), "SB same word must wait");
+            check(isValid(sbWords.search('h8008, DataMemAccess(unpack('h100)), unpack(0)).matchIdx), "normal SB search lost pending store");
         endaction
         action
-            check(sbWords.noMatchMetadataLdQ('h8010) && sbWords.noMatchMetadataStQ('h8010), "SB adjacent word blocked");
+            noAction;
         endaction
-        check(sbWords.noMatchMetadataLdQ('h9000), "SB unrelated line blocked");
         action
             noAction;
         endaction
         action
             let entry <- sbWords.issue;
         endaction
-        check(!sbWords.noMatchMetadataLdQ('h8000), "SB issue released word before cache completion");
         action let entry <- sbWords.deq(sbIndex); endaction
-        check(sbWords.noMatchMetadataLdQ('h8000) && sbWords.noMatchMetadataStQ('h8000), "SB cache completion did not release word");
+        check(!isValid(sbWords.search('h8008, DataMemAccess(unpack('h100)), unpack(0)).matchIdx), "normal SB write survived callback");
         action
             let idx = sbWords.getEnqIndex('h83ff, unpack('h8000), unpack(0));
             check(isValid(idx), "metadata SB allocation");
@@ -478,13 +475,19 @@ module mkTest(Empty);
             ordering.enqSt(unpack(45), f, Invalid, 0, 0);
         endaction
         ordering.enqLd(unpack(46), instruction(False), Invalid, 0, 0);
+        ordering.enqSt(unpack(47), instruction(True), Invalid, 0, 0);
+        check(ordering.searchObjIDSt(4) == Stall(StQ), "store metadata bypassed preceding fence");
         check(!ordering.objIdFenceOrdered(tagged Ld 2), "cached hit bypassed preceding fence");
+        check(ordering.searchObjIDSt(3) == ObjIdToCache, "fence blocked itself");
+        check(ordering.searchObjIdLd(1) == ObjIdToCache, "younger fence blocked older metadata");
         check(ordering.objIdFenceOrdered(tagged Ld 1), "younger fence blocked older hit");
-        check(ordering.searchObjIdLd(2, 'h9000) == Stall(StQ), "metadata request bypassed preceding fence");
+        check(ordering.searchObjIdLd(2) == Stall(StQ), "metadata request bypassed preceding fence");
         ordering.setAtCommit[0].put(tagged St 3);
         ordering.deqSt;
         check(ordering.objIdFenceOrdered(tagged Ld 2), "retired fence still blocked hit");
-        $display("PASS: conservative 128-bit metadata/store ordering and SB drain; independent ObjID credit exhaustion/wraparound, full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences, early data/late translation, fault draining, pending cancellation, squash and same-cycle correct-spec allocation");
+        check(ordering.searchObjIdLd(2) == ObjIdToCache, "retired fence still blocked metadata");
+        check(ordering.searchObjIDSt(4) == ObjIdToCache, "retired fence still blocked store metadata");
+        $display("PASS: relaxed metadata store ordering, fence-only issue, and SB drain; independent ObjID credit exhaustion/wraparound, full LQ/SQ capacity, execute-time credit return, same-cycle issue, independent lookup tags, squash/reuse, commit protection, LR gating, fences, early data/late translation, fault draining, pending cancellation, squash and same-cycle correct-spec allocation");
         $finish(0);
     endseq;
     mkAutoFSM(test);
