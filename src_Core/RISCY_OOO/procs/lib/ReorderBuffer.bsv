@@ -176,6 +176,7 @@ interface ReorderBufferRowEhr#(numeric type aluExeNum, numeric type fpuMulDivExe
     // perform), and non-MMIO St can become Executed (NOTE faulting
     // instructions are not Executed, they are set at deqLSQ time)
 
+    method Action setObjIdReady(Bool access_at_commit, Bool non_mmio_st_done);
     method Action setExecuted_doFinishMem(Addr vaddr,
 `ifdef INCLUDE_TANDEM_VERIF
                                           Data store_data, ByteEn store_data_BE,
@@ -226,12 +227,13 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Integer ldKill_enq_port = 1; // init ldKilled
 
     Integer accessCom_deq_port = 0;
+    Integer accessCom_objId_port = 1;
     Integer accessCom_finishMem_port = 0; // set memAccessAtCommit
 `ifdef INORDER_CORE
-    Integer accessCom_setLSQTag_port = 1; // enq to LSQ
-    Integer accessCom_enq_port = 2; // init
+    Integer accessCom_setLSQTag_port = 2; // enq to LSQ
+    Integer accessCom_enq_port = 3; // init
 `else
-    Integer accessCom_enq_port = 1; // init
+    Integer accessCom_enq_port = 2; // init
 `endif
 
     Integer lsqNotified_deq_port = 0;
@@ -239,15 +241,17 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Integer lsqNotified_enq_port = 1;
 
     Integer nonMMIOSt_deq_port = 0;
+    Integer nonMMIOSt_objId_port = 1;
     Integer nonMMIOSt_finishMem_port = 0;
-    Integer nonMMIOSt_enq_port = 1;
+    Integer nonMMIOSt_enq_port = 2;
 
     Integer state_deq_port = 0;
     function Integer state_finishAlu_port(Integer i) = i; // write state
     function Integer state_finishFpuMulDiv_port(Integer i) = valueof(aluExeNum) + i; // write state
     Integer state_deqLSQ_port = valueof(fpuMulDivExeNum) + valueof(aluExeNum); // write state
     Integer state_finishMem_port = 1 + state_deqLSQ_port; // write state
-    Integer state_enq_port = 1 + state_finishMem_port; // write state
+    Integer state_objId_port = 1 + state_finishMem_port;
+    Integer state_enq_port = 1 + state_objId_port; // write state
 
     Integer sb_deq_port = 0;
     Integer sb_wrongSpec_port = 0;
@@ -276,12 +280,12 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     Ehr#(TAdd#(2, aluExeNum), PPCVAddrCSRData)                      ppc_vaddr_csrData    <- mkEhr(?);
     Ehr#(TAdd#(1, fpuMulDivExeNum), Bit#(5))                        fflags               <- mkEhr(?);
     Reg#(Bool)                                                      will_dirty_fpu_state <- mkRegU;
-    Ehr#(TAdd#(3, TAdd#(fpuMulDivExeNum, aluExeNum)), RobInstState) rob_inst_state       <- mkEhr(?);
+    Ehr#(TAdd#(4, TAdd#(fpuMulDivExeNum, aluExeNum)), RobInstState) rob_inst_state       <- mkEhr(?);
     Reg#(LdStQTag)                                                  lsqTag               <- mkRegU;
     Ehr#(2, Maybe#(LdKilledBy))                                     ldKilled             <- mkEhr(?);
-    Ehr#(3, Bool)                                                   memAccessAtCommit    <- mkEhr(?);
+    Ehr#(4, Bool)                                                   memAccessAtCommit    <- mkEhr(?);
     Ehr#(2, Bool)                                                   lsqAtCommitNotified  <- mkEhr(?);
-    Ehr#(2, Bool)                                                   nonMMIOStDone        <- mkEhr(?);
+    Ehr#(3, Bool)                                                   nonMMIOStDone        <- mkEhr(?);
     Reg#(Bool)                                                      epochIncremented     <- mkRegU;
     Ehr#(3, SpecBits)                                               spec_bits            <- mkEhr(?);
 `ifdef RVFI_DII
@@ -369,6 +373,18 @@ module mkReorderBufferRowEhr(ReorderBufferRowEhr#(aluExeNum, fpuMulDivExeNum)) p
     interface setExecuted_doFinishAlu = aluSetExe;
 
     interface setExecuted_doFinishFpuMulDiv = fpuMulDivExe;
+
+    // Metadata completion only updates readiness; preserve the data access's
+    // address and trace, and allow the next data admission on a separate port.
+    method Action setObjIdReady(Bool access_at_commit, Bool non_mmio_st_done);
+        doAssert(!(access_at_commit && non_mmio_st_done), "cannot both be true");
+        if (non_mmio_st_done) begin
+            rob_inst_state[state_objId_port] <= Executed;
+            doAssert(iType == St, "must be St");
+        end
+        memAccessAtCommit[accessCom_objId_port] <= access_at_commit;
+        nonMMIOStDone[nonMMIOSt_objId_port] <= non_mmio_st_done;
+    endmethod
 
     method Action setExecuted_doFinishMem(Addr vaddr,
 `ifdef INCLUDE_TANDEM_VERIF
@@ -631,6 +647,7 @@ interface SupReorderBuffer#(numeric type aluExeNum, numeric type fpuMulDivExeNum
     interface Vector#(aluExeNum, ROB_setExecuted_doFinishAlu) setExecuted_doFinishAlu;
     interface Vector#(fpuMulDivExeNum, ROB_setExecuted_doFinishFpuMulDiv) setExecuted_doFinishFpuMulDiv;
     // doFinishMem, after addr translation
+    method Action setObjIdReady(InstTag x, Bool access_at_commit, Bool non_mmio_st_done);
     method Action setExecuted_doFinishMem(InstTag x,
                                           Addr vaddr,
 `ifdef INCLUDE_TANDEM_VERIF
@@ -1305,6 +1322,11 @@ module mkSupReorderBuffer#(
     interface setExecuted_doFinishAlu = aluSetExeIfc;
 
     interface setExecuted_doFinishFpuMulDiv = fpuMulDivSetExeIfc;
+
+    method Action setObjIdReady(InstTag x, Bool access_at_commit, Bool non_mmio_st_done)
+        if (all(id, readVReg(setExeMem_SB_enq)));
+        row[x.way][x.ptr].setObjIdReady(access_at_commit, non_mmio_st_done);
+    endmethod
 
     method Action setExecuted_doFinishMem(
         InstTag x,

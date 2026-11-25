@@ -219,3 +219,11 @@ Bitwise#(ix), Eq#(ix), Arith#(ix), PrimIndex#(ix, a__));
     endmethod
     method Bool clearDone = !clearReg;
 endmodule
+
+// Concrete synthesis boundary for the 1 KiB ObjID buffer. Other users of
+// mkMapLossyBRAM retain their existing inlined implementations and schedules.
+(* synthesize *)
+module mkObjIdBuffer(MapSplit#(Bit#(38), Bit#(6), Maybe#(Bit#(32)), 4));
+    let buffer <- mkMapLossyBRAM;
+    return buffer;
+endmodule

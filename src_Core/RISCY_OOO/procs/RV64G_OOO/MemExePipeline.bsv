@@ -233,6 +233,16 @@ endmodule
 // Data admission now produces metadata retries. Keep this handoff FIFO's
 // enqueue and dequeue independent: deq-before-enq would impose the cycle
 // DTLB request < data admission < DTLB response on the shared DTLB.
+// A narrow, speculative sideband decides metadata work after data admission.
+typedef struct {
+    LdStQTag parent;
+    ObjIdQTag child;
+    InstTag instTag;
+    MemFunc memFunc;
+    Bool active;
+    Bool needsTranslation;
+} ObjIdLookupDecision deriving(Bits, Eq, FShow);
+
 typedef SpecFifo_SB_deq_enq_C_deq_enq#(2, DTlbResp#(MemExeToFinish)) FinishTranslationFifo;
 module mkFinishTranslationFifo(SpecFifo_SB_deq_enq_C_deq_enq#(2, t)) provisos(Bits#(t, tSz));
     Vector#(2, Reg#(t)) rows <- replicateM(mkRegU);
@@ -323,6 +333,7 @@ interface MemExeInput;
     method CapReg scaprf_rd(SCR csr);
     // ROB
     method CapMem rob_getPC(InstTag t);
+    method Action rob_setObjIdReady(InstTag t, Bool access_at_commit, Bool non_mmio_st_done);
     method Action rob_setExecuted_doFinishMem(InstTag t,
                                               Addr vaddr,
 `ifdef INCLUDE_TANDEM_VERIF
@@ -451,6 +462,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     SpecFifo_SB_deq_enq_C_deq_enq#(ObjIdTranslationSlots, Bool) objIdTranslation <-
         mkSpecFifo_SB_deq_enq_C_deq_enq(True);
     FinishTranslationFifo finishTranslationQ <- mkFinishTranslationFifo;
+    SpecFifo_SB_deq_enq_C_deq_enq#(2, ObjIdLookupDecision) objIdDecisionQ <- mkFinishTranslationFifo;
+    SpecFifo_SB_deq_enq_C_deq_enq#(ObjIdTranslationSlots, Bool) objIdRetryDecision <-
+        mkSpecFifo_SB_deq_enq_C_deq_enq(True);
 
     // store buffer only used in WEAK model
 `ifdef TSO_MM
@@ -515,6 +529,10 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // A non-bypass queue delays completion until Map's pipelined tag/data
     // update (or invalidation) has had a cycle to commit.
     FIFOF#(Tuple2#(ObjIdQTag, MemTaggedData)) objIdRefreshDoneQ <- mkSizedFIFOF(2);
+    // Keep the verdict stage independent of FIFOF.notEmpty's read-before-enq
+    // scheduling edge. A current refill still suppresses stale cached verdicts.
+    Reg#(Bool) objIdRefreshBusy <- mkReg(False);
+    PulseWire objIdRefreshStarting <- mkPulseWire;
 
     Fifo#(2, ObjIdEvictReq)
         objIdEvictQ <- mkCFFifo;
@@ -540,7 +558,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     // Preserve 1 KiB of ID payload: 64 sets x 4 ways x 4 bytes.
     // Keys describe aligned 32-bit metadata words; tag storage grows with
     // entry count. Memory requests still return a 128-bit data word.
-    MapSplit#(ObjIdBufKey, Bit#(6), Maybe#(Bit#(32)), 4) objIdBuf <- mkMapLossyBRAM;
+    MapSplit#(ObjIdBufKey, Bit#(6), Maybe#(Bit#(32)), 4) objIdBuf <- mkObjIdBuffer;
     Fifo#(1, ObjIdLookupClient) objIdLookupQ <- mkPipelineFifo;
     Vector#(TExp#(SizeOf#(LdStQTag)), Ehr#(2, Bool))
         objIdLookupHits <- replicateM(mkEhr(False));
@@ -881,9 +899,9 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     endrule
 
     // A speculation-aware reservation guarantees room to consume the data
-    // response even when all TLB request slots are occupied. A one-entry
-    // reservation has no invalid head holes after selective speculation kills.
-    rule doExeMem (!objIdTranslation.notEmpty);
+    // response even when all TLB request slots are occupied. The FIFO
+    // reserves up to three retries; do not serialize on an occupied slot.
+    rule doExeMem;
         regToExeQ.deq;
         let regToExe = regToExeQ.first;
         let x = regToExe.data;
@@ -1071,11 +1089,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     rule sendObjIdTranslation;
         let r = dTlbReqQ.first;
         dTlbReqQ.deq;
+        let translate = objIdRetryDecision.first.data;
+        objIdRetryDecision.deq;
         objIdTranslation.deq;
         // A data-side fault/MMIO can cancel metadata after admission. Carry
         // that release through this queue too, so doFinishMem never competes
         // with the normal data-response rule for the reservation dequeue.
-        if (r.data.translateObjId)
+        if (translate)
             dTlb.procReq(DTlbReq { inst: r.data, specBits: r.spec_bits });
     endrule
 
@@ -1094,13 +1114,6 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         // Only a preceding fence orders hits; ordinary older stores do not.
         hit = hit && lookupEligible && !objIdRefreshDoneQ.notEmpty && !objIdFlushPending &&
               !objIdEvictQ.notEmpty;
-`ifdef BSIM
-        Bool traceLayout <- $test$plusargs("trace_objid_layout");
-        if (traceLayout) begin
-            if (hit) $display("OBJID_LAYOUT hit");
-            else $display("OBJID_LAYOUT miss");
-        end
-`endif
         objIdLookupHits[pack(tag)][0] <= hit;
     endrule
 
@@ -1108,26 +1121,41 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         let r = dTlb.procResp;
         dTlb.deqProcResp;
         let x = r.inst;
-        Bool reservedRetry = isValid(x.objIdAddr) && x.tmode != 1;
-        Bool needsMetadata = reservedRetry;
-        Bool dataFault = True;
-        if (r.resp matches tagged Valid .rsp)
-            dataFault = isValid(tpl_2(rsp));
-        if (isValid(x.objIdAddr)) begin
-            if (!x.inlineId.inLine && x.inlineId.expected == 0) begin
-                if (objIdLookupHits[pack(x.ldstq_tag)][1]) begin
-                    x.objIdAddr = Invalid;
-                    needsMetadata = False;
-                end
-            end
-            if (reservedRetry && (!needsMetadata || dataFault))
-                objIdTranslation.deq;
-        end
-        // Admit data independently; doFinishMem prepares the pending ObjID
-        // obligation before making its translation retry visible.
-        x.translateObjId = needsMetadata && !dataFault;
+        // Preserve the potential metadata descriptor. No buffer verdict feeds
+        // this rule or data-side LSQ admission.
+        x.translateObjId = isValid(x.objIdAddr) && x.tmode != 1;
         r.inst = x;
         finishTranslationQ.enq(ToSpecFifo { data: r, spec_bits: r.specBits });
+    endrule
+
+    rule decideObjIdLookup;
+        let decision = objIdDecisionQ.first;
+        let x = decision.data;
+        objIdDecisionQ.deq;
+        Bool hit = objIdLookupHits[pack(x.parent)][1] && objIdBuf.clearDone &&
+                   !objIdRefreshBusy && !objIdRefreshStarting && !objIdFlushPending &&
+                   !objIdEvictQ.notEmpty && !objIdInvalidate;
+        Bool needed = False;
+        if (x.active) begin
+            let verdict <- lsq.resolveObjIdLookup(x.parent, x.child, x.instTag, hit);
+            needed = tpl_1(verdict);
+            hit = tpl_2(verdict);
+            if (needed && (hit || !x.needsTranslation)) begin
+                Bool atomicAccess = x.memFunc == Lr || x.memFunc == Sc || x.memFunc == Amo;
+                if (atomicAccess || (hit && x.memFunc == St))
+                    inIfc.rob_setObjIdReady(x.instTag, atomicAccess, hit && x.memFunc == St);
+            end
+`ifdef BSIM
+            Bool traceLayout <- $test$plusargs("trace_objid_layout");
+            if (traceLayout && needed) begin
+                if (hit) $display("OBJID_LAYOUT hit");
+                else $display("OBJID_LAYOUT miss");
+            end
+`endif
+        end
+        if (x.needsTranslation)
+            objIdRetryDecision.enq(ToSpecFifo {
+                data: x.active && needed && !hit, spec_bits: decision.spec_bits });
     endrule
 
     rule doObjIdTlb (dTlb.procResp.inst.translateObjId);
@@ -1254,12 +1282,13 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
                 x.capException = Valid(CSR_XCapCause{cheri_exc_reg: check.authority_idx, cheri_exc_code: cheriExcLengthViolation});
         end
         if (x.capException matches tagged Valid .c) cause = Valid(CapException(c));
+        Bool lookupActive = isValid(x.objIdAddr) && !isValid(cause) && !isMMIO;
         Bool metadataPending = x.translateObjId && !isValid(cause) && !isMMIO;
         let needsObjIdCheck = (x.mem_func == St || x.mem_func == Sc || x.mem_func == Amo) &&
                               !isMMIO && isValid(x.objIdAddr);
         // Keep atomics out of the at-commit/protected state until their
         // metadata translation has also completed.
-        Bool access_at_commit = !isValid(cause) && (isMMIO || (isLrScAmo && !metadataPending));
+        Bool access_at_commit = !isValid(cause) && (isMMIO || (isLrScAmo && !metadataPending && !lookupActive));
         Bool non_mmio_st_done = !isValid(cause) && !isMMIO && (x.mem_func == St) && !needsObjIdCheck;
         inIfc.rob_setExecuted_doFinishMem(x.tag, getAddr(x.vaddr),
 `ifdef INCLUDE_TANDEM_VERIF
@@ -1319,8 +1348,18 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
 
         LSQUpdateAddrResult updRes <- lsq.updateAddr(
             x.ldstq_tag, cause, x.allowCapLoad && allowCapPTE, paddr, isMMIO, x.shiftedBE, x.mte, x.alloc_policy, 
-            (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset, x.inlineId, metadataPending
+            (((x.mem_func == Ld || x.mem_func == St || x.mem_func == Lr || x.mem_func == Sc || x.mem_func == Amo) && !isMMIO) ? objIdPAddr : Invalid), x.objIdOffset, x.inlineId, metadataPending, lookupActive
         );
+        // Capture the child before updateAddr can cancel it for a fault or a
+        // forwarding verdict. The held child prevents reuse until this drains.
+        let child = updRes.objIdChild;
+        if (lookupActive || x.translateObjId)
+            objIdDecisionQ.enq(ToSpecFifo { data: ObjIdLookupDecision {
+                parent: x.ldstq_tag, child: fromMaybe(?, child), instTag: x.tag,
+                memFunc: x.mem_func, active: lookupActive,
+                needsTranslation: x.translateObjId
+            }, spec_bits: dTlbResp.specBits });
+
         if(verbose) $display("%t : [doFinishMem] ", $time, fshow(updRes));
 
         // issue non-MMIO Ld which has no exception and is not waiting for
@@ -1400,9 +1439,12 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         if(issRes matches tagged Forward .forward) begin
             forwardQ.enq(tuple2(info.tag, forward.data));
             if (info.objIdLookup) begin
-                if (!info.inlineId.forwardUnchecked && !forward.storeIdCheck)
-                    lsq.startObjIdCheck(tagged Ld info.tag);
-                else lsq.cancelObjIdCheck(tagged Ld info.tag);
+                // Separate metadata lookups (modes 1-6) keep their own
+                // obligation even when the payload forwards. Inline sharing
+                // and unchecked forwarding never set objIdLookup.
+                doAssert(!info.inlineId.inLine && !info.inlineId.forwardUnchecked &&
+                         !forward.storeIdCheck, "separate ObjID lookup cannot share inline verdict");
+                lsq.startObjIdCheck(tagged Ld info.tag);
             end
             // early wake up
             if(forward.dst matches tagged Valid .dst) begin
@@ -1542,15 +1584,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     action
         let storeDone <- lsq.completeObjId(child, data);
         if (storeDone matches tagged Valid { .instTag, .memFunc } &&& memFunc == St)
-            inIfc.rob_setExecuted_doFinishMem(instTag, 0,
-`ifdef INCLUDE_TANDEM_VERIF
-                0, 0,
-`endif
-                False, True
-`ifdef RVFI
-                , unpack(0)
-`endif
-            );
+            inIfc.rob_setObjIdReady(instTag, False, True);
     endaction
     endfunction
 
@@ -1582,11 +1616,14 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
             }, Invalid, False);
         end
         objIdRefreshDoneQ.enq(tuple2(child, data));
+        objIdRefreshBusy <= True;
+        objIdRefreshStarting.send;
     endrule
 
     rule finishObjIdRefresh;
         let {child, data} = objIdRefreshDoneQ.first;
         objIdRefreshDoneQ.deq;
+        objIdRefreshBusy <= False;
         finishObjId(child, data);
     endrule
 
@@ -2383,7 +2420,7 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
     interface recvBypass = map(getRecvBypassIfc, bypassWire);
     interface rsMemIfc = rsMem;
     interface dTlbIfc = dTlb;
-    method tlbNoPendingReq = dTlb.noPendingReq && !objIdTranslation.notEmpty && !dTlbReqQ.notEmpty && !finishTranslationQ.notEmpty && !objIdTranslationResults.notEmpty && !objIdLookupQ.notEmpty;
+    method tlbNoPendingReq = dTlb.noPendingReq && !objIdTranslation.notEmpty && !dTlbReqQ.notEmpty && !finishTranslationQ.notEmpty && !objIdTranslationResults.notEmpty && !objIdLookupQ.notEmpty && !objIdDecisionQ.notEmpty && !objIdRetryDecision.notEmpty;
     interface lsqIfc = lsq;
     interface stbIfc = stb;
     interface dMemIfc = dMem;
@@ -2392,6 +2429,8 @@ module mkMemExePipeline#(MemExeInput inIfc)(MemExePipeline);
         dispToRegQ.specUpdate,
         regToExeQ.specUpdate,
         finishTranslationQ.specUpdate,
+        objIdDecisionQ.specUpdate,
+        objIdRetryDecision.specUpdate,
         objIdTranslationResults.specUpdate,
         dTlbReqQ.specUpdate,
         objIdTranslation.specUpdate,

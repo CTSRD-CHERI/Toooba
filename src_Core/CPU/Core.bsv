@@ -504,6 +504,7 @@ module mkCore#(CoreId coreId)(Core);
             method scaprf_rd = csrf.scrRd;
             method rob_getPC = rob.getOrigPC[valueof(AluExeNum)].get; // last getPC port
             method rob_setExecuted_doFinishMem = rob.setExecuted_doFinishMem;
+            method rob_setObjIdReady = rob.setObjIdReady;
 `ifdef INCLUDE_TANDEM_VERIF
             method rob_setExecuted_doFinishMem_RegData = rob.setExecuted_doFinishMem_RegData;
 `endif

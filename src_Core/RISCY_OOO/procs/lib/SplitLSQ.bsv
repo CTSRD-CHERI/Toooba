@@ -291,6 +291,7 @@ typedef struct {
 typedef struct {
     Bool waitWPResp;
     Bool delayIssue;
+    Maybe#(ObjIdQTag) objIdChild;
 } LSQUpdateAddrResult deriving(Bits, Eq, FShow);
 
 typedef struct {
@@ -412,9 +413,10 @@ interface SplitLSQ;
         LdStQTag lsqTag, Maybe#(Trap) fault,
         // below are only meaningful wen fault is Invalid
         Bool allowCap, Addr paddr, Bool isMMIO, ByteOrTagEn shiftedBE, Bit#(8) mte, Bit#(3) alloc_policy,
-        Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset, InlineId inlineId, Bool objIdTranslationPending
+        Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset, InlineId inlineId, Bool objIdTranslationPending, Bool objIdLookupPending
     );
     method Maybe#(ObjIdQTag) objIdChild(LdStQTag parent);
+    method ActionValue#(Tuple2#(Bool, Bool)) resolveObjIdLookup(LdStQTag parent, ObjIdQTag child, InstTag instTag, Bool hit);
     method Action resolveObjIdTranslation(LdStQTag parent, Addr paddr, Maybe#(Trap) fault);
     method Action startObjIdCheck(LdStQTag parent);
     method Action cancelObjIdCheck(LdStQTag parent);
@@ -766,7 +768,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(LdQSize, Ehr#(2, ByteOrTagEn))          ld_shiftedBE       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(Trap)))         ld_fault           <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_computed        <- replicateM(mkEhr(?));
-    Vector#(LdQSize, Ehr#(5, Maybe#(Bool)))         ld_objIdSealOk     <- replicateM(mkEhr(?));
+    Vector#(LdQSize, Ehr#(6, Maybe#(Bool)))         ld_objIdSealOk     <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_executing       <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(2, Bool))                 ld_done            <- replicateM(mkEhr(?));
     Vector#(LdQSize, Ehr#(3, Maybe#(LdKilledBy)))   ld_killed          <- replicateM(mkEhr(?));
@@ -859,11 +861,12 @@ module mkSplitLSQ(SplitLSQ);
     let ld_objIdSealOk_wrongSpec    = getVEhrPort(ld_objIdSealOk, 0);
     let ld_objIdSealOk_deqLd        = getVEhrPort(ld_objIdSealOk, 0);
     let ld_objIdSealOk_findIss      = getVEhrPort(ld_objIdSealOk, 0);
-    let ld_objIdSealOk_issue        = getVEhrPort(ld_objIdSealOk, 1); // fast-forward completion
-    let ld_objIdSealOk_updObjIdSeal = getVEhrPort(ld_objIdSealOk, 0); // write
-    let ld_objIdSealOk_storeResp    = getVEhrPort(ld_objIdSealOk, 2);
-    let ld_objIdSealOk_resp         = getVEhrPort(ld_objIdSealOk, 3); // combined data/ID response
-    let ld_objIdSealOk_enq          = getVEhrPort(ld_objIdSealOk, 4); // write
+    let ld_objIdSealOk_issue        = getVEhrPort(ld_objIdSealOk, 2); // fast-forward completion
+    let ld_objIdSealOk_updAddr = getVEhrPort(ld_objIdSealOk, 0);
+    let ld_objIdSealOk_updObjIdSeal = getVEhrPort(ld_objIdSealOk, 1); // write
+    let ld_objIdSealOk_storeResp    = getVEhrPort(ld_objIdSealOk, 3);
+    let ld_objIdSealOk_resp         = getVEhrPort(ld_objIdSealOk, 4); // combined data/ID response
+    let ld_objIdSealOk_enq          = getVEhrPort(ld_objIdSealOk, 5); // write
 
     let ld_executing_findIss   = getVEhrPort(ld_executing, 0);
     let ld_executing_wrongSpec = getVEhrPort(ld_executing, 0);
@@ -993,7 +996,7 @@ module mkSplitLSQ(SplitLSQ);
     Vector#(StQSize, Ehr#(2, Maybe#(Trap)))         st_fault     <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_allowCapAmoLd <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_computed  <- replicateM(mkEhr(?));
-    Vector#(StQSize, Ehr#(2, Maybe#(Bool)))         st_objIdSealOk   <- replicateM(mkEhr(?));
+    Vector#(StQSize, Ehr#(3, Maybe#(Bool)))         st_objIdSealOk   <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, Bool))                 st_verified  <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(2, SpecBits))             st_specBits  <- replicateM(mkEhr(?));
     Vector#(StQSize, Ehr#(TAdd#(1, SupSize), Bool)) st_atCommit  <- replicateM(mkEhr(?));
@@ -1056,9 +1059,10 @@ module mkSplitLSQ(SplitLSQ);
     let st_computed_enq     = getVEhrPort(st_computed, 1); // write
 
     let st_objIdSealOk_wrongSpec    = getVEhrPort(st_objIdSealOk, 0);
-    let st_objIdSealOk_updObjIdSeal = getVEhrPort(st_objIdSealOk, 0); // write
-    let st_objIdSealOk_deqSt        = getVEhrPort(st_objIdSealOk, 1);
-    let st_objIdSealOk_enq          = getVEhrPort(st_objIdSealOk, 1); // write
+    let st_objIdSealOk_updAddr = getVEhrPort(st_objIdSealOk, 0);
+    let st_objIdSealOk_updObjIdSeal = getVEhrPort(st_objIdSealOk, 1); // write
+    let st_objIdSealOk_deqSt        = getVEhrPort(st_objIdSealOk, 2);
+    let st_objIdSealOk_enq          = getVEhrPort(st_objIdSealOk, 2); // write
 
     let st_verified_wrongSpec = getVEhrPort(st_verified, 0);
     let st_verified_verify    = getVEhrPort(st_verified, 0); // write
@@ -1746,7 +1750,7 @@ module mkSplitLSQ(SplitLSQ);
     method ActionValue#(LSQUpdateAddrResult) updateAddr(
         LdStQTag lsqTag, Maybe#(Trap) fault,
         Bool allowCap, Addr pa, Bool mmio, ByteOrTagEn shift_be, Bit#(8) mte, Bit#(3) alloc_policy,
-        Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset, InlineId inlineId, Bool objIdTranslationPending
+        Maybe#(Addr) objIdPAddr, Bit#(7) objIdOffset, InlineId inlineId, Bool objIdTranslationPending, Bool objIdLookupPending
     ) if (!wrongSpec_conflict);
         // index vec for vector functions
         Vector#(LdQSize, LdQTag) idxVec = genWith(fromInteger);
@@ -1786,7 +1790,7 @@ module mkSplitLSQ(SplitLSQ);
             // write fault, computed paddr, shift be. NOTE computed is
             // true only when no fault.
             ld_fault_updAddr[tag] <= fault;
-            ld_translationPending[tag][1] <= objIdTranslationPending;
+            ld_translationPending[tag][0] <= objIdTranslationPending;
             ld_computed_updAddr[tag] <= !isValid(fault);
             ld_paddr_updAddr[tag] <= pa;
             ld_inlineId_updAddr[tag] <= inlineId;
@@ -1819,7 +1823,7 @@ module mkSplitLSQ(SplitLSQ);
             // write fault, computed paddr, shift be. NOTE computed is
             // true only when no fault.
             st_fault_updAddr[tag] <= fault;
-            st_translationPending[tag][1] <= objIdTranslationPending;
+            st_translationPending[tag][0] <= objIdTranslationPending;
             st_allowCapAmoLd_updAddr[tag] <= allowCap;
             st_computed_updAddr[tag] <= !isValid(fault);
             st_paddr_updAddr[tag] <= pa;
@@ -1860,13 +1864,13 @@ module mkSplitLSQ(SplitLSQ);
             Bool active = !isValid(fault) && !mmio && isValid(objIdPAddr) && !inlineId.inLine;
             objIds.prepare(child, active, active && (isStoreParent(lsqTag) || isLrParent(lsqTag)), !objIdTranslationPending, ObjIdCheck {
                 paddr:fromMaybe(?, objIdPAddr), mte:mte, offset:objIdOffset
-            });
+            }, objIdLookupPending);
         end
         Maybe#(Bool) verdict = !isValid(fault) && !mmio &&
             (isValid(objIdPAddr) || inlineId.expected != 0) ? Invalid : Valid(True);
         case (lsqTag) matches
-            tagged Ld .tag: ld_objIdSealOk_updObjIdSeal[tag] <= verdict;
-            tagged St .tag: st_objIdSealOk_updObjIdSeal[tag] <=
+            tagged Ld .tag: ld_objIdSealOk_updAddr[tag] <= verdict;
+            tagged St .tag: st_objIdSealOk_updAddr[tag] <=
                 !isValid(fault) && !mmio && isValid(objIdPAddr) ? Invalid : Valid(True);
         endcase
         // Only same-line checks remain an obligation of the payload access.
@@ -1958,13 +1962,36 @@ module mkSplitLSQ(SplitLSQ);
                 tagged Ld .tag: ld_waitWPRespLd_updAddr[tag];
                 default: False;
             endcase),
-            delayIssue: delayIssue
+            delayIssue: delayIssue,
+            objIdChild: getObjIdChild(lsqTag)
         };
     endmethod
 
     method Maybe#(ObjIdQTag) objIdChild(LdStQTag parent) = getObjIdChild(parent);
     method Action setObjIdVAddr(ObjIdQTag child, Addr addr) if (!wrongSpec_conflict);
         objIds.setVAddr(child, addr);
+    endmethod
+    method ActionValue#(Tuple2#(Bool, Bool)) resolveObjIdLookup(LdStQTag parent, ObjIdQTag child, InstTag instTag, Bool hit) if (!wrongSpec_conflict);
+        let verdict <- objIds.resolveLookup(child, hit);
+        let {needed, acceptedHit} = verdict;
+        hit = acceptedHit;
+        // Forwarding may already have resolved and released the payload slot.
+        // The child remains held until this tagged sideband decision drains.
+        case (parent) matches
+            tagged Ld .l: begin
+                Bool current = ld_valid_resp[l] && ld_objIdChild[l][0] == Valid(child) && ld_instTag[l] == instTag;
+                doAssert(!needed || current, "cache verdict belongs to current load");
+                if (current && (hit || !needed)) ld_translationPending[l][1] <= False;
+                if (current && needed && hit) ld_objIdSealOk_updObjIdSeal[l] <= Valid(True);
+            end
+            tagged St .st: begin
+                Bool current = st_valid_updObjIdSeal[st] && st_objIdChild[st][0] == Valid(child) && st_instTag[st] == instTag;
+                doAssert(!needed || current, "cache verdict belongs to current store");
+                if (current && (hit || !needed)) st_translationPending[st][1] <= False;
+                if (current && needed && hit) st_objIdSealOk_updObjIdSeal[st] <= Valid(True);
+            end
+        endcase
+        return verdict;
     endmethod
     method Action resolveObjIdTranslation(LdStQTag parent, Addr paddr, Maybe#(Trap) fault) if (!wrongSpec_conflict);
         // A forwarding verdict may already have resolved the parent, but the

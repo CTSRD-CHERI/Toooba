@@ -41,7 +41,8 @@ interface ObjIdLoadQueue;
     method Maybe#(ObjIdQTag) enqTag;
     method Action reserve(ObjIdOwner owner, SpecBits specBits, Bool unused);
     method Action setVAddr(ObjIdQTag tag, Addr addr);
-    method Action prepare(ObjIdQTag tag, Bool enabled, Bool ready, Bool translated, ObjIdCheck check);
+    method Action prepare(ObjIdQTag tag, Bool enabled, Bool ready, Bool translated, ObjIdCheck check, Bool lookupPending);
+    method ActionValue#(Tuple2#(Bool, Bool)) resolveLookup(ObjIdQTag tag, Bool hit);
     method Action translate(ObjIdQTag tag, Addr paddr, Bool fault);
     method Action start(ObjIdQTag tag);
     method Action cancel(ObjIdQTag tag);
@@ -73,6 +74,7 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
     Vector#(ObjIdQSize, Ehr#(2, Bool)) used <- replicateM(mkEhr(False));
     Vector#(ObjIdQSize, Ehr#(3, Bool)) enabled <- replicateM(mkEhr(False));
     Vector#(ObjIdQSize, Ehr#(3, Bool)) translated <- replicateM(mkEhr(True));
+    Vector#(ObjIdQSize, Ehr#(3, Bool)) lookupPending <- replicateM(mkEhr(False));
     Vector#(ObjIdQSize, Ehr#(3, Bool)) ready <- replicateM(mkEhr(False));
     Vector#(ObjIdQSize, Ehr#(3, Bool)) issued <- replicateM(mkEhr(False));
     Vector#(ObjIdQSize, Ehr#(3, Bool)) done <- replicateM(mkEhr(False));
@@ -90,7 +92,7 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
         Bit#(ObjIdQSize) bits = 0;
         for (Integer i=0; i<valueOf(ObjIdQSize); i=i+1)
             bits[i] = pack(used[i][1] && enabled[i][0] && ready[i][0] &&
-                           translated[i][0] && !issued[i][0] && !done[i][0] && !canceled[i][0]);
+                           translated[i][0] && !lookupPending[i][0] && !issued[i][0] && !done[i][0] && !canceled[i][0]);
         return bits;
     endfunction
     function ObjIdQTag selected;
@@ -105,7 +107,7 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
 
     // Reclaim resolved reservations on this queue's own head pointer.
     // Payload queues and ROB retirement do not participate in reclamation.
-    rule retire (used[head][0] && done[head][0] && !issued[head][0] && !wrongSpec);
+    rule retire (used[head][0] && done[head][0] && !lookupPending[head][0] && !issued[head][0] && !wrongSpec);
         used[head][0] <= False;
         head <= next(head);
     endrule
@@ -129,6 +131,7 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
         used[tail][1] <= True;
         enabled[tail][2] <= False;
         ready[tail][2] <= False;
+        lookupPending[tail][2] <= False;
         translated[tail][2] <= True;
         issued[tail][2] <= False;
         done[tail][2] <= unused;
@@ -142,13 +145,28 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
     method Action setVAddr(ObjIdQTag tag, Addr addr) if (!wrongSpec);
         virtualAddrs.upd(tag, addr);
     endmethod
-    method Action prepare(ObjIdQTag tag, Bool active, Bool canIssue, Bool addressReady, ObjIdCheck check) if (!wrongSpec);
+    method Action prepare(ObjIdQTag tag, Bool active, Bool canIssue, Bool addressReady, ObjIdCheck check, Bool waitLookup) if (!wrongSpec);
         doAssert(used[tag][1] && !issued[tag][0] && !canceled[tag][0], "prepare needs live reservation");
         checks.upd(tag, check);
+        lookupPending[tag][0] <= active && waitLookup;
         translated[tag][0] <= addressReady;
         enabled[tag][0] <= active;
         ready[tag][0] <= canIssue;
         done[tag][0] <= !active;
+    endmethod
+    method ActionValue#(Tuple2#(Bool, Bool)) resolveLookup(ObjIdQTag tag, Bool hit) if (!wrongSpec);
+        doAssert(used[tag][1] && lookupPending[tag][1] && !issued[tag][0], "lookup decision needs held reservation");
+        Bool needed = enabled[tag][1] && !done[tag][1] && !canceled[tag][1];
+        hit = hit && !staleFill[tag][0];
+        lookupPending[tag][1] <= False;
+        if (hit || !needed) begin
+            // No metadata translation has been sent yet. A cached/forwarded
+            // verdict cancels that optional work without waiting for a reply.
+            translated[tag][1] <= True;
+            enabled[tag][1] <= False;
+            done[tag][1] <= True;
+        end
+        return tuple2(needed, hit);
     endmethod
     method Action start(ObjIdQTag tag) if (!wrongSpec);
         // Port 1 observes prepare in the same execute rule. The selector
@@ -222,6 +240,7 @@ module mkObjIdLoadQueue(ObjIdLoadQueue);
             for (Integer i=0; i<valueOf(ObjIdQSize); i=i+1) begin
                 if (used[i][0] && (killAll ? !atCommit[i][0] : masks[i][0][tag] == 1)) begin
                     canceled[i][0] <= True;
+                    lookupPending[i][0] <= False;
                     done[i][0] <= !issued[i][0];
                 end
             end
